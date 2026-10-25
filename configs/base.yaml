@@ -1,0 +1,45 @@
+# Base configuration shared by every arm (S1-S4). Experiment files override keys from here.
+# Every run writes its fully resolved config next to its results.
+
+run:
+  seed: 469                 # data generation, ticket sampling and trial order
+  k_trials: 4               # repeated trials per case, used for pass^k
+  clock_start: "2026-10-01T09:00:00+08:00"   # injectable clock origin
+
+llm:
+  provider: groq
+  base_url: https://api.groq.com/openai/v1
+  api_key_env: GROQ_API_KEY
+  temperature: 0.0
+  reasoning_effort: medium  # gpt-oss only; recorded so both supervisor variants match
+  max_tokens: 2048
+  cache_dir: results/cache  # response cache for final runs (set to null to disable)
+  models:                   # one model family for the main comparison
+    supervisor: openai/gpt-oss-120b
+    specialist: openai/gpt-oss-120b
+    approver: openai/gpt-oss-120b
+    user_simulator: openai/gpt-oss-20b
+  # USD per 1M tokens; check provider pricing page and record the date you checked
+  pricing:
+    openai/gpt-oss-120b: {input: 0.15, output: 0.60}
+    openai/gpt-oss-20b: {input: 0.075, output: 0.30}
+
+guard:
+  enabled: true
+  model: meta-llama/llama-prompt-guard-2-86m
+  threshold: 0.5
+  on_flag: escalate         # escalate | annotate
+
+policy:
+  rules_file: policy/rules.yaml   # hard rules (not created yet)
+  skills_dir: policy/skills
+  corpus_dir: policy/corpus
+  corpus_size: 5p           # 5p | 20p | 50p
+
+limits:                     # enforced by the ticket state tool, not by prompts
+  max_steps_per_ticket: 40
+  max_agent_steps: 12
+  max_cost_usd_per_ticket: 0.05
+  max_replans: 2            # plan-and-execute only
+
+human_cost_per_ticket_usd: 4.00   # baseline for the "acceptable cost" goal; cite your source in the report
