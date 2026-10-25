@@ -1,4 +1,5 @@
-"""Config loading: base.yaml, then an experiment file, then dotted CLI overrides."""
+"""Config loading: base.yaml, then an experiment file, then dotted CLI overrides.
+Also loads secrets (API keys) from .env into the environment."""
 
 from __future__ import annotations
 
@@ -7,8 +8,15 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parents[3]
+
+
+def load_env(path: str | Path = ROOT / ".env") -> bool:
+    """Read KEY=value lines from .env into os.environ. Variables already set in the shell
+    win over .env. Returns False if there is no .env file."""
+    return load_dotenv(path, override=False)
 
 
 def deep_merge(base: dict, override: dict) -> dict:
@@ -39,6 +47,7 @@ def get_dotted(cfg: dict, dotted: str, default: Any = None) -> Any:
 
 
 def load_config(path: str | Path | None = None, overrides: dict[str, Any] | None = None) -> dict:
+    load_env()
     base = yaml.safe_load((ROOT / "configs" / "base.yaml").read_text())
     cfg = base
     if path is not None:

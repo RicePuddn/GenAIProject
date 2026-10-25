@@ -1,11 +1,12 @@
 """Tests for the shared helpers: clock, config, tracer and the scripted LLM."""
 
+import os
 from datetime import datetime, timezone
 
 import pytest
 
 from support_ops.helpers.clock import Clock
-from support_ops.helpers.config import ROOT, load_config
+from support_ops.helpers.config import ROOT, load_config, load_env
 from support_ops.helpers.llm import ScriptedLLM, text, tool_call
 from support_ops.helpers.tracing import Tracer
 
@@ -25,6 +26,18 @@ def test_config_loads_base_and_applies_overrides():
     assert cfg["run"]["k_trials"] == 1
     assert cfg["llm"]["models"]["supervisor"] == "small"
     assert cfg["llm"]["models"]["specialist"]          # untouched keys survive
+
+
+def test_env_file_is_loaded_but_shell_variables_win(tmp_path, monkeypatch):
+    env = tmp_path / ".env"
+    env.write_text("SUPPORT_OPS_TEST_KEY=from-file\nSUPPORT_OPS_TEST_OTHER=from-file\n")
+    monkeypatch.delenv("SUPPORT_OPS_TEST_KEY", raising=False)
+    monkeypatch.setenv("SUPPORT_OPS_TEST_OTHER", "from-shell")
+    assert load_env(env)
+    assert os.environ["SUPPORT_OPS_TEST_KEY"] == "from-file"
+    assert os.environ["SUPPORT_OPS_TEST_OTHER"] == "from-shell"
+    monkeypatch.delenv("SUPPORT_OPS_TEST_KEY")
+    assert not load_env(tmp_path / "missing.env")
 
 
 def test_scripted_llm_replays_in_order_and_records_usage():
