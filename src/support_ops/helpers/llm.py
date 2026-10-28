@@ -14,10 +14,12 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any, Callable, Protocol
 
 import tiktoken
 
+from .config import ROOT
 from .tracing import Tracer
 
 _ENC = tiktoken.get_encoding("o200k_base")
@@ -68,9 +70,11 @@ class OpenAICompatLLM:
         self.temperature = llm.get("temperature", 0.0)
         self.reasoning_effort = llm.get("reasoning_effort")
         self.max_tokens = llm.get("max_tokens", 2048)
+        self.max_tokens_by_role: dict[str, int] = llm.get("max_tokens_by_role", {})
+        self.cache_enabled_by_role: dict[str, bool] = llm.get("cache_enabled_by_role", {})
         self.seed = cfg["run"]["seed"]
         cache_dir = llm.get("cache_dir")
-        self.cache = Path(cache_dir) if cache_dir else None
+        self.cache = (ROOT / cache_dir).resolve() if cache_dir else None
         api_key = os.environ.get(llm["api_key_env"])
         if not api_key:
             raise RuntimeError(f"set {llm['api_key_env']} (see .env.example)")
@@ -84,7 +88,7 @@ class OpenAICompatLLM:
         model = self.models[role]
         req: dict[str, Any] = {
             "model": model, "messages": messages, "temperature": self.temperature,
-            "max_tokens": self.max_tokens, "seed": self.seed,
+            "max_tokens": self.max_tokens_by_role.get(role, self.max_tokens), "seed": self.seed,
         }
         if tools:
             req["tools"] = tools
@@ -94,7 +98,8 @@ class OpenAICompatLLM:
             req["reasoning_effort"] = self.reasoning_effort
 
         key = hashlib.sha256(json.dumps(req, sort_keys=True, default=str).encode()).hexdigest()
-        cached = self._cache_get(key)
+        cache_enabled = self.cache_enabled_by_role.get(role, True)
+        cached = self._cache_get(key) if cache_enabled else None
         t0 = time.perf_counter()
         if cached is None:
             resp = self.client.chat.completions.create(**req)
@@ -107,12 +112,13 @@ class OpenAICompatLLM:
             tin = usage.prompt_tokens if usage else count_tokens(json.dumps(messages))
             tout = usage.completion_tokens if usage else count_tokens(msg.content or "")
             result = ChatResult(msg.content, calls, tin, tout)
-            self._cache_put(key, result)
+            if cache_enabled:
+                self._cache_put(key, result)
         else:
             result = cached
         if tracer is not None:
             tracer.record_llm(role, model, result.input_tokens, result.output_tokens,
-                              self._cost(model, result.input_tokens, result.output_tokens),
+                              self._cost(model, result.input_tokens, result.output_tokens) if cached is None else 0.0,
                               time.perf_counter() - t0, cached is not None)
         return result
 
@@ -122,18 +128,31 @@ class OpenAICompatLLM:
         path = self.cache / f"{key}.json"
         if not path.exists():
             return None
-        d = json.loads(path.read_text())
-        return ChatResult(d["content"], [ToolCall(**tc) for tc in d["tool_calls"]],
-                          d["input_tokens"], d["output_tokens"])
+        try:
+            d = json.loads(path.read_text())
+            result = ChatResult(d["content"], [ToolCall(**tc) for tc in d["tool_calls"]],
+                                d["input_tokens"], d["output_tokens"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+        # Old/invalid empty responses must never become a permanent cache hit.
+        return result if result.content or result.tool_calls else None
 
     def _cache_put(self, key: str, r: ChatResult) -> None:
-        if self.cache is None:
+        if self.cache is None or (not r.content and not r.tool_calls):
             return
         self.cache.mkdir(parents=True, exist_ok=True)
-        (self.cache / f"{key}.json").write_text(json.dumps({
+        payload = {
             "content": r.content, "input_tokens": r.input_tokens, "output_tokens": r.output_tokens,
             "tool_calls": [tc.__dict__ for tc in r.tool_calls],
-        }))
+        }
+        # Readers only see a complete JSON file, including with concurrent API requests.
+        with NamedTemporaryFile(mode="w", dir=self.cache, delete=False) as temporary:
+            try:
+                json.dump(payload, temporary)
+                temporary.close()
+                os.replace(temporary.name, self.cache / f"{key}.json")
+            finally:
+                Path(temporary.name).unlink(missing_ok=True)
 
 
 def _parse_args(raw: str | None) -> dict[str, Any]:

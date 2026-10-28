@@ -1,1 +1,1 @@
-"""One module per arm (s1.py ... s4.py)."""
+"""Support workflow variants and their shared tool contracts."""

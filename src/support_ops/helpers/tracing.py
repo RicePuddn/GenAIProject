@@ -43,13 +43,31 @@ class Tracer:
     def elapsed_s(self) -> float:
         return time.perf_counter() - self._t0
 
-    def dump(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({
-            "ticket_id": self.ticket_id,
+    @property
+    def tool_call_count(self) -> int:
+        return len(self.of_kind("tool_start"))
+
+    @property
+    def tool_calls(self) -> list[dict[str, Any]]:
+        completed = {event["call_id"]: event for event in self.of_kind("tool_end")}
+        return [
+            {**event, "execution": completed.get(event["call_id"])}
+            for event in self.of_kind("tool_call_requested")
+        ]
+
+    def summary(self) -> dict[str, Any]:
+        return {
             "llm_calls": self.llm_calls,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
-            "cost_usd": self.cost_usd,
+            "cost_usd": round(self.cost_usd, 8),
+            "elapsed_s": round(self.elapsed_s, 4),
+            "tool_call_count": self.tool_call_count,
             "events": self.events,
+        }
+
+    def dump(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "ticket_id": self.ticket_id, **self.summary(),
         }, indent=1, default=str))

@@ -1,5 +1,8 @@
-"""Injectable clock. Nothing in the system calls datetime.now() directly, so return
-windows, SLA timers and token expiry can be replayed exactly in simulated time."""
+"""Injectable workflow clock for reproducible dates and token expiry.
+
+The API initializes it from the current UTC time; experiments can supply a fixed
+origin and advance it explicitly. Execution durations use a monotonic timer.
+"""
 
 from __future__ import annotations
 

@@ -13,9 +13,14 @@ llm:
   temperature: 0.0
   reasoning_effort: medium  # gpt-oss only; recorded so both supervisor variants match
   max_tokens: 2048
+  max_tokens_by_role:
+    guard: 512              # Prompt Guard's Groq limit
+  cache_enabled_by_role:
+    guard: false             # Always classify live; do not replay stale/empty results
   cache_dir: results/cache  # response cache for final runs (set to null to disable)
   models:                   # one model family for the main comparison
     supervisor: openai/gpt-oss-120b
+    guard: meta-llama/llama-prompt-guard-2-86m
     specialist: openai/gpt-oss-120b
     approver: openai/gpt-oss-120b
     user_simulator: openai/gpt-oss-20b
@@ -26,9 +31,10 @@ llm:
 
 guard:
   enabled: true
-  model: meta-llama/llama-prompt-guard-2-86m
-  threshold: 0.5
-  on_flag: escalate         # escalate | annotate
+  threshold: 0.5             # numeric malicious-class score threshold
+
+agent:
+  strategy: react           # react | plan_and_execute
 
 policy:
   rules_file: policy/rules.yaml   # hard rules (not created yet)
@@ -36,10 +42,10 @@ policy:
   corpus_dir: policy/corpus
   corpus_size: 5p           # 5p | 20p | 50p
 
-limits:                     # enforced by the ticket state tool, not by prompts
-  max_steps_per_ticket: 40
+limits:                     # enforced by the workflow between calls
+  max_steps_per_ticket: 40  # maximum tool executions
   max_agent_steps: 12
-  max_cost_usd_per_ticket: 0.05
+  max_cost_usd_per_ticket: 0.05  # stop before the next call once reached
   max_replans: 2            # plan-and-execute only
 
 human_cost_per_ticket_usd: 4.00   # baseline for the "acceptable cost" goal; cite your source in the report
