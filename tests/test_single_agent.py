@@ -16,9 +16,10 @@ from support_ops.gateway.ticket_state import TicketState
 from support_ops.helpers.clock import Clock
 from support_ops.helpers.config import load_config
 from support_ops.helpers.llm import ChatResult, OpenAICompatLLM, ScriptedLLM, ToolCall, text, tool_call
-from support_ops.policy.skills import SkillsPolicy, check_operation
+from support_ops.policy.rules import Rules
+from support_ops.policy.skills import SkillsPolicy
 from support_ops.systems.single_agent import SingleAgentWorkflow
-from support_ops.systems.tools import validate_arguments
+from support_ops.systems.tools import SupportTools
 
 
 class WorkflowTests(unittest.TestCase):
@@ -154,7 +155,7 @@ class ToolTests(unittest.TestCase):
 
     def test_refund_limit_shared_and_above_limit_handoff_does_not_recurse(self):
         gateway = TicketState(self.clock)
-        self.assertTrue(check_operation("refund", 100)["allowed"])
+        self.assertTrue(Rules.load().check("refund", 100)["allowed"])
         args = {"action": "write", "operation": "refund", "record_id": "O1", "amount": 100.01}
         result = gateway.run("T1", args)
         self.assertEqual(result["status"], "awaiting_human")
@@ -174,6 +175,7 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(gateway.run("T2", {**args, "operation": "cancel"})["status"], "awaiting_human")
 
     def test_tool_contracts_reject_bad_types_enums_missing_fields_and_nonfinite_amounts(self):
+        tools = SupportTools(Mock(spec=PostgresReader), SkillsPolicy(), TicketState(self.clock))
         for name, args in (
             ("policy", {"action": "guess"}), ("policy", {"action": "read"}),
             ("read_record", {"kind": "shipments", "record_id": "O1"}),
@@ -183,7 +185,7 @@ class ToolTests(unittest.TestCase):
             ("policy", {"action": "check", "operation": "refund", "amount": -1}),
         ):
             with self.subTest(name=name, args=args), self.assertRaises(ValueError):
-                validate_arguments(name, args)
+                tools.validate(name, args)
 
     def test_cache_ignores_empty_or_corrupt_entries_and_cached_calls_have_no_api_cost(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"GROQ_API_KEY": "test-key"}):

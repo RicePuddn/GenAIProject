@@ -158,7 +158,10 @@ A dedicated final response node generates the customer reply through the shared 
 
 Policy retrieval follows `list` → `open` a skill's `SKILL.md` → `read` a relevant
 clause. Available skills are `orders-and-shipping` and `returns-and-refunds`.
-Policy checks and the ticket tool share the same mock SGD 100 refund limit.
+Policy checks and the ticket tool share the same mock SGD 100 refund limit, read from
+[policy/rules.yaml](policy/rules.yaml). `policy.mode` in `configs/base.yaml` selects the
+policy provider plugged into the `policy` tool.
+
 Unsupported write operations and above-limit refunds require a human handoff.
 
 PostgreSQL tools only read data. Approval tokens, mock writes, audits, and handoff
@@ -186,6 +189,7 @@ UI or curl as described above.
 
 ```text
 configs/                      models, strategy, simulation clock and limits
+policy/rules.yaml             hard limits shared by every arhitecture
 policy/skills/                policy entrypoints and clause files
 policy/corpus/                reserved for the RAG variants
 data/backend_seed/schema.sql  PostgreSQL schema
@@ -194,7 +198,9 @@ src/support_ops/
   api.py                      FastAPI request/response boundary
   helpers/                    shared LLM wrapper, clock, config and tracing
   backend/postgres.py         allowlisted database reads
-  policy/skills.py            skill navigation and mock approval rule
+  policy/provider.py          contract each policy provider implements (RAG/skills)
+  policy/rules.py             hard-limit checks from policy/rules.yaml
+  policy/skills.py            skill navigation (the skills provider)
   gateway/ticket_state.py     request-local approvals, audit and handoff
   systems/tools.py            shared tool schemas, validation and dispatcher
   systems/single_agent.py     LangGraph nodes and strategy routing

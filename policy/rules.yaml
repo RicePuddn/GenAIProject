@@ -1,0 +1,11 @@
+# Hard policy limits
+
+# Soft guidance (exceptions, tone, escalation criteria) stays in the policy text.
+
+# Bump `version` on every change.
+
+version: "2026-10-28"
+currency: SGD
+refund:
+  rule_id: mock_refund_limit_100
+  max_auto_amount: "100.00"   # refunds above this need a human

@@ -37,7 +37,8 @@ agent:
   strategy: react           # react | plan_and_execute
 
 policy:
-  rules_file: policy/rules.yaml   # hard rules (not created yet)
+  mode: skills              
+  rules_file: policy/rules.yaml   # shared hard limits
   skills_dir: policy/skills
   corpus_dir: policy/corpus
   corpus_size: 5p           # 5p | 20p | 50p

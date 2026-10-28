@@ -13,8 +13,17 @@ from support_ops.gateway.ticket_state import TicketState
 from support_ops.helpers.clock import Clock
 from support_ops.helpers.llm import ChatResult, LLM, OpenAICompatLLM, ToolCall
 from support_ops.helpers.tracing import Tracer
+from support_ops.policy.provider import PolicyProvider
+from support_ops.policy.rules import Rules
 from support_ops.policy.skills import SkillsPolicy
-from support_ops.systems.tools import TOOLS, SupportTools, validate_arguments
+from support_ops.systems.tools import SupportTools
+
+
+def policy_from_config(cfg: dict[str, Any], rules: Rules) -> PolicyProvider:
+    mode = cfg["policy"].get("mode", "skills")
+    if mode == "skills":
+        return SkillsPolicy(cfg["policy"]["skills_dir"], rules)
+    raise ValueError(f"unsupported policy.mode: {mode!r}")
 
 
 class SupportState(TypedDict, total=False):
@@ -39,14 +48,16 @@ class SupportState(TypedDict, total=False):
 
 class SingleAgentWorkflow:
     def __init__(self, llm: LLM, cfg: dict[str, Any], *, reader: PostgresReader | None = None,
-                 skills: SkillsPolicy | None = None, ticket_state: TicketState | None = None,
+                 policy: PolicyProvider | None = None, ticket_state: TicketState | None = None,
                  tracer: Tracer | None = None, clock: Clock | None = None):
         self.llm, self.cfg, self.tracer = llm, cfg, tracer
         self._provided_tracer = tracer
         self.clock = clock or Clock(datetime.fromisoformat(cfg["run"]["clock_start"]))
+        # The gateway and the policy tool's check action share one copy of the hard rules.
+        rules = Rules.load(cfg["policy"]["rules_file"])
         self.tools = SupportTools(
-            reader or PostgresReader(), skills or SkillsPolicy(cfg["policy"]["skills_dir"]),
-            ticket_state or TicketState(self.clock),
+            reader or PostgresReader(), policy or policy_from_config(cfg, rules),
+            ticket_state or TicketState(self.clock, rules=rules),
         )
         self._call_sequence = 0
         graph = StateGraph(SupportState)
@@ -131,8 +142,7 @@ class SingleAgentWorkflow:
         return (
             f"You are a policy-bound customer support agent. Current workflow date: {self.clock.now().date()}. "
             "Use read tools for account facts. Read the order by its own ID; use the shipment tools with "
-            "the order ID for tracking. Discover policies, open the matching SKILL.md, then read the "
-            "relevant clause before advising. Never invent policy filenames or missing facts. "
+            f"the order ID for tracking. {self.tools.policy.prompt_hint} "
             "Calculate return windows using the workflow date and delivery date. "
             "ticket_state only simulates writes; never describe a simulated refund as a real payment. "
             "Ask for missing information when needed."
@@ -175,7 +185,7 @@ class SingleAgentWorkflow:
             {"role": "system", "content": self._system_prompt() +
              " Choose exactly one tool call per turn. When ready for the final reply, stop calling tools."},
             *state["messages"],
-        ], tools=TOOLS)
+        ], tools=self.tools.schemas)
         if not result.tool_calls:
             # The dedicated reply node is the only place that drafts the final response.
             return {**update, "planned_calls": []}
@@ -189,14 +199,14 @@ class SingleAgentWorkflow:
         return {**update, "messages": [*state["messages"], message], "planned_calls": [call]}
 
     def _plan(self, state: SupportState) -> dict[str, Any]:
+        policy_context = self.tools.policy.planner_context()
         prompt = (
             self._system_prompt() +
             ' Plan all necessary calls in execution order. Return JSON only as '
             '{"calls":[{"name":"EXACT_TOOL_NAME","arguments":{}}]}. '
-            "Use only these tool schemas: " + json.dumps(TOOLS) +
-            ". Available policy filenames (contents must still be read with tools): " +
-            json.dumps(self.tools.skills.catalog()) +
-            ". Use literal known IDs and arguments; never invent results of earlier calls. "
+            "Use only these tool schemas: " + json.dumps(self.tools.schemas) + ". " +
+            (policy_context + ". " if policy_context else "") +
+            "Use literal known IDs and arguments; never invent results of earlier calls. "
             "If clarification is required, return an empty calls list. Correct any previous error "
             "using the execution evidence, and do not repeat completed writes."
         )
@@ -218,7 +228,7 @@ class SingleAgentWorkflow:
             for call in calls:
                 if not isinstance(call, dict) or set(call) != {"name", "arguments"}:
                     raise ValueError("each call requires exactly name and arguments")
-                normalized.append((call["name"], validate_arguments(call["name"], call["arguments"])))
+                normalized.append((call["name"], self.tools.validate(call["name"], call["arguments"])))
         except (ValueError, TypeError) as exc:
             return self._retry_plan(state, str(exc))
         return {

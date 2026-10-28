@@ -1,20 +1,18 @@
-"""One tool contract and dispatcher shared by both supervisor strategies."""
+"""One tool contract and dispatcher shared by both supervisor strategies.
+
+Read and ticket-state tools are identical in every architecture; the `policy` tool's arguments
+and description come from the plugged-in policy provider (RAG or skills).
+"""
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, Self
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import model_validator
 
 from support_ops.backend.postgres import PostgresReader, RECORD_KINDS
 from support_ops.gateway.ticket_state import TicketState
-from support_ops.policy.skills import SkillsPolicy
-
-NonEmpty = Annotated[str, Field(min_length=1)]
-Amount = Annotated[float, Field(gt=0, allow_inf_nan=False)]
-
-
-class ToolArguments(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+from support_ops.helpers.arguments import Amount, NonEmpty, ToolArguments
+from support_ops.policy.provider import PolicyProvider
 
 
 class ReadArguments(ToolArguments):
@@ -67,40 +65,41 @@ class TicketArguments(ToolArguments):
         return self
 
 
-ARGUMENT_MODELS = {
-    "read_record": ReadArguments,
-    "get_shipments_for_order": OrderArguments,
-    "get_shipment_events_for_order": OrderArguments,
-    "policy": PolicyArguments,
-    "ticket_state": TicketArguments,
-}
-DESCRIPTIONS = {
-    "read_record": ReadArguments.__doc__,
-    "get_shipments_for_order": "Get all shipments for an order ID, not a shipment ID.",
-    "get_shipment_events_for_order": "Get chronological carrier tracking events for an order ID.",
-    "policy": PolicyArguments.__doc__,
-    "ticket_state": TicketArguments.__doc__,
-}
-TOOLS = [
-    {"type": "function", "function": {
-        "name": name, "description": DESCRIPTIONS[name], "parameters": model.model_json_schema(),
-    }}
-    for name, model in ARGUMENT_MODELS.items()
-]
-
-
-def validate_arguments(name: str, arguments: Any) -> dict[str, Any]:
-    if not isinstance(name, str) or name not in ARGUMENT_MODELS:
-        raise ValueError(f"unknown tool: {name!r}; available tools: {', '.join(ARGUMENT_MODELS)}")
-    return ARGUMENT_MODELS[name].model_validate(arguments).model_dump(exclude_none=True)
+def validate_arguments(models: dict[str, type[ToolArguments]], name: str, arguments: Any) -> dict[str, Any]:
+    if not isinstance(name, str) or name not in models:
+        raise ValueError(f"unknown tool: {name!r}; available tools: {', '.join(models)}")
+    return models[name].model_validate(arguments).model_dump(exclude_none=True)
 
 
 class SupportTools:
-    def __init__(self, reader: PostgresReader, skills: SkillsPolicy, ticket_state: TicketState):
-        self.reader, self.skills, self.ticket_state = reader, skills, ticket_state
+    def __init__(self, reader: PostgresReader, policy: PolicyProvider, ticket_state: TicketState):
+        self.reader, self.policy, self.ticket_state = reader, policy, ticket_state
+        self.argument_models: dict[str, type[ToolArguments]] = {
+            "read_record": ReadArguments,
+            "get_shipments_for_order": OrderArguments,
+            "get_shipment_events_for_order": OrderArguments,
+            "policy": policy.arguments,
+            "ticket_state": TicketArguments,
+        }
+        descriptions = {
+            "read_record": ReadArguments.__doc__,
+            "get_shipments_for_order": "Get all shipments for an order ID, not a shipment ID.",
+            "get_shipment_events_for_order": "Get chronological carrier tracking events for an order ID.",
+            "policy": policy.description,
+            "ticket_state": TicketArguments.__doc__,
+        }
+        self.schemas = [
+            {"type": "function", "function": {
+                "name": name, "description": descriptions[name], "parameters": model.model_json_schema(),
+            }}
+            for name, model in self.argument_models.items()
+        ]
+
+    def validate(self, name: str, arguments: Any) -> dict[str, Any]:
+        return validate_arguments(self.argument_models, name, arguments)
 
     def execute(self, ticket_id: str, name: str, arguments: Any) -> dict[str, Any]:
-        args = validate_arguments(name, arguments)
+        args = self.validate(name, arguments)
         if name == "read_record":
             return self.reader.read(**args)
         if name == "get_shipments_for_order":
@@ -108,5 +107,5 @@ class SupportTools:
         if name == "get_shipment_events_for_order":
             return {"events": self.reader.shipment_events_for_order(**args)}
         if name == "policy":
-            return self.skills.run(args)
+            return self.policy.run(args)
         return self.ticket_state.run(ticket_id, args)
