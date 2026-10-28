@@ -25,7 +25,7 @@ The default local database configuration is:
 ```dotenv
 POSTGRES_PASSWORD=support_ops_local
 POSTGRES_PORT=5432
-SUPPORT_OPS_DATABASE_URL=postgresql://support_ops:support_ops_local@localhost:5432/support_ops
+SUPPORT_OPS_DATABASE_URL=postgresql://support_ops:support_ops_local@127.0.0.1:5432/support_ops
 ```
 
 If you change the password or host port, update the database URL to match.
@@ -94,6 +94,48 @@ curl -X POST http://127.0.0.1:8000/chat \
   -d '{"ticket_id":"TKT-LOCAL-001","customer_message":"Where is my order ORD-2026-00001?","strategy":"react"}'
 ```
 
+### Multi-turn conversations
+
+The API is stateless: the server keeps nothing between requests. To continue a ticket, copy
+the `history` array from the previous response into the next request:
+
+```json
+{
+  "ticket_id": "TKT-LOCAL-004",
+  "customer_message": "It is ORD-2026-00001.",
+  "history": [
+    {"role": "customer", "content": "My order has not arrived."},
+    {"role": "agent", "content": "Could you share your order number?"}
+  ]
+}
+```
+
+Earlier turns precede the new message in the agent's context; only the new message is
+screened by Prompt Guard. History holds text turns only, never tool results, and the gateway
+enforces its limits on every request, so edited history cannot authorise a write.
+
+### Live steps: `/chat/stream`
+
+`POST /chat/stream` takes the same body as `/chat` and answers with Server-Sent Events
+(`text/event-stream`) while the turn runs: a `trace` event for each step as it is logged
+(guard, thought, tool call, tool result, handoff), then one `result` event holding exactly
+the `/chat` response, or an `error` event. It is a single stateless POST, the pattern of
+MCP's Streamable HTTP transport. Steps stream whole, not token by token; `/chat` is unchanged
+and remains the endpoint for scripts and evaluation.
+
+### Demo page
+
+A Streamlit page shows a chat window and, while the agent works, its steps as they stream in:
+the guard result, each thought, each tool call with its result (retrieved policy clauses as a
+table) and any handoff. Under each reply the full timeline stays available with cost and
+timing. It keeps the conversation and sends it as `history`, and **New ticket** starts over.
+With the API running:
+
+```bash
+uv pip install --python .venv/bin/python -e ".[demo]"
+.venv/bin/streamlit run scripts/demo_app.py
+```
+
 ## Compare the two strategies
 
 | Setting | Behavior |
@@ -137,7 +179,9 @@ The `/chat` response includes:
 - `tool_calls`: requested tool names and inputs, linked to execution outputs and elapsed time.
   A plan stopped by an error or handoff can include later requested calls with `execution: null`.
 - `trace`: LLM call count, token totals, configured cost estimate, elapsed seconds,
-  tool count, and chronological node/LLM/tool/handoff events.
+  tool count, and chronological node/LLM/tool/handoff events. `llm_response` events carry
+  the model's `reasoning` when the provider returns it (gpt-oss on Groq does); it is logged
+  for inspection and never sent back to the model.
 
 Tool durations and total elapsed time use a monotonic timer. `simulated_at` records
 the injected workflow clock, which stays fixed unless explicitly advanced.
@@ -152,8 +196,10 @@ LLM cost between calls. A single call can exceed the remaining cost budget.
 
 ## Policies and mock operations
 
-The current tools are `read_record`, `get_shipments_for_order`,
-`get_shipment_events_for_order`, `policy`, and `ticket_state`.
+The current tools are `read_record`, the order lookups `get_shipments_for_order`,
+`get_shipment_events_for_order`, `get_items_for_order` (with product details),
+`get_payments_for_order` and `get_returns_for_order` (returns and refunds), then `policy`
+and `ticket_state`.
 A dedicated final response node generates the customer reply through the shared LLM wrapper.
 
 Policy retrieval follows `list` → `open` a skill's `SKILL.md` → `read` a relevant
@@ -167,8 +213,8 @@ Unsupported write operations and above-limit refunds require a human handoff.
 PostgreSQL tools only read data. Approval tokens, mock writes, audits, and handoff
 packets are held in memory for each request. A mock approval does not issue a
 real refund or update PostgreSQL. Tokens are opaque simulation artifacts; signed
-token validation and durable ticket state are future work. Reusing `ticket_id`
-does not restore conversation history or previous approvals across requests.
+token validation and durable ticket state are future work. Conversation history
+travels with each request (see above), but approvals from earlier requests are not restored.
 Prompt Guard screens prompt attacks; it does not provide a complete abuse or
 out-of-scope classification system. This local experiment API has no customer
 authentication or order ownership checks.
@@ -191,7 +237,7 @@ UI or curl as described above.
 configs/                      models, strategy, simulation clock and limits
 policy/rules.yaml             hard limits shared by every arhitecture
 policy/skills/                policy entrypoints and clause files
-policy/corpus/                reserved for the RAG variants
+policy/corpus/                clause-level policy for the RAG variants (mini/ mirrors skills)
 data/backend_seed/schema.sql  PostgreSQL schema
 scripts/seed_backend.py       deterministic ecommerce fixtures
 src/support_ops/
@@ -201,6 +247,8 @@ src/support_ops/
   policy/provider.py          contract each policy provider implements (RAG/skills)
   policy/rules.py             hard-limit checks from policy/rules.yaml
   policy/skills.py            skill navigation (the skills provider)
+  policy/rag/                 loader.py (files -> clauses), retriever.py (search),
+                              policy.py (the RAG provider)
   gateway/ticket_state.py     request-local approvals, audit and handoff
   systems/tools.py            shared tool schemas, validation and dispatcher
   systems/single_agent.py     LangGraph nodes and strategy routing

@@ -10,7 +10,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 @dataclass
@@ -22,9 +22,14 @@ class Tracer:
     output_tokens: int = 0
     cost_usd: float = 0.0
     _t0: float = field(default_factory=time.perf_counter)
+    # Called with each event as it is logged, e.g. to stream the trace to a client live.
+    listener: Callable[[dict[str, Any]], None] | None = field(default=None, repr=False)
 
     def log(self, kind: str, **payload: Any) -> None:
-        self.events.append({"t": round(time.perf_counter() - self._t0, 4), "kind": kind, **payload})
+        event = {"t": round(time.perf_counter() - self._t0, 4), "kind": kind, **payload}
+        self.events.append(event)
+        if self.listener is not None:
+            self.listener(event)
 
     def record_llm(self, role: str, model: str, input_tokens: int, output_tokens: int,
                    cost: float, latency_s: float, cached: bool) -> None:

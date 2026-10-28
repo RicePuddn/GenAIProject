@@ -42,6 +42,7 @@ class ChatResult:
     tool_calls: list[ToolCall] = field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0
+    reasoning: str | None = None   
 
     def as_message(self) -> dict[str, Any]:
         """The assistant message to append to the conversation."""
@@ -111,7 +112,8 @@ class OpenAICompatLLM:
             usage = resp.usage
             tin = usage.prompt_tokens if usage else count_tokens(json.dumps(messages))
             tout = usage.completion_tokens if usage else count_tokens(msg.content or "")
-            result = ChatResult(msg.content, calls, tin, tout)
+            # gpt-oss on Groq returns its thinking in a provider-specific `reasoning` field.
+            result = ChatResult(msg.content, calls, tin, tout, getattr(msg, "reasoning", None) or None)
             if cache_enabled:
                 self._cache_put(key, result)
         else:
@@ -131,7 +133,7 @@ class OpenAICompatLLM:
         try:
             d = json.loads(path.read_text())
             result = ChatResult(d["content"], [ToolCall(**tc) for tc in d["tool_calls"]],
-                                d["input_tokens"], d["output_tokens"])
+                                d["input_tokens"], d["output_tokens"], d.get("reasoning"))
         except (OSError, ValueError, KeyError, TypeError):
             return None
         # Old/invalid empty responses must never become a permanent cache hit.
@@ -143,7 +145,7 @@ class OpenAICompatLLM:
         self.cache.mkdir(parents=True, exist_ok=True)
         payload = {
             "content": r.content, "input_tokens": r.input_tokens, "output_tokens": r.output_tokens,
-            "tool_calls": [tc.__dict__ for tc in r.tool_calls],
+            "tool_calls": [tc.__dict__ for tc in r.tool_calls], "reasoning": r.reasoning,
         }
         # Readers only see a complete JSON file, including with concurrent API requests.
         with NamedTemporaryFile(mode="w", dir=self.cache, delete=False) as temporary:

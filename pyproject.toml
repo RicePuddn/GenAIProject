@@ -18,6 +18,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+rag = [               
+    "sentence-transformers>=3.0",   # embeddings and cross-encoder reranker (Topic 8 labs)
+    "pypdf>=4.0",                   # PDF policy documents (Topic 8 Lab B)
+]
+demo = ["streamlit>=1.50"]   # scripts/demo_app.py, a chat page that shows each agent step
 
 [build-system]
 requires = ["hatchling"]

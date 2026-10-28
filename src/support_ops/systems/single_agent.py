@@ -14,6 +14,7 @@ from support_ops.helpers.clock import Clock
 from support_ops.helpers.llm import ChatResult, LLM, OpenAICompatLLM, ToolCall
 from support_ops.helpers.tracing import Tracer
 from support_ops.policy.provider import PolicyProvider
+from support_ops.policy.rag import RagPolicy
 from support_ops.policy.rules import Rules
 from support_ops.policy.skills import SkillsPolicy
 from support_ops.systems.tools import SupportTools
@@ -23,12 +24,19 @@ def policy_from_config(cfg: dict[str, Any], rules: Rules) -> PolicyProvider:
     mode = cfg["policy"].get("mode", "skills")
     if mode == "skills":
         return SkillsPolicy(cfg["policy"]["skills_dir"], rules)
+    if mode == "rag":
+        return RagPolicy.from_config(cfg, rules)
     raise ValueError(f"unsupported policy.mode: {mode!r}")
+
+
+# Earlier turns arrive with each request (the API is stateless); they map onto chat roles.
+HISTORY_ROLES = {"customer": "user", "agent": "assistant"}
 
 
 class SupportState(TypedDict, total=False):
     ticket_id: str
     customer_message: str
+    history: list[dict[str, str]]
     strategy: str
     messages: list[dict[str, Any]]
     planned_calls: list[dict[str, Any]]
@@ -77,18 +85,25 @@ class SingleAgentWorkflow:
         return cls(OpenAICompatLLM(cfg), cfg, **kwargs)
 
     def invoke(self, ticket_id: str, customer_message: str, strategy: str | None = None,
-               tracer: Tracer | None = None) -> SupportState:
+               tracer: Tracer | None = None, history: list[dict[str, str]] | None = None) -> SupportState:
+        """Run one turn. `history` holds the earlier turns of this ticket as
+        {"role": "customer" | "agent", "content": ...}; nothing is kept between calls."""
         selected = strategy or self.cfg.get("agent", {}).get("strategy", "react")
         if selected not in {"react", "plan_and_execute"}:
             raise ValueError("strategy must be react or plan_and_execute")
+        history = [{"role": turn["role"], "content": turn["content"]} for turn in history or []]
+        if any(turn["role"] not in HISTORY_ROLES for turn in history):
+            raise ValueError("history roles must be customer or agent")
         self.tracer = tracer or self._provided_tracer or Tracer(ticket_id)
         self._call_sequence = 0
-        self._event("workflow_start", strategy=selected)
+        self._event("workflow_start", strategy=selected, history_turns=len(history))
         # Explicit budgets terminate loops before LangGraph's recursion safeguard.
         recursion_limit = 2 * self.cfg["limits"]["max_agent_steps"] + 6
+        earlier = [{"role": HISTORY_ROLES[turn["role"]], "content": turn["content"]} for turn in history]
         result = self.graph.invoke({
-            "ticket_id": ticket_id, "customer_message": customer_message, "strategy": selected,
-            "messages": [{"role": "user", "content": customer_message}], "planned_calls": [],
+            "ticket_id": ticket_id, "customer_message": customer_message, "history": history,
+            "strategy": selected,
+            "messages": [*earlier, {"role": "user", "content": customer_message}], "planned_calls": [],
             "evidence": [], "ticket_status": "open", "handoff_packet": None,
             "replans": 0, "agent_steps": 0, "tool_steps": 0,
             "plan_complete": False, "retry_reason": None, "error": None,
@@ -105,7 +120,8 @@ class SingleAgentWorkflow:
     def _chat(self, role: str, messages: list[dict[str, Any]], *, tools=None, json_mode=False) -> ChatResult:
         self._event("llm_request", role=role)
         result = self.llm.chat(role, messages, tools=tools, tracer=self.tracer, json_mode=json_mode)
-        self._event("llm_response", role=role, tool_calls=[call.name for call in result.tool_calls])
+        self._event("llm_response", role=role, tool_calls=[call.name for call in result.tool_calls],
+                    **({"reasoning": result.reasoning} if result.reasoning else {}))
         return result
 
     def _guard(self, state: SupportState) -> dict[str, Any]:
@@ -141,8 +157,10 @@ class SingleAgentWorkflow:
     def _system_prompt(self) -> str:
         return (
             f"You are a policy-bound customer support agent. Current workflow date: {self.clock.now().date()}. "
-            "Use read tools for account facts. Read the order by its own ID; use the shipment tools with "
-            f"the order ID for tracking. {self.tools.policy.prompt_hint} "
+            "Use read tools for account facts. Read the order by its own ID; use the order lookup tools "
+            "with the order ID for its items, payments, returns and tracking. Before advising on a return "
+            "or refund, check the order's items and any existing returns or refunds. "
+            f"{self.tools.policy.prompt_hint} "
             "Calculate return windows using the workflow date and delivery date. "
             "ticket_state only simulates writes; never describe a simulated refund as a real payment. "
             "Ask for missing information when needed."
@@ -213,6 +231,7 @@ class SingleAgentWorkflow:
         result = self._chat("supervisor", [
             {"role": "system", "content": prompt},
             {"role": "user", "content": json.dumps({
+                **self._earlier_turns(state),
                 "message": state["customer_message"], "evidence": state["evidence"],
                 "previous_error": state.get("retry_reason"),
             }, default=str)},
@@ -285,6 +304,11 @@ class SingleAgentWorkflow:
             return "supervisor"
         return "final_reply"
 
+    @staticmethod
+    def _earlier_turns(state: SupportState) -> dict[str, Any]:
+        # Omitted when empty, so single-turn prompts stay exactly as before.
+        return {"history": state["history"]} if state.get("history") else {}
+
     def _final_reply(self, state: SupportState) -> dict[str, Any]:
         self._event("node_start", node="final_reply")
         if self.tracer and self.tracer.cost_usd >= self.cfg["limits"]["max_cost_usd_per_ticket"]:
@@ -293,9 +317,11 @@ class SingleAgentWorkflow:
             {"role": "system", "content": self._system_prompt() +
              " Draft a concise final reply using only the supplied status and successful evidence. "
              "Use the workflow date for date arithmetic. If a required policy could not be read, "
-             "ask for clarification or offer review; never invent its terms. Do not use placeholder names. "
+             "ask for clarification or offer review; never invent its terms. Do not use placeholder names, "
+             "and never address the customer by an internal ID such as a customer ID; use a neutral greeting. "
              "Do not promise follow-up unless a handoff was recorded."},
             {"role": "user", "content": json.dumps({
+                **self._earlier_turns(state),
                 "message": state["customer_message"], "status": state["ticket_status"],
                 "evidence": [item for item in state["evidence"] if "error" not in item["result"]],
             }, default=str)},
@@ -308,6 +334,7 @@ class SingleAgentWorkflow:
         if packet is None:
             handoff = self.tools.ticket_state.run(state["ticket_id"], {
                 "action": "handoff", "reason": state.get("error") or state.get("guard_flag") or "review required",
+                **self._earlier_turns(state),
                 "customer_message": state["customer_message"], "evidence": state["evidence"],
             })
             packet = handoff["handoff_packet"]

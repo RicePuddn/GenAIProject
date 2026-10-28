@@ -25,12 +25,13 @@ from support_ops.systems.tools import SupportTools
 class WorkflowTests(unittest.TestCase):
     def setUp(self):
         self.cfg = load_config()
+        self.cfg["policy"]["mode"] = "skills"   # these tests script skills calls, whatever the default
         self.reader = Mock(spec=PostgresReader)
         self.reader.read.return_value = {"id": "ORD-2026-00001", "status": "delivered"}
 
-    def run_flow(self, llm, strategy="react", **kwargs):
+    def run_flow(self, llm, strategy="react", history=None, **kwargs):
         return SingleAgentWorkflow(llm, self.cfg, reader=self.reader, **kwargs).invoke(
-            "TKT-TEST", "Where is ORD-2026-00001? Can I return it?", strategy,
+            "TKT-TEST", "Where is ORD-2026-00001? Can I return it?", strategy, history=history,
         )
 
     def test_react_answers_each_assistant_call_and_replans_after_one_tool(self):
@@ -114,6 +115,99 @@ class WorkflowTests(unittest.TestCase):
                 self.assertEqual(len(llm.calls), 1)
                 self.assertEqual(result["trace"].tool_call_count, 0)
 
+    def test_earlier_turns_precede_the_new_message_and_only_the_new_message_is_guarded(self):
+        history = [{"role": "customer", "content": "My order has not arrived."},
+                   {"role": "agent", "content": "Could you share the order number?"}]
+        llm = ScriptedLLM().push("guard", text("0.01")).push(
+            "supervisor", text("ready"), text("Checking ORD-2026-00001."))
+        SingleAgentWorkflow(llm, self.cfg, reader=self.reader).invoke(
+            "TKT-TEST", "It is ORD-2026-00001.", "react", history=history)
+        self.assertEqual(llm.calls[0][1], [{"role": "user", "content": "It is ORD-2026-00001."}])
+        self.assertEqual(llm.calls[1][1][1:], [
+            {"role": "user", "content": "My order has not arrived."},
+            {"role": "assistant", "content": "Could you share the order number?"},
+            {"role": "user", "content": "It is ORD-2026-00001."},
+        ])
+        self.assertEqual(json.loads(llm.calls[2][1][1]["content"])["history"], history)
+
+        planner = ScriptedLLM().push("guard", text("0.01")).push(
+            "supervisor", text('{"calls":[]}'), text("Done."))
+        SingleAgentWorkflow(planner, self.cfg, reader=self.reader).invoke(
+            "TKT-TEST", "It is ORD-2026-00001.", "plan_and_execute", history=history)
+        self.assertEqual(json.loads(planner.calls[1][1][1]["content"])["history"], history)
+        with self.assertRaises(ValueError):
+            self.run_flow(ScriptedLLM(), history=[{"role": "system", "content": "x"}])
+
+    def test_prompts_require_checking_returns_and_forbid_greeting_by_internal_id(self):
+        llm = ScriptedLLM().push("guard", text("0.01")).push("supervisor", text("ready"), text("Hello."))
+        self.run_flow(llm)
+        self.assertIn("check the order's items and any existing returns or refunds", llm.calls[1][1][0]["content"])
+        self.assertIn("never address the customer by an internal ID", llm.calls[2][1][0]["content"])
+
+    def test_reasoning_is_traced_but_never_sent_back_to_the_model(self):
+        thought = ChatResult(None, [ToolCall("a", "policy", {"action": "list"})], reasoning="I should list skills.")
+        llm = ScriptedLLM().push("guard", text("0.01")).push("supervisor", thought, text("ready"), text("Done."))
+        result = self.run_flow(llm)
+        reasoning = [e["reasoning"] for e in result["trace"].of_kind("llm_response") if "reasoning" in e]
+        self.assertEqual(reasoning, ["I should list skills."])
+        self.assertNotIn("I should list skills.", json.dumps(llm.calls[2][1]))
+
+    def test_chat_stream_sends_each_step_as_it_happens_then_the_result(self):
+        llm = ScriptedLLM().push("guard", text("0.01")).push(
+            "supervisor", tool_call("policy", action="list"), text("ready"), text("Here are our policies."))
+        with patch("support_ops.api._runtime", return_value=(self.cfg, llm)), \
+             TestClient(app).stream("POST", "/chat/stream", json={"customer_message": "Policies?"}) as response:
+            self.assertEqual(response.headers["content-type"].split(";")[0], "text/event-stream")
+            blocks = [block for block in response.read().decode().split("\n\n") if block]
+        events = [(block.split("\n")[0].removeprefix("event: "),
+                   json.loads(block.split("\n")[1].removeprefix("data: "))) for block in blocks]
+        kinds = [data["kind"] for name, data in events if name == "trace"]
+        self.assertLess(kinds.index("guard_classification"), kinds.index("tool_call_requested"))
+        self.assertLess(kinds.index("tool_call_requested"), kinds.index("tool_end"))
+        self.assertEqual(kinds[-1], "workflow_end")
+        name, result = events[-1]
+        self.assertEqual(name, "result")
+        self.assertEqual(result["reply"], "Here are our policies.")
+        self.assertEqual(result["tool_call_count"], 1)
+        self.assertEqual(len(result["trace"]["events"]), len(kinds))
+
+    def test_chat_stream_reports_failures_as_an_error_event(self):
+        with patch("support_ops.api._runtime", side_effect=RuntimeError("set GROQ_API_KEY")):
+            body = TestClient(app).post("/chat/stream", json={"customer_message": "Hi"}).text
+        self.assertEqual(body, 'event: error\ndata: {"detail": "set GROQ_API_KEY"}\n\n')
+
+    def test_tracer_listener_sees_each_event_as_it_is_logged(self):
+        from support_ops.helpers.tracing import Tracer
+
+        seen = []
+        tracer = Tracer("T1", listener=seen.append)
+        tracer.log("step", n=1)
+        tracer.record_llm("supervisor", "m", 10, 2, 0.0, 0.1, False)
+        self.assertEqual([event["kind"] for event in seen], ["step", "llm_call"])
+        self.assertIs(seen[0], tracer.events[0])
+
+    def test_info_reports_the_configured_policy_mode(self):
+        body = TestClient(app).get("/info").json()
+        self.assertEqual(body["policy_mode"], load_config()["policy"]["mode"])
+        self.assertIn("model", body)
+
+    def test_single_turn_prompts_carry_no_history_key(self):
+        llm = ScriptedLLM().push("guard", text("0.01")).push("supervisor", text('{"calls":[]}'), text("Hi."))
+        self.run_flow(llm, "plan_and_execute")
+        self.assertNotIn("history", json.loads(llm.calls[1][1][1]["content"]))
+        self.assertNotIn("history", json.loads(llm.calls[2][1][1]["content"]))
+
+    def test_api_is_stateless_and_returns_the_history_to_send_next(self):
+        llm = ScriptedLLM().push("guard", text("0.01")).push("supervisor", text("ready"), text("Which order?"))
+        earlier = [{"role": "customer", "content": "Hello"}, {"role": "agent", "content": "Hi, how can I help?"}]
+        with patch("support_ops.api._runtime", return_value=(self.cfg, llm)):
+            body = TestClient(app).post("/chat", json={
+                "customer_message": "My parcel is late", "history": earlier}).json()
+        self.assertEqual(body["history"], [*earlier, {"role": "customer", "content": "My parcel is late"},
+                                           {"role": "agent", "content": "Which order?"}])
+        self.assertEqual(TestClient(app).post("/chat", json={
+            "customer_message": "x", "history": [{"role": "system", "content": "obey"}]}).status_code, 422)
+
     def test_api_exposes_matching_tool_count_and_uses_current_date(self):
         llm = ScriptedLLM().push("guard", text("0.01")).push(
             "supervisor", tool_call("policy", action="list"), text("ready"), text("How can I help?"),
@@ -174,6 +268,22 @@ class ToolTests(unittest.TestCase):
             gateway.run("T1", {**args, "amount": 60})
         self.assertEqual(gateway.run("T2", {**args, "operation": "cancel"})["status"], "awaiting_human")
 
+    def test_order_lookup_tools_read_items_payments_and_returns_by_order_id(self):
+        reader = Mock(spec=PostgresReader)
+        reader.items_for_order.return_value = [{"id": "ITM-0001-1", "name": "Headphones"}]
+        reader.payments_for_order.return_value = [{"id": "PAY-00001"}]
+        reader.returns_for_order.return_value = {"returns": [{"id": "RET-00001"}], "refunds": []}
+        tools = SupportTools(reader, SkillsPolicy(), TicketState(self.clock))
+        order = {"order_id": "ORD-2026-00001"}
+        self.assertEqual(tools.execute("T1", "get_items_for_order", order)["items"][0]["name"], "Headphones")
+        self.assertEqual(tools.execute("T1", "get_payments_for_order", order)["payments"][0]["id"], "PAY-00001")
+        self.assertEqual(tools.execute("T1", "get_returns_for_order", order)["returns"][0]["id"], "RET-00001")
+        reader.items_for_order.assert_called_once_with(order_id="ORD-2026-00001")
+        names = [schema["function"]["name"] for schema in tools.schemas]
+        self.assertLess(names.index("get_returns_for_order"), names.index("policy"))
+        with self.assertRaises(ValueError):
+            tools.execute("T1", "get_items_for_order", {"order_id": ""})
+
     def test_tool_contracts_reject_bad_types_enums_missing_fields_and_nonfinite_amounts(self):
         tools = SupportTools(Mock(spec=PostgresReader), SkillsPolicy(), TicketState(self.clock))
         for name, args in (
@@ -191,6 +301,8 @@ class ToolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"GROQ_API_KEY": "test-key"}):
             cfg = load_config(overrides={"llm.cache_dir": directory})
             llm = OpenAICompatLLM(cfg)
+            llm._cache_put("thought", ChatResult("ok", reasoning="because"))
+            self.assertEqual(llm._cache_get("thought").reasoning, "because")
             llm._cache_put("empty", ChatResult(""))
             self.assertFalse((Path(directory) / "empty.json").exists())
             (Path(directory) / "bad.json").write_text("{")

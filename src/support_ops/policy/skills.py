@@ -23,6 +23,9 @@ class SkillsPolicy:
         self.root = (path if path.is_absolute() else ROOT / path).resolve()
         self.rules = rules or Rules.load()
 
+    def warm_up(self) -> None:
+        """Skills read files on demand; there is nothing to load up front."""
+
     def planner_context(self) -> str:
         return ("Available policy filenames (contents must still be read with tools): "
                 + json.dumps(self.catalog()))

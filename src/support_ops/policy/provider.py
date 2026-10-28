@@ -18,3 +18,7 @@ class PolicyProvider(Protocol):
     def run(self, args: dict[str, Any]) -> dict[str, Any]:
         """Execute validated `policy` tool arguments."""
         ...
+
+    def warm_up(self) -> None:
+        """Do a one-off setup (e.g. loading models) before tickets are timed."""
+        ...

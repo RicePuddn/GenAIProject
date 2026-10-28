@@ -16,7 +16,7 @@ from support_ops.policy.provider import PolicyProvider
 
 
 class ReadArguments(ToolArguments):
-    """Read a record by its own ID. Shipment lookups require the order lookup tools."""
+    """Read a record by its own ID. For an order's items, payments, returns or shipments, use the order lookup tools."""
     kind: Literal[*RECORD_KINDS]
     record_id: NonEmpty
 
@@ -39,6 +39,24 @@ class PolicyArguments(ToolArguments):
             raise ValueError("open requires skill")
         if self.action == "read" and not (self.skill or self.file):
             raise ValueError("read requires skill or file")
+        if self.action == "check" and not self.operation:
+            raise ValueError("check requires operation")
+        if self.action == "check" and self.operation == "refund" and self.amount is None:
+            raise ValueError("refund check requires amount")
+        return self
+
+
+class RagPolicyArguments(ToolArguments):
+    """search: retrieve the policy clauses most relevant to a query, with their exceptions; check: mock refund limit."""
+    action: Literal["search", "check"]
+    query: NonEmpty | None = None
+    operation: NonEmpty | None = None
+    amount: Amount | None = None
+
+    @model_validator(mode="after")
+    def required_for_action(self) -> Self:
+        if self.action == "search" and not self.query:
+            raise ValueError("search requires query")
         if self.action == "check" and not self.operation:
             raise ValueError("check requires operation")
         if self.action == "check" and self.operation == "refund" and self.amount is None:
@@ -78,6 +96,9 @@ class SupportTools:
             "read_record": ReadArguments,
             "get_shipments_for_order": OrderArguments,
             "get_shipment_events_for_order": OrderArguments,
+            "get_items_for_order": OrderArguments,
+            "get_payments_for_order": OrderArguments,
+            "get_returns_for_order": OrderArguments,
             "policy": policy.arguments,
             "ticket_state": TicketArguments,
         }
@@ -85,6 +106,10 @@ class SupportTools:
             "read_record": ReadArguments.__doc__,
             "get_shipments_for_order": "Get all shipments for an order ID, not a shipment ID.",
             "get_shipment_events_for_order": "Get chronological carrier tracking events for an order ID.",
+            "get_items_for_order": "Get the items in an order ID: product name, SKU, category, quantity, "
+                                   "unit price and fulfilment status.",
+            "get_payments_for_order": "Get the payments for an order ID: method, status and amount.",
+            "get_returns_for_order": "Get existing returns and refunds for an order ID, with their status.",
             "policy": policy.description,
             "ticket_state": TicketArguments.__doc__,
         }
@@ -106,6 +131,12 @@ class SupportTools:
             return {"shipments": self.reader.shipments_for_order(**args)}
         if name == "get_shipment_events_for_order":
             return {"events": self.reader.shipment_events_for_order(**args)}
+        if name == "get_items_for_order":
+            return {"items": self.reader.items_for_order(**args)}
+        if name == "get_payments_for_order":
+            return {"payments": self.reader.payments_for_order(**args)}
+        if name == "get_returns_for_order":
+            return self.reader.returns_for_order(**args)
         if name == "policy":
             return self.policy.run(args)
         return self.ticket_state.run(ticket_id, args)

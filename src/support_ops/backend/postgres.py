@@ -43,6 +43,26 @@ class PostgresReader:
             order_id,
         )
 
+    def items_for_order(self, order_id: str) -> list[dict[str, Any]]:
+        """Order lines with the product each one is for."""
+        return self._select(
+            """SELECT i.id, i.product_id, p.sku, p.name, p.category, i.quantity, i.unit_price,
+                      i.item_status
+               FROM order_items i JOIN products p ON p.id = i.product_id
+               WHERE i.order_id = %s ORDER BY i.id""",
+            order_id,
+        )
+
+    def payments_for_order(self, order_id: str) -> list[dict[str, Any]]:
+        return self._select("SELECT * FROM payments WHERE order_id = %s ORDER BY id", order_id)
+
+    def returns_for_order(self, order_id: str) -> dict[str, list[dict[str, Any]]]:
+        """Returns and refunds together, since a refund usually follows a return."""
+        return {
+            "returns": self._select("SELECT * FROM returns WHERE order_id = %s ORDER BY requested_at, id", order_id),
+            "refunds": self._select("SELECT * FROM refunds WHERE order_id = %s ORDER BY requested_at, id", order_id),
+        }
+
     def shipment_events_for_order(self, order_id: str) -> list[dict[str, Any]]:
         return self._select(
             """SELECT e.id, e.shipment_id, s.tracking_number, e.occurred_at,
