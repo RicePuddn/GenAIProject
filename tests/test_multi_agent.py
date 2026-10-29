@@ -234,6 +234,13 @@ class EscalationTests(Base):
         self.assertEqual((result["ticket_status"], result["reply"]), ("awaiting_human", HOLD_REPLY))
         self.assertEqual(self.roles(), ["guard"])
 
+    def test_triage_routes_order_detail_questions_and_follow_ups_to_a_specialist(self):
+        from support_ops.supervisor.supervisor import TRIAGE_PROMPT
+
+        for phrase in ("its items, quantities, prices and status", "Read the earlier turns",
+                       "Use specialist null only for requests no specialist can handle"):
+            self.assertIn(phrase, TRIAGE_PROMPT)
+
     def test_triage_triggers_hand_off(self):
         cases = {"customer asked for a human": {"wants_human": True},
                  "no specialist": {"specialist": None},

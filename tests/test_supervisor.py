@@ -66,7 +66,7 @@ class OutcomeTests(unittest.TestCase):
             "share what the facts show": dict(status="awaiting_human", execution=None),
             "Promise nothing else": dict(status="awaiting_human", execution=None, evidence=[ROUTE]),
             "Ask: Which bottle?": dict(status="awaiting_customer", execution=None, customer_question="Which bottle?"),
-            "No action was taken": dict(status="approved", execution=None),
+            "if none are listed, do not apologise": dict(status="approved", execution=None),
         }
         for phrase, overrides in cases.items():
             with self.subTest(phrase):

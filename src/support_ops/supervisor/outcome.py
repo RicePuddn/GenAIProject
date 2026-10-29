@@ -58,5 +58,5 @@ def _tell_customer(status: str, has_facts: bool, executed: bool, proposal: Propo
         return f"Ask: {customer_question}"
     if executed:
         return f"The {proposal.action} is recorded and complete; nothing is pending review. Say what was recorded."
-    return ("Answer the question from the facts. Acknowledge every item in problems, if any, and "
-            "apologise. No action was taken.")
+    return ("Answer the question from the facts. If problems are listed, acknowledge each and apologise; "
+            "if none are listed, do not apologise. Nothing was changed on the account; do not mention that.")

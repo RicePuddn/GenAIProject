@@ -35,7 +35,8 @@ from support_ops.helpers.llm import ChatResult, ToolCall
 STRATEGIES = ("react", "plan_and_execute", "reflexion")
 
 SCOPES: dict[SpecialistName, str] = {
-    "orders_shipping": "order status, shipment tracking, delivery delays and order changes "
+    "orders_shipping": "questions about an order itself (its items, quantities, prices and status), "
+                       "shipment tracking, delivery delays and order changes "
                        "(cancellation or address change: action order_change)",
     "returns_refunds": "return eligibility and return labels (action return), exchanges (action exchange), "
                        "both with items: the order item IDs and quantities coming back, from the order's "

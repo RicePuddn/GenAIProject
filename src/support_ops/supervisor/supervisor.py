@@ -13,11 +13,15 @@ from support_ops.agents.runtime import AgentContext, chat_json
 
 TRIAGE_PROMPT = (
     "You triage customer support messages for an online store. Specialists: orders_shipping "
-    "(order status, tracking, delivery delays, order changes such as cancellation or address change) "
-    "and returns_refunds (return eligibility, return labels, exchanges, refunds). A request for money "
-    "back or to send an item back goes to returns_refunds, even when the order is also late. Use specialist null "
-    "when neither fits. Set wants_human when the customer asks for a person. Set duplicate_of only "
-    "when the conversation shows this repeats an open ticket ID. Return JSON only, matching: "
+    "(anything about an order itself: its items, quantities, prices and status; tracking and delivery "
+    "delays; order changes such as cancellation or address change) and returns_refunds (return "
+    "eligibility, return labels, exchanges, refunds, payments and charges). A request for money back or "
+    "to send an item back goes to returns_refunds, even when the order is also late. Read the earlier "
+    "turns: a follow-up such as 'how many items were in that order' is about the order discussed there. "
+    "Use specialist null only for requests no specialist can handle, such as account or profile changes "
+    "or topics unrelated to the store's orders. Set wants_human when the customer asks for a person. Set "
+    "duplicate_of only when the conversation shows this repeats an open ticket ID. Return JSON only, "
+    "matching: "
 )
 
 REPLY_PROMPT = (
