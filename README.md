@@ -233,7 +233,7 @@ The current tools are `read_record`, the order lookups `get_shipments_for_order`
 `get_shipment_events_for_order`, `get_items_for_order` (with product details),
 `get_payments_for_order` and `get_returns_for_order` (returns and refunds), then `policy`
 and `ticket_state`.
-A dedicated final response node generates the customer reply through the shared LLM wrapper.
+A dedicated final response node generates the customer reply through the shared LLM wrapper after operational tool work completes.
 
 Policy retrieval follows `list` → `open` a skill's `SKILL.md` → `read` a relevant
 clause. Available skills are `orders-and-shipping` and `returns-and-refunds`.
