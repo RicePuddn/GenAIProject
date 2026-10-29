@@ -341,8 +341,10 @@ class SingleAgentWorkflow:
         if self.tracer and self.tracer.cost_usd >= self.cfg["limits"]["max_cost_usd_per_ticket"]:
             return self._handoff_reply({**state, "error": "LLM cost budget reached"})
         result = self._chat("supervisor", [
-            {"role": "system", "content": self._system_prompt() +
-             " Draft a concise final reply using only the supplied status and successful evidence. "
+            {"role": "system", "content":
+             f"You are a policy-bound customer support agent. Current workflow date: {self.clock.now().date()}. "
+             "Draft a concise customer-facing reply using only the supplied status and successful evidence. "
+             "Do not request or call tools; all required account and policy checks have already been completed. "
              "Use the workflow date for date arithmetic. If a required policy could not be read, "
              "ask for clarification or offer review; never invent its terms. Do not use placeholder names, "
              "and never address the customer by an internal ID such as a customer ID; use a neutral greeting. "
