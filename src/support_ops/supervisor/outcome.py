@@ -12,6 +12,9 @@ from support_ops.agents.models import Proposal
 OFF_TOPIC = ("The message is not about the store. Do not answer it. Briefly say you can help with orders, "
              "shipments, items, payments, returns, refunds and the store's support policies, and invite a "
              "question about those.")
+PARTS = ("The message held several requests, one per part, in the order the customer raised them. Answer "
+         "each part, following that part's own tell_customer; one part's status (such as a pending review) "
+         "says nothing about another.")
 # Ticket states that end the turn resolved, as the customer sees them.
 RESOLVED_STATES = {"approved": "resolved", "executed": "resolved"}
 
@@ -82,3 +85,8 @@ def _tell_customer(status: str, has_facts: bool, executed: bool, proposal: Propo
         return f"The {proposal.action} is recorded and complete; nothing is pending review. Say what was recorded."
     return ("Answer the question from the facts. If problems are listed, acknowledge each and apologise; "
             "if none are listed, do not apologise. Nothing was changed on the account; do not mention that.")
+
+
+def combined_outcome(status: str, parts: list[dict[str, Any]]) -> dict[str, Any]:
+    """A multi-part ticket: the overall status and each part's own outcome."""
+    return {"status": RESOLVED_STATES.get(status, status), "parts": parts, "tell_customer": PARTS}

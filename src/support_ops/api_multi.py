@@ -45,7 +45,8 @@ class MultiChatRequest(BaseModel):
 
     customer_message: str = Field(min_length=1, max_length=20_000)
     ticket_id: str | None = Field(default=None, min_length=1, max_length=100)
-    strategy: Literal["react", "plan_and_execute"] | None = None
+    strategy: Literal["react", "plan_and_execute"] | None = None        # the specialists
+    orchestration: Literal["react", "plan_and_execute"] | None = None   # the supervisor; default: config, else strategy
     # Stateless: the client sends the earlier turns of the ticket; the server keeps nothing.
     history: list[Turn] = Field(default_factory=list, max_length=MAX_HISTORY_TURNS)
 
@@ -53,6 +54,7 @@ class MultiChatRequest(BaseModel):
 class MultiChatResponse(BaseModel):
     ticket_id: str
     strategy: str
+    orchestration: str
     reply: str
     ticket_status: str
     triage: dict[str, Any] | None = None
@@ -62,6 +64,8 @@ class MultiChatResponse(BaseModel):
     reply_review: dict[str, Any] | None = None
     execution: dict[str, Any] | None = None
     handoff_packet: dict[str, Any] | None = None
+    # One per specialist when triage split the message; proposal etc. above are the last part's.
+    parts: list[dict[str, Any]] = Field(default_factory=list)
     evidence: list[dict[str, Any]] = Field(default_factory=list)
     audit_log: list[dict[str, Any]] = Field(default_factory=list)
     tool_call_count: int = 0
@@ -118,6 +122,8 @@ def info() -> dict[str, Any]:
         "system": "multi_agent", "config": config_path(), "policy_mode": policy["mode"],
         "corpus": policy["corpus_size"],
         "default_strategy": cfg.get("agent", {}).get("strategy", "react"),
+        "default_orchestration": cfg.get("multi_agent", {}).get("orchestration")
+        or cfg.get("agent", {}).get("strategy", "react"),
         "models": {role: cfg["llm"]["models"][role] for role in ("supervisor", "specialist", "approver")},
         "providers": {role: {**cfg["llm"], **cfg.get("multi_agent", {}).get("llm_by_role", {}).get(role, {})}["provider"]
                       for role in ("guard", "supervisor", "specialist", "approver")},
@@ -135,7 +141,7 @@ def _run_chat(request: MultiChatRequest, tracer: Tracer,
     workflow = MultiAgentWorkflow(llm, cfg, clock=Clock(datetime.now(timezone.utc)), cancellation=cancellation)
     history = [turn.model_dump() for turn in request.history]
     result = workflow.invoke(tracer.ticket_id, request.customer_message, strategy=request.strategy,
-                             tracer=tracer, history=history)
+                             tracer=tracer, history=history, orchestration=request.orchestration)
     tracer = result.pop("trace")
     reply = result.pop("reply")
     result.pop("history")

@@ -19,9 +19,11 @@ from support_ops.policy.routing import at_least
 TRANSITIONS: dict[str, set[str]] = {
     "open": {"triaged", "awaiting_customer", "awaiting_human"},
     "triaged": {"proposed", "awaiting_customer", "awaiting_human"},
-    "proposed": {"approved", "triaged", "awaiting_human"},   # triaged: sent back for a new proposal
-    "approved": {"executed", "resolved", "awaiting_human"},  # resolved: information only, nothing to execute
-    "executed": {"resolved", "awaiting_human"},
+    # proposed → triaged: sent back for a new proposal, or on to the next part of a multi-part ticket.
+    # → awaiting_customer from a later state: a part finished, but another part asked the customer something.
+    "proposed": {"approved", "triaged", "awaiting_customer", "awaiting_human"},
+    "approved": {"executed", "resolved", "triaged", "awaiting_customer", "awaiting_human"},  # resolved: info only
+    "executed": {"resolved", "triaged", "awaiting_customer", "awaiting_human"},
     "awaiting_customer": {"awaiting_human"},                 # the question itself failed review
     "awaiting_human": set(),
     "resolved": set(),

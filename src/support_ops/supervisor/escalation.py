@@ -33,19 +33,31 @@ def triage_escalation(triage: Triage, confidence_min: float) -> str | None:
 
 def handoff_packet(*, ticket_id: str, reason: str, customer_message: str, triage: Triage | None,
                    proposal: Proposal | None, min_route: dict[str, Any] | None,
-                   evidence: list[dict[str, Any]], execution: dict[str, Any] | None) -> HandoffPacket:
-    """Summary, actions taken, cited clauses and a recommendation for the operator."""
+                   evidence: list[dict[str, Any]], execution: dict[str, Any] | None,
+                   parts: list[dict[str, Any]] | None = None) -> HandoffPacket:
+    """Summary, actions taken, cited clauses and a recommendation for the operator. A multi-part
+    ticket lists every part, so the operator sees what was already done for the others."""
     actions = [f"{item['agent']}: {item['tool']}" + (" (error)" if "error" in item["result"] else "")
                for item in evidence]
     if execution:
         actions.append(f"write {execution['status']}: {execution.get('operation')}")
+    if parts:
+        clauses = list(dict.fromkeys(clause for part in parts for clause in
+                                     ((part.get("proposal") or {}).get("cited_clauses") or [])))
+        recommendation = " | ".join(
+            f"{part['specialist']} ({part['status']}): " + (
+                f"proposes {part['proposal']['action']} via {part['proposal']['route']}: {part['proposal']['reason']}"
+                if part.get("proposal") else part.get("handoff_reason") or part.get("customer_question") or "no proposal")
+            for part in parts)
+    else:
+        clauses = proposal.cited_clauses if proposal else []
+        recommendation = (f"Specialist proposes {proposal.action} via {proposal.route}: {proposal.reason}"
+                          if proposal else "Review the request; the automated flow stopped before a proposal.")
     return HandoffPacket(
         ticket_id=ticket_id, reason=reason,
         summary=f"{triage.intent if triage else 'request'}: {customer_message[:500]}",
-        actions_taken=actions, cited_clauses=proposal.cited_clauses if proposal else [],
-        recommendation=(f"Specialist proposes {proposal.action} via {proposal.route}: {proposal.reason}"
-                        if proposal else "Review the request; the automated flow stopped before a proposal."),
-        proposal=proposal, min_route=min_route,
+        actions_taken=actions, cited_clauses=clauses, recommendation=recommendation,
+        proposal=proposal, min_route=min_route, parts=parts or [],
     )
 
 

@@ -63,6 +63,20 @@ def route(amount=20, route_name="auto", **overrides):
     return tool_call("route", **{key: value for key, value in args.items() if value is not None})
 
 
+def step(specialist=None, request=None, reason="Next."):
+    """A react orchestrator step: delegate a part to a specialist, or finish (no specialist)."""
+    move = {"action": "delegate", "specialist": specialist, "request": request} if specialist else {"action": "finish"}
+    return text(json.dumps({**move, "reason": reason}))
+
+
+def one_part(messages, tools):
+    """Default react orchestrator: hand the whole message to the triaged specialist once, then finish."""
+    brief = json.loads(messages[1]["content"])
+    if brief["parts_done"]:
+        return step()
+    return step(brief["triage"]["specialist"], brief["message"])
+
+
 def verdict(decision="approve", *issues):
     return text(json.dumps({"decision": decision, "issues": list(issues), "reason": "Checked."}))
 
@@ -70,7 +84,7 @@ def verdict(decision="approve", *issues):
 class Base(unittest.TestCase):
     def setUp(self):
         self.cfg = load_config("configs/experiments/multi_agent_rag.yaml")
-        self.llm = ScriptedLLM().push("guard", text("0.01"))
+        self.llm = ScriptedLLM().push("guard", text("0.01")).on("orchestrator", one_part)
 
     def run_flow(self, message="My mug arrived broken, refund please. ORD-2026-00001", strategy="react", **backend):
         self.workflow = MultiAgentWorkflow(self.llm, self.cfg, reader=reader(**backend), policy=rag_policy(),
@@ -121,7 +135,7 @@ class RouteTests(Base):
             "approver", verdict("reject", "Only one of two items was damaged."), verdict(), verdict())
         result = self.run_flow()
         self.assertEqual((result["ticket_status"], result["execution"]["amount"]), ("resolved", 40))
-        second_brief = json.loads(self.llm.calls[4][1][1]["content"])
+        second_brief = json.loads([messages for role, messages in self.llm.calls if role == "specialist"][1][1]["content"])
         self.assertEqual(second_brief["approver_feedback"], ["Only one of two items was damaged."])
 
     def test_second_rejection_goes_to_a_human(self):
@@ -528,7 +542,7 @@ class RetryTests(Base):
         self.assertIn("triage failed", self.run_flow()["handoff_packet"]["reason"])
 
         self.cfg["multi_agent"]["retries"]["invalid_json"] = 2
-        self.llm = ScriptedLLM().push("guard", text("0.01")).push(
+        self.llm = ScriptedLLM().push("guard", text("0.01")).on("orchestrator", one_part).push(
             "supervisor", garbled, garbled, triage(), text("Recorded.")).push(
             "specialist", route()).push("approver", verdict())
         self.assertEqual(self.run_flow()["ticket_status"], "resolved")
@@ -538,6 +552,176 @@ class RetryTests(Base):
             with self.subTest(retries), self.assertRaises(ValueError):
                 self.cfg["multi_agent"]["retries"] = retries
                 self.run_flow()
+
+
+TWO_TASKS = [{"specialist": "orders_shipping", "request": "Where is my order ORD-2026-00001?"},
+             {"specialist": "returns_refunds", "request": "Refund the dented bottle from ORD-2026-00001."}]
+STATUS = tool_call("route", action="none", order_id=ORDER, route="auto", reason="Delivered; status shared.")
+
+
+def plan(*calls):
+    return text(json.dumps({"calls": [{"name": name, "arguments": arguments} for name, arguments in calls]}))
+
+
+def draft(**fields):
+    return text(json.dumps(fields))
+
+
+STATUS_DRAFT = draft(action="none", order_id=ORDER, route="auto", reason="Delivered; status shared.")
+REFUND_DRAFT = draft(action="refund", order_id=ORDER, amount=20, reason_code="damaged_item", cited_clauses=["REF-1"],
+                     items=[{"item_id": "ITM-0031-2", "quantity": 1}], route="auto", reason="Dented on arrival.")
+
+
+class PlannedPartsTests(Base):
+    """plan_and_execute: triage plans one task per specialist; each specialist plans its own calls."""
+    MESSAGE = "Where is my order ORD-2026-00001? Also the bottle arrived dented, refund it please."
+
+    def run_planned(self, *specialist_turns, reply="Done.", **backend):
+        self.llm.push("supervisor", triage(tasks=TWO_TASKS), text(reply)).push(
+            "specialist", *specialist_turns).push("approver", verdict())
+        return self.run_flow(self.MESSAGE, strategy="plan_and_execute", **backend)
+
+    def test_each_specialist_handles_its_part_and_both_go_through_the_gates(self):
+        result = self.run_planned(plan(("get_shipments_for_order", {"order_id": ORDER})), STATUS_DRAFT,
+                                  plan(("get_returns_for_order", {"order_id": ORDER})), REFUND_DRAFT)
+        self.assertEqual(result["ticket_status"], "resolved")
+        self.assertEqual([(part["specialist"], part["status"]) for part in result["parts"]],
+                         [("orders_shipping", "approved"), ("returns_refunds", "executed")])
+        self.assertEqual(len(self.workflow.writes.executed), 1)
+        self.assertNotIn("orchestrator", self.roles())   # the plan is made once, at triage
+        # Each specialist is told its own part; the reply gets one outcome per part.
+        briefs = [messages[1]["content"] for role, messages in self.llm.calls if role == "specialist"]
+        self.assertIn("Where is my order", briefs[0])
+        self.assertIn("Refund the dented bottle", briefs[2])
+        outcome = json.loads(self.llm.calls[-2][1][1]["content"])["outcome"]
+        self.assertEqual([part["status"] for part in outcome["parts"]], ["resolved", "resolved"])
+        self.assertEqual(outcome["parts"][1]["customer_request"], TWO_TASKS[1]["request"])
+        self.assertEqual([event["specialist"] for event in result["trace"].of_kind("part_start")],
+                         ["orders_shipping", "returns_refunds"])
+
+    def test_a_part_needing_a_person_does_not_stop_the_other_part(self):
+        human = draft(action="refund", order_id=ORDER, amount=150, reason_code="damaged_item", cited_clauses=["REF-1"],
+                      items=[{"item_id": "ITM-0031-2", "quantity": 2}], route="human", reason="Large refund.")
+        result = self.run_planned(plan(), STATUS_DRAFT, plan(), human, total=200)
+        self.assertEqual(result["ticket_status"], "awaiting_human")
+        self.assertEqual(result["parts"][0]["status"], "approved")
+        packet = result["handoff_packet"]
+        self.assertTrue(packet["reason"].startswith("returns_refunds: route: human"))
+        self.assertEqual([part["specialist"] for part in packet["parts"]], ["orders_shipping", "returns_refunds"])
+        self.assertIn("orders_shipping (approved)", packet["recommendation"])
+
+
+class ReactOrchestrationTests(Base):
+    """react: the orchestrator delegates one part at a time after seeing the last result."""
+    MESSAGE = "My bottle from ORD-2026-00001 arrived dented. Where is the rest of my order, and can I get money back?"
+
+    def setUp(self):
+        super().setUp()
+        self.llm.responders.pop("orchestrator")   # these tests script every orchestrator step
+
+    def test_the_next_part_is_chosen_after_seeing_the_first_result(self):
+        self.llm.push("supervisor", triage("orders_shipping"), text("Delivered, and your refund is recorded.")).push(
+            "orchestrator", step("orders_shipping", "Where is ORD-2026-00001?"),
+            step("returns_refunds", "Refund the dented bottle in ORD-2026-00001."), step()).push(
+            "specialist", STATUS, route()).push("approver", verdict())
+        result = self.run_flow(self.MESSAGE)
+        self.assertEqual(result["ticket_status"], "resolved")
+        self.assertEqual([part["specialist"] for part in result["parts"]], ["orders_shipping", "returns_refunds"])
+        # The second decision saw the first part's result.
+        second = json.loads([messages for role, messages in self.llm.calls if role == "orchestrator"][1][1]["content"])
+        self.assertEqual(second["parts_done"][0]["ended"], "resolved")
+        self.assertEqual(second["parts_done"][0]["finding"], "Delivered; status shared.")
+        self.assertNotIn("tasks", second["triage"])   # no plan from triage under react
+        self.assertEqual(len(result["trace"].of_kind("orchestrator_step")), 3)
+
+    def test_a_question_in_one_part_waits_for_the_customer_after_the_other_executes(self):
+        question = tool_call("route", action="none", route="auto", reason="Which order?",
+                             customer_question="Which order is the parcel from?")
+        self.llm.push("supervisor", triage(), text("Refund recorded. Which order is the parcel from?")).push(
+            "orchestrator", step("returns_refunds", "Refund the dented bottle."),
+            step("orders_shipping", "Where is the parcel?"), step()).push(
+            "specialist", route(), question).push("approver", verdict())
+        result = self.run_flow(self.MESSAGE)
+        self.assertEqual(result["ticket_status"], "awaiting_customer")
+        self.assertEqual(result["parts"][0]["execution"]["status"], "executed")
+        moves = [(entry["from"], entry["to"]) for entry in result["audit_log"] if entry.get("type") == "transition"]
+        self.assertIn(("executed", "triaged"), moves)
+        self.assertEqual(moves[-1], ("triaged", "awaiting_customer"))
+
+    def test_a_specialist_that_wrote_cannot_be_delegated_again(self):
+        self.llm.push("supervisor", triage(), text("Your refund is recorded.")).push(
+            "orchestrator", step("returns_refunds", "Refund the bottle."), step("returns_refunds", "Refund it again."),
+            step()).push("specialist", route()).push("approver", verdict())
+        result = self.run_flow(self.MESSAGE)
+        self.assertEqual((result["ticket_status"], len(self.workflow.writes.executed)), ("resolved", 1))
+        self.assertIn("already executed a write", result["trace"].of_kind("orchestrator_refused")[0]["reason"])
+        third = json.loads([messages for role, messages in self.llm.calls if role == "orchestrator"][2][1]["content"])
+        self.assertIn("already executed a write", third["refused_last_step"])
+
+    def test_the_step_limit_ends_the_loop(self):
+        self.cfg["multi_agent"]["max_orchestration_steps"] = 2
+        self.llm.push("supervisor", triage(), text("Your refund is recorded.")).push(
+            "orchestrator", step("returns_refunds", "Refund the bottle."), step("orders_shipping", "Track it.")).push(
+            "specialist", route(), STATUS).push("approver", verdict())
+        result = self.run_flow(self.MESSAGE)
+        self.assertEqual(len(result["parts"]), 2)
+        self.assertEqual(result["trace"].of_kind("orchestration_limit")[0]["steps"], 2)
+        self.assertEqual(result["ticket_status"], "resolved")
+
+    def test_finishing_before_any_specialist_hands_off(self):
+        self.llm.push("supervisor", triage(), text("A specialist will review it.")).push(
+            "orchestrator", step()).push("approver", verdict())
+        result = self.run_flow(self.MESSAGE)
+        self.assertEqual(result["handoff_packet"]["reason"], "the orchestrator finished before any specialist ran")
+
+
+class MixedModeTests(Base):
+    def test_orchestration_and_specialist_strategy_are_set_separately(self):
+        self.llm.push("supervisor", triage(tasks=TWO_TASKS), text("Done.")).push(
+            "specialist", STATUS, route()).push("approver", verdict())
+        self.workflow = MultiAgentWorkflow(self.llm, self.cfg, reader=reader(), policy=rag_policy(), clock=Clock(NOW))
+        result = self.workflow.invoke("T1", PlannedPartsTests.MESSAGE, "react", orchestration="plan_and_execute")
+        self.assertEqual((result["orchestration"], result["strategy"], result["ticket_status"]),
+                         ("plan_and_execute", "react", "resolved"))
+        self.assertNotIn("orchestrator", self.roles())
+        self.assertEqual(len(result["parts"]), 2)
+
+    def test_orchestration_follows_the_config_then_the_strategy(self):
+        draft_turns = (plan(), REFUND_DRAFT)
+        self.llm.push("supervisor", triage(), text("Recorded.")).push("specialist", *draft_turns).push("approver", verdict())
+        result = self.run_flow(strategy="plan_and_execute")
+        self.assertEqual(result["orchestration"], "plan_and_execute")
+        self.cfg["multi_agent"]["orchestration"] = "react"
+        self.llm.push("guard", text("0.01")).push("supervisor", triage(), text("Recorded.")).push("specialist", *draft_turns).push("approver", verdict())
+        result = self.run_flow(strategy="plan_and_execute")
+        self.assertEqual((result["orchestration"], result["strategy"]), ("react", "plan_and_execute"))
+        self.assertIn("orchestrator", self.roles())
+
+    def test_an_unknown_orchestration_is_rejected(self):
+        self.workflow = MultiAgentWorkflow(self.llm, self.cfg, reader=reader(), policy=rag_policy(), clock=Clock(NOW))
+        with self.assertRaisesRegex(ValueError, "orchestration must be one of"):
+            self.workflow.invoke("T1", "Hi", "react", orchestration="vibes")
+
+
+class OrderFillTests(Base):
+    def test_an_answer_about_several_orders_is_checked_against_each(self):
+        late = "ORD-2026-00002"
+        self.llm.push("supervisor", triage("orders_shipping"), text("One is late; a specialist will follow up.")).push(
+            "specialist", tool_call("get_shipments_for_order", order_id=late),
+            tool_call("get_shipments_for_order", order_id=ORDER),
+            tool_call("route", action="none", route="auto", reason="Both shared."),
+            tool_call("route", action="none", route="human", reason="One parcel is late.")).push("approver", verdict())
+        self.workflow = MultiAgentWorkflow(self.llm, self.cfg, reader=reader(), policy=rag_policy(), clock=Clock(NOW))
+        self.workflow.reader.read.side_effect = lambda kind, record_id: {"id": record_id, "total": 80}
+        self.workflow.reader.shipments_for_order.side_effect = lambda order_id: (
+            [{"id": "SHP-2", "status": "in_transit", "shipped_at": NOW - timedelta(days=30),
+              "estimated_delivery": "2026-09-07", "delivered_at": None}] if order_id == late
+            else [{"id": "SHP-1", "delivered_at": NOW - timedelta(days=5)}])
+        result = self.workflow.invoke("T1", "Where are ORD-2026-00001 and ORD-2026-00002?", "react")
+        self.assertIn("minimum is 'human'", result["evidence"][2]["result"]["error"])
+        self.assertIn(late, result["evidence"][2]["result"]["error"])
+        self.assertEqual((result["ticket_status"], result["min_route"]["orders"]), ("awaiting_human", [ORDER, late]))
+        self.assertTrue(result["min_route"]["overdue_shipment"])
 
 
 class CancellationTests(Base):
@@ -592,7 +776,36 @@ class StrategyTests(Base):
         self.assertIn("minimum is 'approver'", replan_input["previous_error"])
         self.assertEqual(result["ticket_status"], "resolved")
 
-    def test_plan_with_the_route_tool_or_unknown_tools_is_rejected(self):
+    def test_a_planned_route_call_is_dropped_and_null_lists_are_empty(self):
+        planned = plan(("route", {"action": "none"}), ("get_returns_for_order", {"order_id": ORDER}))
+        none_items = draft(action="none", order_id=ORDER, items=None, cited_clauses=None, route="auto", reason="Info.")
+        self.llm.push("supervisor", triage(), text("Here you go.")).push(
+            "specialist", planned, none_items).push("approver", verdict())
+        result = self.run_flow(strategy="plan_and_execute")
+        self.assertEqual([item["tool"] for item in result["evidence"]], ["get_returns_for_order", "route"])
+        self.assertEqual(len(result["trace"].of_kind("plan_route_dropped")), 1)
+        self.assertEqual(result["ticket_status"], "resolved")
+
+    def test_reasoning_leaked_into_the_proposal_is_ignored(self):
+        leaked = text(json.dumps({"analysis": "We need to propose a refund... Let's output.",
+                                  "proposal": {"action": "none", "order_id": ORDER, "route": "auto", "reason": "Info."}}))
+        self.llm.push("supervisor", triage(), text("Here you go.")).push(
+            "specialist", plan(), leaked).push("approver", verdict())
+        result = self.run_flow(strategy="plan_and_execute")
+        self.assertEqual((result["ticket_status"], result["proposal"]["reason"]), ("resolved", "Info."))
+
+    def test_a_malformed_proposal_is_asked_again_without_replanning(self):
+        broken = text(json.dumps({"analysis": "Let's output.", "order_id": ORDER}))   # no action, route or reason
+        self.llm.push("supervisor", triage(), text("Here you go.")).push(
+            "specialist", plan(("get_returns_for_order", {"order_id": ORDER})), broken, STATUS_DRAFT).push(
+            "approver", verdict())
+        result = self.run_flow(strategy="plan_and_execute")
+        self.assertEqual(result["ticket_status"], "resolved")
+        self.assertEqual([item["tool"] for item in result["evidence"]], ["get_returns_for_order", "route"])  # ran once
+        self.assertEqual(result["trace"].of_kind("json_retry")[0]["role"], "specialist")
+        self.assertEqual(result["trace"].of_kind("plan_rejected"), [])
+
+    def test_plan_with_unknown_tools_is_rejected(self):
         bad = text(json.dumps({"calls": [{"name": "ticket_state", "arguments": {}}]}))
         self.cfg["limits"]["max_replans"] = 0
         self.llm.push("supervisor", triage(), text("A specialist will review it.")).push(

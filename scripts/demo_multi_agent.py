@@ -118,7 +118,9 @@ def show_event(event: dict[str, Any]) -> None:
     elif kind == "node_start" and event.get("node") in NODE_TITLES:
         st.markdown(f"#### {NODE_TITLES[event['node']]}")
     elif kind == "triage":
-        st.markdown(f"**Intent:** {event['intent']} · **specialist:** {event['specialist'] or 'none'} · "
+        specialists = " + ".join(task["specialist"].replace("_", " ") for task in event.get("tasks") or []) \
+            or (event["specialist"] or "none")
+        st.markdown(f"**Intent:** {event['intent']} · **specialist:** {specialists} · "
                     f"**urgency:** {event['urgency']} · **confidence:** {event['confidence']:.2f}"
                     + (" · **wants a human**" if event.get("wants_human") else ""))
     elif kind == "llm_response" and event.get("reasoning"):
@@ -127,6 +129,8 @@ def show_event(event: dict[str, Any]) -> None:
     elif kind == "plan":
         st.markdown("**Plan:** " + " → ".join(f"`{name}`" for name, _ in event["calls"]) if event["calls"]
                     else "**Plan:** no calls needed")
+    elif kind == "plan_route_dropped":
+        st.caption("The plan included the route tool; dropped (the proposal comes after the plan runs)")
     elif kind == "plan_rejected":
         st.warning(f"Plan rejected: {event['reason']}")
     elif kind == "tool_call_requested":
@@ -149,6 +153,22 @@ def show_event(event: dict[str, Any]) -> None:
             st.error(f"Write refused: {result.get('reason')}")
     elif kind == "order_id_filled":
         st.caption(f"The proposal named no order, so the one looked up ({event['order_id']}) was checked")
+    elif kind == "orchestrator_step":
+        if event["action"] == "delegate":
+            st.markdown(f"#### Supervisor · next step: {event['specialist'].replace('_', ' ')}")
+            st.caption(f"{event['request']} ({event['reason']})")
+        else:
+            st.markdown("#### Supervisor · finish")
+            st.caption(event["reason"])
+    elif kind == "orchestrator_refused":
+        st.warning(f"Delegation refused: {event['reason']}")
+    elif kind == "orchestration_limit":
+        st.warning(f"Orchestration stopped after {event['steps']} steps")
+    elif kind == "part_start":
+        st.markdown(f"### Part {event['part']} of {event['of']}: {event['request'] or 'the whole message'}")
+    elif kind == "part_done":
+        st.caption(f"Part {event['part']} ({event['specialist'].replace('_', ' ')}) ended: {event['status']}; "
+                   "on to the next part")
     elif kind == "off_topic":
         st.info("Not a support request: replying with what we can help with (no specialist, no handoff)")
     elif kind == "missing_record":
@@ -170,17 +190,27 @@ def show_event(event: dict[str, Any]) -> None:
 # ---------------------------------------------------------------- outcome
 
 
+def proposal_row(proposal: dict[str, Any], minimum: dict[str, Any] | None, status: str | None = None) -> dict[str, Any]:
+    return {
+        "specialist": proposal["specialist"], **({"part ended": status} if status else {}),
+        "action": proposal["action"], "order": proposal.get("order_id"), "amount": proposal.get("amount"),
+        "items": ", ".join(f"{line['item_id']} ×{line['quantity']}" for line in proposal.get("items", [])),
+        "route": proposal["route"], "rules minimum": minimum["route"] if minimum else None,
+        "cited": ", ".join(proposal.get("cited_clauses", [])), "reason": proposal["reason"],
+    }
+
+
 def show_outcome(response: dict[str, Any]) -> None:
-    proposal, minimum = response.get("proposal"), response.get("min_route")
-    if proposal:
+    parts = response.get("parts") or []
+    if len(parts) > 1:
+        st.markdown("**Proposals, one per part**")
+        st.dataframe([proposal_row(part["proposal"], part.get("min_route"), part["status"]) if part.get("proposal")
+                      else {"specialist": part["specialist"], "part ended": part["status"],
+                            "reason": part.get("handoff_reason") or part.get("customer_question")}
+                      for part in parts], hide_index=True, width="stretch")
+    elif proposal := response.get("proposal"):
         st.markdown("**Proposal**")
-        st.dataframe([{
-            "specialist": proposal["specialist"], "action": proposal["action"],
-            "order": proposal.get("order_id"), "amount": proposal.get("amount"),
-            "items": ", ".join(f"{line['item_id']} ×{line['quantity']}" for line in proposal.get("items", [])),
-            "route": proposal["route"], "rules minimum": minimum["route"] if minimum else None,
-            "cited": ", ".join(proposal.get("cited_clauses", [])), "reason": proposal["reason"],
-        }], hide_index=True, width="stretch")
+        st.dataframe([proposal_row(proposal, response.get("min_route"))], hide_index=True, width="stretch")
     if response.get("audit_log"):
         st.markdown("**Audit log**")
         st.dataframe([{
@@ -195,7 +225,8 @@ def show_outcome(response: dict[str, Any]) -> None:
 
 def summary(response: dict[str, Any]) -> str:
     trace = response["trace"]
-    return (f"What the agents did · {response['strategy']} · {trace['tool_call_count']} tools · "
+    return (f"What the agents did · supervisor {response.get('orchestration', response['strategy'])} · "
+            f"specialists {response['strategy']} · {trace['tool_call_count']} tools · "
             f"{trace['llm_calls']} LLM calls · ${trace['cost_usd']:.4f} · {trace['elapsed_s']:.1f}s")
 
 
@@ -244,8 +275,13 @@ with st.sidebar:
         info = {"default_strategy": "react"}
         st.error(str(exc))
     default = info.get("default_strategy", "react")
-    strategy = st.radio("Specialist strategy", STRATEGIES,
-                        index=STRATEGIES.index(default) if default in STRATEGIES else 0)
+    default_orchestration = info.get("default_orchestration", default)
+    orchestration = st.radio("Supervisor (orchestration)", STRATEGIES,
+                             index=STRATEGIES.index(default_orchestration) if default_orchestration in STRATEGIES else 0,
+                             help="react: picks each part after seeing the last result. plan_and_execute: "
+                                  "plans every part at triage.")
+    strategy = st.radio("Specialists", STRATEGIES, index=STRATEGIES.index(default) if default in STRATEGIES else 0,
+                        help="react: one tool call per turn. plan_and_execute: plan the calls, then run them.")
     st.button("New ticket", on_click=new_ticket, width="stretch")
     st.caption(f"Ticket: {st.session_state.ticket_id or 'new'} · {len(st.session_state.history)} turns sent as history")
     st.caption("Return windows are counted from today: try orders delivered in the last 30 days, "
@@ -257,7 +293,8 @@ for index, exchange in enumerate(exchanges):
 
 if message := st.chat_input("Write as the customer, e.g. One bottle in ORD-2026-00031 arrived dented."):
     exchange: dict[str, Any] = {"message": message}
-    payload = {"customer_message": message, "strategy": strategy, "history": st.session_state.history}
+    payload = {"customer_message": message, "strategy": strategy, "orchestration": orchestration,
+               "history": st.session_state.history}
     if st.session_state.ticket_id:
         payload["ticket_id"] = st.session_state.ticket_id
     with st.chat_message("user"):

@@ -6,7 +6,7 @@ validation failures go back to the agent as errors, never into a write.
 """
 from __future__ import annotations
 
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
@@ -29,17 +29,53 @@ class AgentOutput(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
+class Task(AgentOutput):
+    """One part of the customer's message, for one specialist."""
+    specialist: Specialist
+    request: NonEmpty | None = None        # the part this specialist handles; None: the whole message
+
+
 class Triage(AgentOutput):
     """The supervisor's first read of a customer message."""
     intent: NonEmpty                       # e.g. order_status, refund_request, return_request
     urgency: Literal["low", "normal", "high"]
     language: NonEmpty                     # e.g. en
-    specialist: Specialist | None          # None: no specialist fits, so hand off
+    specialist: Specialist | None          # the first task's specialist; None: no specialist fits, so hand off
+    tasks: list[Task] = Field(default_factory=list)   # in the order the customer raised them
     duplicate_of: str | None = None        # open ticket ID this message repeats
     wants_human: bool = False              # the customer asked for a person
     off_topic: bool = False                # nothing to do with the store's support topics: redirect, no handoff
     confidence: float = Field(ge=0, le=1)
     reason: NonEmpty
+
+    @model_validator(mode="after")
+    def tasks_match_specialist(self) -> Self:
+        # `specialist` alone means one task for the whole message; with tasks, the first one leads.
+        if self.specialist is None and not self.tasks or self.off_topic:
+            self.specialist, self.tasks = None, []
+        elif not self.tasks:
+            self.tasks = [Task(specialist=self.specialist)]
+        else:
+            self.specialist = self.tasks[0].specialist
+        if len({task.specialist for task in self.tasks}) != len(self.tasks):
+            raise ValueError("list each specialist once in tasks, with everything it handles in its request")
+        return self
+
+
+class SupervisorStep(AgentOutput):
+    """The ReAct orchestrator's next move, chosen after seeing the parts done so far."""
+    action: Literal["delegate", "finish"]
+    specialist: Specialist | None = None   # delegate: who handles the next part
+    request: NonEmpty | None = None        # delegate: the part of the message it handles
+    reason: NonEmpty
+
+    @model_validator(mode="after")
+    def delegate_names_the_part(self) -> Self:
+        if self.action == "delegate" and not (self.specialist and self.request):
+            raise ValueError("delegate requires specialist and request")
+        if self.action == "finish":
+            self.specialist, self.request = None, None
+        return self
 
 
 class ItemLine(AgentOutput):
@@ -47,6 +83,10 @@ class ItemLine(AgentOutput):
     item_id: NonEmpty = Field(validation_alias=AliasChoices("item_id", "order_item_id", "id"),
                               description="The order item ID from get_items_for_order, e.g. ITM-0031-2.")
     quantity: int = Field(default=1, ge=1, description="How many units of that line come back.")
+
+
+# Keys a model may add for its own reasoning; never part of a proposal.
+REASONING_KEYS = frozenset({"analysis", "reasoning", "thinking", "thoughts", "thought"})
 
 
 class ProposalDraft(AgentOutput):
@@ -69,6 +109,21 @@ class ProposalDraft(AgentOutput):
     reason: NonEmpty = Field(description="Why this action and route, for the approver and operator.")
     customer_question: NonEmpty | None = Field(
         default=None, description="With action none: the question only the customer can answer.")
+
+    @model_validator(mode="before")
+    @classmethod
+    def tidy_model_output(cls, data: Any) -> Any:
+        """Undo three habits of models writing JSON: reasoning written into the object (gpt-oss puts its
+        analysis channel there in JSON mode on some providers), the proposal nested one level down
+        (e.g. under "proposal"), and "items": null for no items."""
+        if not isinstance(data, dict):
+            return data
+        data = {key: value for key, value in data.items() if key not in REASONING_KEYS}
+        nested = [value for value in data.values() if isinstance(value, dict) and "action" in value]
+        if "action" not in data and len(nested) == 1:
+            data = {key: value for key, value in nested[0].items() if key not in REASONING_KEYS}
+        return {key: value for key, value in data.items()
+                if not (key in {"items", "cited_clauses"} and value is None)}
 
     @model_validator(mode="after")
     def required_for_action(self) -> Self:
@@ -119,3 +174,4 @@ class HandoffPacket(AgentOutput):
     recommendation: NonEmpty
     proposal: Proposal | None = None
     min_route: dict | None = None          # the rule engine's result, when a proposal was checked
+    parts: list[dict] = Field(default_factory=list)   # a multi-part ticket: each specialist's outcome

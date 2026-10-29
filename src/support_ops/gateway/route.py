@@ -15,7 +15,7 @@ from support_ops.agents.models import SPECIALIST_ACTIONS, ProposalDraft, Proposa
 from support_ops.agents.toolbox import ExtraTool
 from support_ops.backend.postgres import PostgresReader
 from support_ops.helpers.clock import Clock
-from support_ops.policy.routing import WINDOWED, RoutingRules, at_least
+from support_ops.policy.routing import ROUTES, WINDOWED, RoutingRules, at_least
 
 # Refunds in these states never paid out, so they do not count against the order total.
 VOID_REFUND_STATUSES = {"failed", "cancelled", "rejected"}
@@ -31,8 +31,10 @@ DESCRIPTION = (
 
 class RouteTool:
     def __init__(self, reader: PostgresReader, routing: RoutingRules, clock: Clock, specialist: Specialist,
-                 returns_checked: set[str] | None = None):
+                 returns_checked: set[str] | None = None, orders_seen: list[str] | None = None):
         self.reader, self.routing, self.clock, self.specialist = reader, routing, clock, specialist
+        # Orders the specialist's read tools were called with, shared with the specialist's run.
+        self.orders_seen = orders_seen if orders_seen is not None else []
         # Orders whose existing returns and refunds the specialist has seen (via its lookup tool or a
         # rejection from here). Shared with that lookup tool for the specialist run.
         self.returns_checked = returns_checked if returns_checked is not None else set()
@@ -112,10 +114,29 @@ class RouteTool:
 
     def check(self, proposal: Proposal) -> dict[str, Any]:
         """The rule engine's minimum route for this proposal, with the order's existing requests."""
+        orders = sorted(set(self.orders_seen))
+        if proposal.action == "none" and not proposal.order_id and len(orders) > 1:
+            return self.check_each(proposal, orders)
         facts, existing = self.order_context(proposal)
         minimum = self.routing.min_route(proposal.action, proposal.amount, now=self.clock.now(),
                                          policy_exception=proposal.policy_exception, **facts)
         return {**minimum, "existing_requests": existing} if existing else minimum
+
+    def check_each(self, proposal: Proposal, orders: list[str]) -> dict[str, Any]:
+        """An answer about several orders: the strictest of their minimums, so a late shipment or a
+        pending return on any of them still counts."""
+        results = {order: self.check(proposal.model_copy(update={"order_id": order})) for order in orders}
+        strictest = max(results.values(), key=lambda minimum: ROUTES.index(minimum["route"]))
+        merged = {**strictest, "orders": orders,
+                  "reasons": [f"{order}: {reason}" for order, minimum in results.items() for reason in minimum["reasons"]],
+                  "allowed": all(minimum["allowed"] for minimum in results.values())}
+        for key in ("overdue_shipment", "pending_return", "undelivered_shipment"):
+            if any(key in minimum for minimum in results.values()):
+                merged[key] = any(minimum.get(key) for minimum in results.values())
+        existing = [request for minimum in results.values() for request in minimum.get("existing_requests", [])]
+        if existing:
+            merged["existing_requests"] = existing
+        return merged
 
     def run(self, ticket_id: str, args: dict[str, Any]) -> dict[str, Any]:
         proposal = Proposal(specialist=self.specialist, **args)
@@ -130,7 +151,8 @@ class RouteTool:
                 raise ValueError(f"refund {proposal.amount:.2f} exceeds the {paid:.2f} paid for the listed items; "
                                  "refund at most what was paid for them")
         minimum = self.check(proposal)
-        if (existing := minimum.get("existing_requests")) and proposal.order_id not in self.returns_checked:
+        if (existing := minimum.get("existing_requests")) and proposal.order_id \
+                and proposal.order_id not in self.returns_checked:
             # Deciding without knowing about a pending return or an earlier refund gets eligibility
             # wrong, so the specialist sees them once before its proposal is recorded.
             self.returns_checked.add(proposal.order_id)

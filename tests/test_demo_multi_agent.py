@@ -51,6 +51,11 @@ def scripted_turn(llm: ScriptedLLM, reply: str) -> None:
         tool_call("get_items_for_order", order_id=ORDER),
         tool_call("get_returns_for_order", order_id=ORDER),
         route,
+    ).push(
+        "orchestrator",   # react: delegate the refund, see it executed, finish
+        text(json.dumps({"action": "delegate", "specialist": "returns_refunds",
+                         "request": "Refund the dented bottle in " + ORDER, "reason": "Refund asked."})),
+        text(json.dumps({"action": "finish", "reason": "The refund part is done."})),
     ).push("approver", *[text(json.dumps({"decision": "approve", "issues": [], "reason": "Within policy."}))] * 2)
 
 

@@ -1,14 +1,21 @@
 extends: base.yaml
 # S3: multi-agent (supervisor, specialists, approver, gateway) with rag policy retrieval.
-# Set agent.strategy to react or plan_and_execute per run.
+# Two settings, each react or plan_and_execute: agent.strategy for the specialists and
+# multi_agent.orchestration for the supervisor (null: same as agent.strategy). Both can be
+# overridden per request.
 
 system: multi_agent
+llm:
+  models:
+    orchestrator: openai/gpt-oss-120b   # the supervisor's react orchestration steps
 policy:
   mode: rag
 multi_agent:
+  orchestration: null           # react: pick each part after seeing the last; plan_and_execute: plan at triage
   triage_confidence_min: 0.5   # below this, hand off rather than guess the specialist
   max_reproposals: 1           # approver rejections the specialist may fix
   max_reply_drafts: 2          # reply drafts the approver reviews before the hold reply
+  max_orchestration_steps: 4   # react: orchestrator decisions per ticket (delegations + finish)
   policy_sections:              # each specialist's policy search scope: section names in the corpus
     orders_shipping: [Orders and shipping]
     returns_refunds: [Returns and refunds]

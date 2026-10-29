@@ -13,8 +13,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from support_ops.agents.models import SPECIALIST_ACTIONS, Proposal, Specialist as SpecialistName
-from support_ops.agents.runtime import AgentContext, BudgetExceeded, parse_json
+from support_ops.agents.models import SPECIALIST_ACTIONS, Proposal, ProposalDraft, Specialist as SpecialistName
+from support_ops.agents.runtime import AgentContext, BudgetExceeded, chat_json, parse_json
 from support_ops.agents.toolbox import Toolbox
 from support_ops.helpers.llm import ChatResult, ToolCall
 
@@ -44,8 +44,11 @@ class SpecialistResult:
 
 
 class Specialist:
-    def __init__(self, name: SpecialistName, toolbox: Toolbox, ctx: AgentContext, cfg: dict[str, Any]):
+    def __init__(self, name: SpecialistName, toolbox: Toolbox, ctx: AgentContext, cfg: dict[str, Any],
+                 orders_seen: list[str] | None = None):
         self.name, self.toolbox, self.ctx, self.cfg = name, toolbox, ctx, cfg
+        # Shared with the route tool, which checks every order looked up when a proposal names none.
+        self.orders_seen = orders_seen if orders_seen is not None else []
         self.max_turns = cfg["limits"]["max_agent_steps"]
         self.max_replans = cfg["limits"].get("max_replans", 2)
 
@@ -69,6 +72,8 @@ class Specialist:
             "customer can supply a missing fact, call route with action none, route auto and customer_question. "
             "If an order or other record the customer named is not found, ask them to confirm it the same way; "
             "do not route it to a human. "
+            "If the brief has your_task, handle only that part of the message: another specialist handles "
+            "the rest, so do not propose or ask about it. "
             "Never write to the customer yourself: the supervisor writes the reply from your proposal. "
             "Never invent facts, amounts or policy terms."
         )
@@ -76,7 +81,7 @@ class Specialist:
     def run(self, ticket_id: str, brief: dict[str, Any], strategy: str) -> SpecialistResult:
         if strategy not in STRATEGIES:
             raise ValueError(f"strategy must be one of {', '.join(STRATEGIES)}")
-        result = SpecialistResult()
+        result = SpecialistResult(orders_seen=self.orders_seen)
         self.ctx.log("node_start", node="specialist", specialist=self.name, strategy=strategy)
         try:
             if strategy == "plan_and_execute":
@@ -97,7 +102,8 @@ class Specialist:
                  result: SpecialistResult) -> dict[str, Any]:
         self.ctx.budget.check()
         seen = sorted(set(result.orders_seen))
-        if name == "route" and isinstance(arguments, dict) and not arguments.get("order_id") and len(seen) == 1:
+        unnamed = name == "route" and isinstance(arguments, dict) and not arguments.get("order_id")
+        if unnamed and len(seen) == 1:
             # The case is about the one order the specialist looked up, so the rule engine checks that
             # order (e.g. for a late shipment) even when an information-only proposal leaves it out.
             arguments = {**arguments, "order_id": seen[0]}
@@ -208,20 +214,22 @@ class Specialist:
                 self._execute(ticket_id, self.ctx.next_call_id(), name, arguments, result)
                 if result.error:
                     return
-            self.ctx.budget.check()
-            reply = self.ctx.chat("specialist", [
-                {"role": "system", "content": self.system_prompt() +
-                 " The planned calls have run. Write your proposal as JSON only, matching the route tool's "
-                 "arguments: " + json.dumps(self.toolbox.argument_models["route"].model_json_schema())},
-                {"role": "user", "content": json.dumps({
-                    **brief, "evidence": result.evidence, "previous_error": previous_error}, default=str)},
-            ], json_mode=True)
+            # A malformed proposal is asked for again (retries.invalid_json) without rerunning the plan.
             try:
-                draft = parse_json(reply.content)
+                draft = chat_json(self.ctx, "specialist", [
+                    {"role": "system", "content": self.system_prompt() +
+                     " The planned calls have run. Write your proposal as one JSON object whose top-level "
+                     "fields are exactly the route tool's arguments (no analysis or other fields): "
+                     + json.dumps(self.toolbox.argument_models["route"].model_json_schema())},
+                    {"role": "user", "content": json.dumps({
+                        **brief, "evidence": result.evidence, "previous_error": previous_error}, default=str)},
+                ], ProposalDraft)
             except ValueError as exc:
                 previous_error = str(exc)
+                self.ctx.log("plan_rejected", reason=previous_error, replan=attempt + 1)
                 continue
-            value = self._execute(ticket_id, self.ctx.next_call_id(), "route", draft, result)
+            value = self._execute(ticket_id, self.ctx.next_call_id(), "route",
+                                  draft.model_dump(mode="json", exclude_defaults=True), result)
             if result.proposal is not None or result.error:
                 return
             previous_error = value.get("error")
@@ -240,6 +248,9 @@ class Specialist:
             if not isinstance(call, dict) or set(call) != {"name", "arguments"}:
                 raise ValueError("each call requires exactly name and arguments")
             if call["name"] == "route":
-                raise ValueError("route is not part of the plan")
+                # The proposal is written after the plan runs, so a planned route call is dropped rather
+                # than costing a replan.
+                self.ctx.log("plan_route_dropped", agent=self.name)
+                continue
             calls.append((call["name"], self.toolbox.validate(call["name"], call["arguments"])))
         return calls

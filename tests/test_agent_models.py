@@ -67,6 +67,19 @@ class OtherModelTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             Triage(intent="x", urgency="low", language="en", specialist=None, confidence=1.5, reason="r")
 
+    def test_triage_tasks_follow_the_specialist(self):
+        base = dict(intent="mixed", urgency="normal", language="en", confidence=0.9, reason="r")
+        one = Triage(**base, specialist="returns_refunds")
+        self.assertEqual([(task.specialist, task.request) for task in one.tasks], [("returns_refunds", None)])
+        two = Triage(**base, specialist="returns_refunds",
+                     tasks=[{"specialist": "orders_shipping", "request": "Where is ORD-1?"},
+                            {"specialist": "returns_refunds", "request": "Refund the mug in ORD-2"}])
+        self.assertEqual(two.specialist, "orders_shipping")   # the first task leads
+        self.assertEqual(Triage(**base, specialist=None, off_topic=True,
+                                tasks=[{"specialist": "orders_shipping"}]).tasks, [])
+        with self.assertRaises(ValidationError):
+            Triage(**base, specialist=None, tasks=[{"specialist": "orders_shipping"}] * 2)
+
     def test_rejection_or_escalation_must_name_an_issue(self):
         ApprovalResult(stage="reply", decision="approve", reason="Matches the executed refund.")
         for decision in ("reject", "escalate"):
