@@ -442,21 +442,88 @@ class StrategyTests(Base):
         self.assertEqual(result["ticket_status"], "awaiting_human")
         self.assertIn("no valid proposal", result["handoff_packet"]["reason"])
 
-    def test_reflexion_holds_back_a_draft_until_its_critique_is_addressed(self):
+    def specialist_trials(self):
+        """Each specialist conversation once. A trial's calls share one message list, which ScriptedLLM
+        records by reference, so a list seen again is the same trial."""
+        trials, seen = [], set()
+        for role, messages in self.llm.calls:
+            if role == "specialist" and messages[0]["content"].startswith("You are the") and id(messages) not in seen:
+                seen.add(id(messages))
+                trials.append(messages)
+        return trials
+
+    def specialist_briefs(self):
+        """The brief each trial started from (the user message after its system prompt)."""
+        return [json.loads(messages[1]["content"]) for messages in self.specialist_trials()]
+
+    def test_reflexion_reflects_on_a_failed_trial_and_retries_with_a_fresh_conversation(self):
         self.llm.push("supervisor", triage(), text("Recorded.")).push(
             "specialist",
-            route(80, "approver"),
-            text(json.dumps({"ok": False, "critique": "Amount not checked against payments."})),
-            tool_call("get_payments_for_order", order_id=ORDER),
-            route(20),
-            text(json.dumps({"ok": True, "critique": ""})),
+            tool_call("get_items_for_order", order_id=ORDER), text("I think it's fine."), text("Done."),  # trial 1 fails
+            text("I never called route; check the items, then submit a refund of the bottle's price."),  # reflection
+            route(20),                                                                                   # trial 2
         ).push("approver", verdict())
         result = self.run_flow(strategy="reflexion")
-        self.assertEqual(result["reflections"], ["Amount not checked against payments."])
-        self.assertEqual([item["tool"] for item in result["evidence"]], ["get_payments_for_order", "route"])
-        self.assertEqual((result["execution"]["amount"], result["ticket_status"]), (20, "resolved"))
-        kinds = [event["kind"] for event in result["trace"].events]
-        self.assertEqual(kinds.count("reflection"), 2)
+        lesson = "I never called route; check the items, then submit a refund of the bottle's price."
+        self.assertEqual(result["reflections"], [lesson])
+        self.assertEqual((result["ticket_status"], result["execution"]["amount"]), ("resolved", 20))
+        first, second = self.specialist_briefs()
+        self.assertNotIn("reflections_from_earlier_attempts", first)
+        self.assertEqual(second["reflections_from_earlier_attempts"], [lesson])
+        trial_one, trial_two = self.specialist_trials()
+        self.assertIn("get_items_for_order", json.dumps(trial_one))
+        self.assertNotIn("get_items_for_order", json.dumps(trial_two))   # fresh: none of trial 1's turns
+        events = result["trace"].of_kind("reflection")
+        self.assertEqual((events[0]["trial"], events[0]["failure"]), (1, "the attempt ended without a valid proposal"))
+
+    def test_an_approver_rejection_becomes_a_lesson_for_the_next_trial(self):
+        self.llm.push("supervisor", triage(), text("Recorded.")).push(
+            "specialist", route(60, "approver"),
+            text("Only one of the two items was damaged; refund one item's price, 40."), route(40, "approver"),
+        ).push("approver", verdict("reject", "Only one of two items was damaged."), verdict(), verdict())
+        result = self.run_flow(strategy="reflexion")
+        self.assertEqual((result["ticket_status"], result["execution"]["amount"]), ("resolved", 40))
+        reflection = result["trace"].of_kind("reflection")[0]
+        self.assertIn("approver rejected the proposal: Only one of two items was damaged.", reflection["failure"])
+        second = self.specialist_briefs()[-1]
+        self.assertEqual(second["reflections_from_earlier_attempts"],
+                         ["Only one of the two items was damaged; refund one item's price, 40."])
+        self.assertNotIn("approver_feedback", second)   # the lesson carries it, not the raw feedback
+
+    def test_memory_from_earlier_turns_reaches_the_first_trial_and_comes_back(self):
+        earlier = ["Lesson one.", "Lesson two.", "Lesson three.", "Lesson four."]
+        self.llm.push("supervisor", triage(), text("Recorded.")).push("specialist", route()).push("approver", verdict())
+        self.workflow = MultiAgentWorkflow(self.llm, self.cfg, reader=reader(), policy=rag_policy(), clock=Clock(NOW))
+        result = self.workflow.invoke("T1", "Refund my mug", "reflexion", reflections=earlier)
+        # Only the newest reflection_window (3) lessons go into the prompt; the memory keeps them all.
+        self.assertEqual(self.specialist_briefs()[0]["reflections_from_earlier_attempts"], earlier[-3:])
+        self.assertEqual(result["reflections"], earlier)
+
+    def test_other_strategies_ignore_the_memory(self):
+        self.llm.push("supervisor", triage(), text("Recorded.")).push("specialist", route()).push("approver", verdict())
+        self.workflow = MultiAgentWorkflow(self.llm, self.cfg, reader=reader(), policy=rag_policy(), clock=Clock(NOW))
+        self.workflow.invoke("T1", "Refund my mug", "react", reflections=["A lesson."])
+        self.assertNotIn("reflections_from_earlier_attempts", self.specialist_briefs()[0])
+
+    def test_reflexion_stops_after_max_trials(self):
+        self.cfg["multi_agent"]["max_trials"] = 2
+        self.llm.push("supervisor", triage(), text("A specialist will review it.")).push(
+            "specialist", text("hm"), text("hm"), text("Call route next time."), text("hm"), text("hm"),
+        ).push("approver", verdict())
+        result = self.run_flow(strategy="reflexion")
+        self.assertEqual(result["ticket_status"], "awaiting_human")
+        self.assertIn("no valid proposal after 2 trials", result["handoff_packet"]["reason"])
+        self.assertEqual(result["reflections"], ["Call route next time."])   # no lesson after the last trial
+
+    def test_an_outage_is_not_reflected_on(self):
+        self.cfg["multi_agent"]["retries"].update(tool_errors=0, backoff_s=0)
+        self.llm.push("supervisor", triage(), text("A specialist will review it.")).push(
+            "specialist", tool_call("get_returns_for_order", order_id=ORDER)).push("approver", verdict())
+        self.workflow = MultiAgentWorkflow(self.llm, self.cfg, reader=reader(), policy=rag_policy(), clock=Clock(NOW))
+        self.workflow.reader.returns_for_order.side_effect = RuntimeError("connection timeout")
+        result = self.workflow.invoke("T1", "Refund my mug", "reflexion")
+        self.assertEqual((result["ticket_status"], result["reflections"]), ("awaiting_human", []))
+        self.assertIn("tool execution failed", result["handoff_packet"]["reason"])
 
     def test_only_the_rag_arm_is_supported(self):
         self.cfg["policy"]["mode"] = "skills"
@@ -548,11 +615,14 @@ class ApiTests(Base):
         self.assertEqual(history[-2:], [{"role": "customer", "content": "Refund"},
                                         {"role": "agent", "content": "Recorded."}])
 
-    def test_reflexion_is_accepted_and_unknown_strategies_are_rejected(self):
-        self.llm.push("supervisor", triage(), text("Recorded.")).push(
-            "specialist", route(), text(json.dumps({"ok": True, "critique": ""}))).push("approver", verdict())
-        body = self.post("/chat", {"customer_message": "Refund", "strategy": "reflexion"}).json()
+    def test_reflexion_is_accepted_and_its_memory_round_trips(self):
+        self.llm.push("supervisor", triage(), text("Recorded.")).push("specialist", route()).push("approver", verdict())
+        body = self.post("/chat", {"customer_message": "Refund", "strategy": "reflexion",
+                                   "reflections": ["Check the payment first."]}).json()
         self.assertEqual((body["strategy"], body["ticket_status"]), ("reflexion", "resolved"))
+        self.assertEqual(body["reflections"], ["Check the payment first."])
+
+    def test_unknown_strategies_are_rejected(self):
         self.assertEqual(self.post("/chat", {"customer_message": "Hi", "strategy": "vibes"}).status_code, 422)
 
 

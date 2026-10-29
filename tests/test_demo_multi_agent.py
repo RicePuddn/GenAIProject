@@ -36,7 +36,8 @@ def reader():
 
 
 def scripted_turn(llm: ScriptedLLM, reply: str) -> None:
-    """A reflexion ticket that touches every step: triage, tools, a critique, approval, write, reply QA."""
+    """A reflexion ticket that touches every step: triage, a failed trial and its reflection, a second
+    trial with tools, approval, the write and the reply check."""
     route = tool_call("route", action="refund", order_id=ORDER, amount=32, reason_code="damaged_item",
                       cited_clauses=["REF-1"], route="approver", reason="One bottle arrived dented.")
     llm.push("guard", text("0.01")).push(
@@ -46,12 +47,11 @@ def scripted_turn(llm: ScriptedLLM, reply: str) -> None:
         text(reply),
     ).push(
         "specialist",
-        tool_call("policy", action="search", query="damaged item refund"),
-        route,
-        text(json.dumps({"ok": False, "critique": "Check the bottle's price."})),
+        text("Looks like a refund."), text("Still thinking."),            # trial 1 ends without a proposal
+        text("Check the bottle's price first."),                          # the reflection
+        tool_call("policy", query="damaged item refund"),                 # trial 2
         tool_call("get_items_for_order", order_id=ORDER),
         route,
-        text(json.dumps({"ok": True, "critique": ""})),
     ).push("approver", *[text(json.dumps({"decision": "approve", "issues": [], "reason": "Within policy."}))] * 2)
 
 
@@ -99,7 +99,11 @@ class DemoMultiAgentTests(unittest.TestCase):
                         "#### Approver · proposal check", "#### Gateway · mock write", "#### Approver · reply check"):
             self.assertIn(heading, texts)
         warnings = [element.value for element in app.warning]
-        self.assertIn("Self-review 1: Check the bottle's price.", warnings)
+        self.assertTrue(any(value.startswith("Reflection after trial 1") and "Check the bottle's price first."
+                            in value for value in warnings))
+        self.assertIn("**Reflexion trial 2** · 1 lesson(s) from memory", texts)
+        # The memory came back from the first turn and went out again with the second.
+        self.assertEqual(fake.chat_payloads[1]["reflections"], ["Check the bottle's price first."])
         successes = [element.value for element in app.success]
         self.assertTrue(any(value.startswith("Mock refund 32") for value in successes))
         self.assertIn("Resolved", successes)

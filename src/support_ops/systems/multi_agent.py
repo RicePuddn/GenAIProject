@@ -64,7 +64,8 @@ class MultiAgentState(TypedDict, total=False):
     feedback: list[str]
     reproposals: int
     evidence: list[dict[str, Any]]
-    reflections: list[str]
+    reflections: list[str]            # reflexion: the ticket's long-term memory of lessons
+    pending_failure: str | None       # reflexion: why the last trial failed, still to reflect on
     execution: dict[str, Any] | None
     customer_question: str | None
     handoff_reason: str | None
@@ -111,7 +112,9 @@ class MultiAgentWorkflow:
     # ------------------------------------------------------------- run
 
     def invoke(self, ticket_id: str, customer_message: str, strategy: str | None = None,
-               tracer: Tracer | None = None, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
+               tracer: Tracer | None = None, history: list[dict[str, str]] | None = None,
+               reflections: list[str] | None = None) -> dict[str, Any]:
+        """Run one turn. `reflections` is the ticket's reflexion memory from earlier turns."""
         selected = strategy or self.cfg.get("agent", {}).get("strategy", "react")
         if selected not in STRATEGIES:
             raise ValueError(f"strategy must be one of {', '.join(STRATEGIES)}")
@@ -126,7 +129,8 @@ class MultiAgentWorkflow:
         state = self.graph.invoke({
             "ticket_id": ticket_id, "customer_message": customer_message, "history": history,
             "strategy": selected, "triage": None, "proposal": None, "min_route": None, "approval": None,
-            "feedback": [], "reproposals": 0, "evidence": [], "reflections": [], "execution": None,
+            "feedback": [], "reproposals": 0, "evidence": [], "reflections": list(reflections or []),
+            "pending_failure": None, "execution": None,
             "customer_question": None, "handoff_reason": None, "handoff_packet": None,
         }, {"recursion_limit": 40})
         status = self.flow.status(ticket_id)
@@ -205,11 +209,19 @@ class MultiAgentWorkflow:
         self._check_sections(name, sections)
         toolbox = Toolbox(self.tools, reads, {"policy": policy_search_tool(self.tools, sections),
                                               "route": route.as_tool()})
-        result = Specialist(name, toolbox, self.ctx, self.cfg).run(
-            state["ticket_id"], self._brief(state), state["strategy"])
+        specialist = Specialist(name, toolbox, self.ctx, self.cfg)
+        brief, memory = self._brief(state), list(state["reflections"])
+        if state["strategy"] == "reflexion":
+            # The trial before was rejected by the approver: reflect on it first. The lesson replaces the
+            # raw feedback, and the new trial starts with a fresh conversation.
+            brief.pop("approver_feedback", None)
+            if state.get("pending_failure"):
+                memory.append(specialist.reflect(brief, state["evidence"], state.get("proposal"),
+                                                 state["pending_failure"], memory, trial=state["reproposals"]))
+        result = specialist.run(state["ticket_id"], brief, state["strategy"], memory=memory)
         update: dict[str, Any] = {
             "evidence": [*state["evidence"], *result.evidence],
-            "reflections": [*state["reflections"], *result.reflections],
+            "reflections": [*memory, *result.reflections], "pending_failure": None,
             "proposal": result.proposal, "min_route": result.min_route,
         }
         if result.error:
@@ -245,6 +257,7 @@ class MultiAgentWorkflow:
             if approval.decision == "reject" and state["reproposals"] < self.settings["max_reproposals"]:
                 self.flow.transition(ticket_id, "triaged", reason="approver rejected the proposal")
                 return {"approval": approval, "feedback": approval.issues,
+                        "pending_failure": f"the approver rejected the proposal: {'; '.join(approval.issues)}",
                         "reproposals": state["reproposals"] + 1, "next": "specialist"}
             if approval.decision != "approve":
                 return {"approval": approval,
