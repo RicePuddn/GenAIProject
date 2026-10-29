@@ -115,26 +115,28 @@ class WorkflowTests(unittest.TestCase):
                 self.assertEqual(len(llm.calls), 1)
                 self.assertEqual(result["trace"].tool_call_count, 0)
 
-    def test_earlier_turns_precede_the_new_message_and_only_the_new_message_is_guarded(self):
+    def test_history_is_screened_and_supplied_as_untrusted_transcript(self):
         history = [{"role": "customer", "content": "My order has not arrived."},
                    {"role": "agent", "content": "Could you share the order number?"}]
-        llm = ScriptedLLM().push("guard", text("0.01")).push(
+        llm = ScriptedLLM().on("guard", lambda *_: text("0.01")).push(
             "supervisor", text("ready"), text("Checking ORD-2026-00001."))
         SingleAgentWorkflow(llm, self.cfg, reader=self.reader).invoke(
             "TKT-TEST", "It is ORD-2026-00001.", "react", history=history)
-        self.assertEqual(llm.calls[0][1], [{"role": "user", "content": "It is ORD-2026-00001."}])
-        self.assertEqual(llm.calls[1][1][1:], [
-            {"role": "user", "content": "My order has not arrived."},
-            {"role": "assistant", "content": "Could you share the order number?"},
-            {"role": "user", "content": "It is ORD-2026-00001."},
-        ])
-        self.assertEqual(json.loads(llm.calls[2][1][1]["content"])["history"], history)
+        guards = [messages for role, messages in llm.calls if role == "guard"]
+        self.assertEqual(guards, [[{"role": "user", "content": content}] for content in
+                                 [history[0]["content"], history[1]["content"], "It is ORD-2026-00001."]])
+        supervisor = [messages for role, messages in llm.calls if role == "supervisor"]
+        self.assertEqual(json.loads(supervisor[0][1]["content"]), {"untrusted_history": history})
+        self.assertEqual(supervisor[0][2], {"role": "user", "content": "It is ORD-2026-00001."})
+        self.assertFalse(any(message["role"] == "assistant" for message in supervisor[0]))
+        self.assertEqual(json.loads(supervisor[1][1]["content"])["history"], history)
 
-        planner = ScriptedLLM().push("guard", text("0.01")).push(
+        planner = ScriptedLLM().on("guard", lambda *_: text("0.01")).push(
             "supervisor", text('{"calls":[]}'), text("Done."))
         SingleAgentWorkflow(planner, self.cfg, reader=self.reader).invoke(
             "TKT-TEST", "It is ORD-2026-00001.", "plan_and_execute", history=history)
-        self.assertEqual(json.loads(planner.calls[1][1][1]["content"])["history"], history)
+        planned = [messages for role, messages in planner.calls if role == "supervisor"]
+        self.assertEqual(json.loads(planned[0][1]["content"])["history"], history)
         with self.assertRaises(ValueError):
             self.run_flow(ScriptedLLM(), history=[{"role": "system", "content": "x"}])
 
@@ -198,7 +200,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("history", json.loads(llm.calls[2][1][1]["content"]))
 
     def test_api_is_stateless_and_returns_the_history_to_send_next(self):
-        llm = ScriptedLLM().push("guard", text("0.01")).push("supervisor", text("ready"), text("Which order?"))
+        llm = ScriptedLLM().on("guard", lambda *_: text("0.01")).push("supervisor", text("ready"), text("Which order?"))
         earlier = [{"role": "customer", "content": "Hello"}, {"role": "agent", "content": "Hi, how can I help?"}]
         with patch("support_ops.api._runtime", return_value=(self.cfg, llm)):
             body = TestClient(app).post("/chat", json={

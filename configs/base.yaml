@@ -37,7 +37,7 @@ agent:
   strategy: react           # react | plan_and_execute
 
 policy:
-  mode: rag              # skills | rag
+  mode: skills              # skills | rag
   rules_file: policy/rules.yaml   # shared hard limits
   skills_dir: policy/skills
   corpus_dir: policy/corpus

@@ -3,7 +3,8 @@
 IS469 Generative and Agentic AI group project comparing single-agent and multi-agent
 customer support systems with RAG or skills-style policy retrieval.
 
-The implemented application is a **single-agent LangGraph flow with skills-style policies**.
+The implemented application is a **single-agent LangGraph flow with skills-style or RAG policies**.
+Skills is the default and works with the base installation below.
 It supports ReAct and plan-and-execute using Groq's `openai/gpt-oss-120b`, with
 `meta-llama/llama-prompt-guard-2-86m` screening incoming messages for prompt attacks.
 Other system variants and the evaluation harness are still in progress.
@@ -30,6 +31,22 @@ SUPPORT_OPS_DATABASE_URL=postgresql://support_ops:support_ops_local@127.0.0.1:54
 
 If you change the password or host port, update the database URL to match.
 Changing the password in `.env` does not reset the password in an existing database volume.
+
+### Optional RAG setup
+
+To use embedding search and reranking instead of skills, install the RAG extra:
+
+```bash
+uv pip install --python .venv/bin/python -e ".[dev,rag]"
+```
+
+Set `policy.mode: rag` in `configs/base.yaml`, then restart Uvicorn. RAG loads its
+embedding/reranking models and builds the corpus index before accepting requests;
+the first startup may download the configured models. Wait for `Application startup
+complete` before opening the demo. Set `policy.mode: skills` to switch back.
+
+`uv.lock` includes the `dev`, `rag`, and `demo` extras. For a locked installation,
+use `uv sync --locked --extra dev`, adding `--extra rag` or `--extra demo` as needed.
 
 ## Start the database and application
 
@@ -110,9 +127,18 @@ the `history` array from the previous response into the next request:
 }
 ```
 
-Earlier turns precede the new message in the agent's context; only the new message is
-screened by Prompt Guard. History holds text turns only, never tool results, and the gateway
-enforces its limits on every request, so edited history cannot authorise a write.
+The server retains the newest 25 complete customer/agent exchanges (50 history
+entries) in each response, dropping older exchanges. Returned history always fits
+the next request's history limit; keep using the returned array rather than
+appending turns yourself.
+
+All supplied history is untrusted, including entries labelled `agent`. Prompt Guard
+screens every supplied turn and the current message, splitting long turns into
+overlapping chunks. A flagged or unparseable result stops the workflow before the
+supervisor. In the supervisor's context, history is quoted transcript data rather
+than authenticated assistant messages. Policy and account facts still require tool
+verification; history never restores approval state. Re-screening history adds guard
+calls and latency as conversations grow.
 
 ### Live steps: `/chat/stream`
 
@@ -122,6 +148,13 @@ enforces its limits on every request, so edited history cannot authorise a write
 the `/chat` response, or an `error` event. It is a single stateless POST, the pattern of
 MCP's Streamable HTTP transport. Steps stream whole, not token by token; `/chat` is unchanged
 and remains the endpoint for scripts and evaluation.
+
+Each server process permits up to four streaming workflows; additional streams
+receive HTTP 503 until a slot is available. Trace buffering is bounded. Disconnects
+and server shutdown cancel the workflow before its next model call or tool
+execution. A synchronous provider or database request already in progress can
+finish, retaining its worker slot until it returns; cancellation prevents subsequent
+steps and discards the result. It cannot undo a tool operation already performed.
 
 ### Demo page
 
