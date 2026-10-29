@@ -24,7 +24,8 @@ def verified_facts(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def customer_outcome(*, status: str, evidence: list[dict[str, Any]], proposal: Proposal | None,
                      execution: dict[str, Any] | None, min_route: dict[str, Any] | None,
-                     customer_question: str | None, currency: str, off_topic: bool = False) -> dict[str, Any]:
+                     customer_question: str | None, currency: str, off_topic: bool = False,
+                     unfound_record: str | None = None) -> dict[str, Any]:
     facts = verified_facts(evidence)
     names = {item["id"]: item.get("name") for fact in facts if fact["tool"] == "get_items_for_order"
              for item in fact["result"].get("items", [])}
@@ -53,22 +54,28 @@ def customer_outcome(*, status: str, evidence: list[dict[str, Any]], proposal: P
         if request.get("kind") == "return" and request.get("awaiting_the_store"):
             problems.append(f"The return the customer requested on {request['requested']} has not been "
                             "processed by the store yet.")
+    if unfound_record:
+        # The customer already confirmed it, so asking them to check again would go round in circles.
+        problems.append(f"The customer confirmed {unfound_record}, but it is not in our records. Do not ask "
+                        "them to check it again.")
     if problems:
         outcome["problems"] = problems
     outcome["tell_customer"] = (OFF_TOPIC if off_topic else
-                                _tell_customer(outcome["status"], bool(facts), executed, proposal, customer_question))
+                                _tell_customer(outcome["status"], bool(facts), executed, proposal, customer_question,
+                                               bool(problems)))
     return outcome
 
 
 def _tell_customer(status: str, has_facts: bool, executed: bool, proposal: Proposal | None,
-                   customer_question: str | None) -> str:
+                   customer_question: str | None, has_problems: bool = False) -> str:
     if status == "awaiting_human" and has_facts:
         return ("Share what the facts show that answers the customer (e.g. the current status and "
                 "estimated dates). Acknowledge every item in problems, if any, and apologise; likewise "
                 "anything else that has gone wrong, such as a damaged item. Then say a support specialist "
                 "will review the request and follow up. Promise no outcome, refund, compensation or timeline.")
     if status == "awaiting_human":
-        return "A support specialist will review the request. Promise nothing else."
+        hold = "A support specialist will review the request. Promise nothing else."
+        return f"Acknowledge every item in problems and apologise. {hold}" if has_problems else hold
     if status == "awaiting_customer":
         return f"Ask: {customer_question}"
     if executed:

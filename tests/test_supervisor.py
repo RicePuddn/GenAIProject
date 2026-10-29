@@ -68,8 +68,18 @@ class MissingRecordTests(unittest.TestCase):
         from support_ops.supervisor.escalation import customer_insists
 
         history = [{"role": "customer", "content": "It's ORD-9"}, {"role": "agent", "content": "ORD-9 not found"}]
-        self.assertTrue(customer_insists(history, "ORD-9"))
-        self.assertFalse(customer_insists(history[1:], "ORD-9"))   # only the agent mentioned it
+        self.assertTrue(customer_insists(history, "Yes, ORD-9 is right", "ORD-9"))
+        self.assertTrue(customer_insists(history, "it's ord ‑ 9", "ORD-9"))   # dash, case and spacing vary
+        self.assertFalse(customer_insists(history[1:], "ORD-9", "ORD-9"))   # only the agent mentioned it
+        # A different number now: a new question, even if the specialist re-checked the old ID.
+        self.assertFalse(customer_insists(history, "Sorry, it's ORD-90", "ORD-9"))
+
+    def test_the_question_names_the_id_the_customer_just_gave(self):
+        from support_ops.supervisor.escalation import confirm_question
+
+        missing = [("order", "ORD-000042"), ("order", "ORD-00042")]
+        self.assertIn("ORD-00042.", confirm_question(missing, "ORD‑00042"))
+        self.assertIn("ORD-000042.", confirm_question(missing))
 
 
 class OutcomeTests(unittest.TestCase):
@@ -100,6 +110,13 @@ class OutcomeTests(unittest.TestCase):
         result = outcome(status="awaiting_human", execution=None, min_route={"overdue_shipment": True})
         self.assertEqual(result["problems"], ["The shipment is past its estimated delivery date."])
         self.assertNotIn("problems", outcome())
+
+    def test_a_confirmed_missing_record_is_not_asked_about_again(self):
+        result = outcome(status="awaiting_human", execution=None, proposal=None, evidence=[],
+                         unfound_record="order ORD-9")
+        self.assertIn("confirmed order ORD-9", result["problems"][0])
+        self.assertIn("do not ask them to check it again", result["problems"][0].lower())
+        self.assertIn("acknowledge every item in problems", result["tell_customer"].lower())
 
 
 if __name__ == "__main__":

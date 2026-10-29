@@ -301,6 +301,21 @@ class RouteTests(Base):
         self.assertEqual(result["ticket_status"], "awaiting_human")
         self.assertEqual(result["handoff_packet"]["reason"], "the customer confirmed order ORD-NOPE, but it cannot be found")
 
+    def test_a_new_id_that_is_also_missing_gets_another_question(self):
+        # The specialist re-checks the old ID from history, but the customer sent a different one.
+        history = [{"role": "customer", "content": "ORD‑000042"},
+                   {"role": "agent", "content": "Could you provide the exact order ID?"}]
+        self.llm.on("guard", lambda messages, tools: text("0.01")).push(
+            "supervisor", triage(), text("We couldn't find ORD-00042 either. Could you check it?")).push(
+            "specialist", tool_call("read_record", kind="orders", record_id="ORD-000042"),
+            tool_call("read_record", kind="orders", record_id="ORD-00042"),
+            tool_call("route", action="none", route="human", reason="Neither order exists.")).push(
+            "approver", verdict())
+        self.workflow = MultiAgentWorkflow(self.llm, self.cfg, reader=reader(), policy=rag_policy(), clock=Clock(NOW))
+        result = self.workflow.invoke("T1", "ORD‑00042", "react", history=history)
+        self.assertEqual((result["ticket_status"], result["handoff_packet"]), ("awaiting_customer", None))
+        self.assertIn("order ORD-00042.", result["trace"].of_kind("missing_record")[0]["question"])
+
     def test_a_human_route_is_not_bypassed_by_also_asking_the_customer_something(self):
         self.llm.push("supervisor", triage(), text("A specialist will follow up.")).push(
             "specialist", tool_call("route", action="none", route="human", reason="Needs a person.",

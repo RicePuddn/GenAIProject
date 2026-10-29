@@ -37,7 +37,8 @@ from support_ops.policy.routing import RoutingRules
 from support_ops.policy.rules import Rules
 from support_ops.policy.rag import RagPolicy
 from support_ops.supervisor.escalation import (FIXED_REPLY_TRIGGERS, HOLD_REPLY, confirm_question, customer_insists,
-                                              handoff_packet, missing_records, triage_escalation)
+                                              handoff_packet, missing_records, plain_dashes,
+                                              triage_escalation)
 from support_ops.supervisor.outcome import customer_outcome
 from support_ops.supervisor.supervisor import Supervisor
 from support_ops.systems.tools import SupportTools
@@ -68,6 +69,7 @@ class MultiAgentState(TypedDict, total=False):
     evidence: list[dict[str, Any]]
     execution: dict[str, Any] | None
     customer_question: str | None
+    unfound_record: str | None   # e.g. "order ORD-9": the customer confirmed it, the database lacks it
     handoff_reason: str | None
     handoff_packet: dict[str, Any] | None
     reply: str
@@ -128,7 +130,7 @@ class MultiAgentWorkflow:
             "ticket_id": ticket_id, "customer_message": customer_message, "history": history,
             "strategy": selected, "triage": None, "proposal": None, "min_route": None, "approval": None,
             "feedback": [], "reproposals": 0, "evidence": [], "execution": None,
-            "customer_question": None, "handoff_reason": None, "handoff_packet": None,
+            "customer_question": None, "unfound_record": None, "handoff_reason": None, "handoff_packet": None,
         }, {"recursion_limit": 40})
         status = self.flow.status(ticket_id)
         self._event("workflow_end", status=status, llm_calls=self.tracer.llm_calls,
@@ -167,9 +169,9 @@ class MultiAgentWorkflow:
         return run
 
     def _brief(self, state: MultiAgentState) -> dict[str, Any]:
-        brief: dict[str, Any] = {"message": state["customer_message"]}
+        brief: dict[str, Any] = {"message": plain_dashes(state["customer_message"])}
         if state.get("history"):
-            brief["history"] = state["history"]
+            brief["history"] = [{**turn, "content": plain_dashes(turn["content"])} for turn in state["history"]]
         if state.get("triage"):
             brief["triage"] = state["triage"].model_dump(mode="json")
         if state.get("feedback"):
@@ -244,14 +246,17 @@ class MultiAgentWorkflow:
         nothing_else = result.error is not None or (proposal is not None and proposal.action == "none")
         if not missing or not nothing_else:
             return None
-        insisted = [(name, record_id) for name, record_id in missing if customer_insists(state["history"], record_id)]
+        message = state["customer_message"]
+        insisted = [(name, record_id) for name, record_id in missing
+                    if customer_insists(state["history"], message, record_id)]
         if insisted:
             name, record_id = insisted[0]
-            return self._to_handoff(f"the customer confirmed {name} {record_id}, but it cannot be found")
+            return {**self._to_handoff(f"the customer confirmed {name} {record_id}, but it cannot be found"),
+                    "unfound_record": f"{name} {record_id}"}
         if proposal is not None and proposal.customer_question and proposal.route != "human":
             return None   # the specialist is already asking the customer
         question = (proposal.customer_question if proposal and proposal.customer_question
-                    else confirm_question(missing))
+                    else confirm_question(missing, message))
         self._event("missing_record", records=[f"{name} {record_id}" for name, record_id in missing], question=question)
         self.flow.transition(state["ticket_id"], "awaiting_customer")
         return {"customer_question": question, "next": "reply"}
@@ -322,7 +327,8 @@ class MultiAgentWorkflow:
             status=status, evidence=state["evidence"], proposal=state.get("proposal"),
             execution=state.get("execution"), min_route=state.get("min_route"),
             customer_question=state.get("customer_question"), currency=self.routing.currency,
-            off_topic=bool(state.get("triage") and state["triage"].off_topic))
+            off_topic=bool(state.get("triage") and state["triage"].off_topic),
+            unfound_record=state.get("unfound_record"))
         brief, issues, review = self._brief(state), None, None
         try:
             for _ in range(self.settings["max_reply_drafts"]):

@@ -69,11 +69,33 @@ def missing_records(evidence: list[dict[str, Any]]) -> list[tuple[str, str]]:
     return list(dict.fromkeys(found))
 
 
-def customer_insists(history: list[dict[str, str]], record_id: str) -> bool:
-    """The customer already gave this ID in an earlier turn, so a mistyped number is unlikely."""
-    return any(turn["role"] == "customer" and record_id in turn["content"] for turn in history)
+DASHES = str.maketrans({dash: "-" for dash in "‐‑‒–—―−﹣－"})
 
 
-def confirm_question(missing: list[tuple[str, str]]) -> str:
-    name, record_id = missing[0]
+def plain_dashes(text: str) -> str:
+    """Unicode dashes (‑ – —) as "-". Models misread them inside IDs: ORD‑00042 was looked up as ORD-100042."""
+    return text.translate(DASHES)
+
+
+def _normalise(text: str) -> str:
+    """Typed IDs vary in dashes, case and stray spaces; compare them without those."""
+    return re.sub(r"\s*-\s*", "-", plain_dashes(text)).casefold()
+
+
+def mentions(text: str, record_id: str) -> bool:
+    """`text` names this whole ID: ORD-0004 is not mentioned by ORD-00042."""
+    return re.search(rf"(?<![\w-]){re.escape(_normalise(record_id))}(?![\w-])", _normalise(text)) is not None
+
+
+def customer_insists(history: list[dict[str, str]], message: str, record_id: str) -> bool:
+    """The customer gives this ID again now, after giving it in an earlier turn, so a mistyped number
+    is unlikely. A specialist re-checking an ID from history while the customer sent a new one is not."""
+    return mentions(message, record_id) and any(
+        turn["role"] == "customer" and mentions(turn["content"], record_id) for turn in history)
+
+
+def confirm_question(missing: list[tuple[str, str]], message: str = "") -> str:
+    """Ask about the ID the customer just gave, if any was missing, rather than an older one."""
+    name, record_id = next(((name, record_id) for name, record_id in missing if mentions(message, record_id)),
+                           missing[0])
     return f"We couldn't find {name} {record_id}. Could you check the number and send it again?"
