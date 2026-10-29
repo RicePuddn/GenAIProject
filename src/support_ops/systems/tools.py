@@ -64,6 +64,11 @@ class RagPolicyArguments(ToolArguments):
         return self
 
 
+class CustomerReplyArguments(ToolArguments):
+    """Send a final reply directly to the customer. This ends the tool plan."""
+    reply: NonEmpty
+
+
 class TicketArguments(ToolArguments):
     """Simulate a guarded write, record an audit event, or hand off to a human. No database mutation."""
     action: Literal["write", "handoff", "audit"]
@@ -101,6 +106,7 @@ class SupportTools:
             "get_returns_for_order": OrderArguments,
             "policy": policy.arguments,
             "ticket_state": TicketArguments,
+            "respond_to_customer": CustomerReplyArguments,
         }
         descriptions = {
             "read_record": ReadArguments.__doc__,
@@ -112,6 +118,7 @@ class SupportTools:
             "get_returns_for_order": "Get existing returns and refunds for an order ID, with their status.",
             "policy": policy.description,
             "ticket_state": TicketArguments.__doc__,
+            "respond_to_customer": CustomerReplyArguments.__doc__,
         }
         self.schemas = [
             {"type": "function", "function": {
