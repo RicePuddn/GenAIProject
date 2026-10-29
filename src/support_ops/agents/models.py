@@ -16,7 +16,8 @@ NonEmpty = Annotated[str, Field(min_length=1)]
 Specialist = Literal["orders_shipping", "returns_refunds"]
 Action = Literal["none", "refund", "return", "exchange", "order_change", "account_change"]
 WRITE_ACTIONS = {"refund", "return", "exchange", "order_change", "account_change"}
-GOODS_ACTIONS = {"return", "exchange"}   # goods come back, so the proposal names the order lines
+GOODS_ACTIONS = {"return", "exchange"}   
+ITEM_ACTIONS = GOODS_ACTIONS | {"refund"}  
 SPECIALIST_ACTIONS: dict[str, frozenset[str]] = {
     "orders_shipping": frozenset({"none", "order_change"}),
     "returns_refunds": frozenset({"none", "refund", "return", "exchange"}),
@@ -36,13 +37,13 @@ class Triage(AgentOutput):
     specialist: Specialist | None          # None: no specialist fits, so hand off
     duplicate_of: str | None = None        # open ticket ID this message repeats
     wants_human: bool = False              # the customer asked for a person
+    off_topic: bool = False                # nothing to do with the store's support topics: redirect, no handoff
     confidence: float = Field(ge=0, le=1)
     reason: NonEmpty
 
 
 class ItemLine(AgentOutput):
     """One order line coming back."""
-    # Models also write order_item_id or id; all mean the same field.
     item_id: NonEmpty = Field(validation_alias=AliasChoices("item_id", "order_item_id", "id"),
                               description="The order item ID from get_items_for_order, e.g. ITM-0031-2.")
     quantity: int = Field(default=1, ge=1, description="How many units of that line come back.")
@@ -55,8 +56,10 @@ class ProposalDraft(AgentOutput):
     order_id: NonEmpty | None = Field(default=None, description="Required for every action except none.")
     amount: float | None = Field(default=None, gt=0, allow_inf_nan=False,
                                  description="Refunds only: the amount in the order's currency.")
-    items: list[ItemLine] = Field(default_factory=list,
-                                  description="Returns and exchanges only: the order lines coming back.")
+    items: list[ItemLine] = Field(default_factory=list, description=(
+        "Returns and exchanges: the order lines coming back (required). Refunds: the order lines the "
+        "refund is for; the amount may not exceed what was paid for them. A refund without items needs "
+        "the approver."))
     reason_code: NonEmpty | None = Field(default=None, description="e.g. damaged_item, late_delivery.")
     cited_clauses: list[NonEmpty] = Field(default_factory=list,
                                           description="Clause IDs you retrieved that support the action.")
@@ -72,7 +75,7 @@ class ProposalDraft(AgentOutput):
         # Fields an action does not use are dropped rather than rejected: they change nothing.
         if self.action != "refund":
             self.amount = None
-        if self.action not in GOODS_ACTIONS:
+        if self.action not in ITEM_ACTIONS:
             self.items = []
         if self.action in WRITE_ACTIONS and not self.order_id:
             raise ValueError(f"{self.action} requires order_id")

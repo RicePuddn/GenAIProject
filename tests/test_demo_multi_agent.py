@@ -36,21 +36,20 @@ def reader():
 
 
 def scripted_turn(llm: ScriptedLLM, reply: str) -> None:
-    """A reflexion ticket that touches every step: triage, a failed trial and its reflection, a second
-    trial with tools, approval, the write and the reply check."""
+    """A ticket that touches every step: triage, specialist tools, approval, the write and the reply check."""
     route = tool_call("route", action="refund", order_id=ORDER, amount=32, reason_code="damaged_item",
-                      cited_clauses=["REF-1"], route="approver", reason="One bottle arrived dented.")
-    llm.push("guard", text("0.01")).push(
+                      items=[{"item_id": "ITM-2", "quantity": 1}], cited_clauses=["REF-1"], route="approver",
+                      reason="One bottle arrived dented.")
+    llm.push("guard", text("0.01"), text("0.01"), text("0.01")).push(
         "supervisor",
         text(json.dumps({"intent": "refund_request", "urgency": "normal", "language": "en",
                          "specialist": "returns_refunds", "confidence": 0.9, "reason": "Refund."})),
         text(reply),
     ).push(
         "specialist",
-        text("Looks like a refund."), text("Still thinking."),            # trial 1 ends without a proposal
-        text("Check the bottle's price first."),                          # the reflection
-        tool_call("policy", query="damaged item refund"),                 # trial 2
+        tool_call("policy", query="damaged item refund"),
         tool_call("get_items_for_order", order_id=ORDER),
+        tool_call("get_returns_for_order", order_id=ORDER),
         route,
     ).push("approver", *[text(json.dumps({"decision": "approve", "issues": [], "reason": "Within policy."}))] * 2)
 
@@ -85,25 +84,20 @@ class DemoMultiAgentTests(unittest.TestCase):
         with patch("urllib.request.urlopen", fake):
             app = AppTest.from_file(str(ROOT / "scripts/demo_multi_agent.py"), default_timeout=30).run()
             self.assertIn("rag", app.sidebar.markdown[0].value)
-            app.sidebar.radio[0].set_value("reflexion").run()
+            app.sidebar.radio[0].set_value("plan_and_execute").run()
+            app.sidebar.radio[0].set_value("react").run()
             app.chat_input[0].set_value("One bottle in ORD-2026-00031 arrived dented.").run()
             app.chat_input[0].set_value("Thanks!").run()
 
         self.assertFalse(app.exception)
-        self.assertEqual(fake.chat_payloads[0]["strategy"], "reflexion")
+        self.assertEqual(fake.chat_payloads[0]["strategy"], "react")
         self.assertEqual([turn["content"] for turn in fake.chat_payloads[1]["history"]],
                          ["One bottle in ORD-2026-00031 arrived dented.", "Reply 1"])
         texts = [element.value for element in app.markdown]
         self.assertIn("Reply 2", texts)
-        for heading in ("#### Supervisor · triage", "#### Specialist · returns refunds (reflexion)",
+        for heading in ("#### Supervisor · triage", "#### Specialist · returns refunds (react)",
                         "#### Approver · proposal check", "#### Gateway · mock write", "#### Approver · reply check"):
             self.assertIn(heading, texts)
-        warnings = [element.value for element in app.warning]
-        self.assertTrue(any(value.startswith("Reflection after trial 1") and "Check the bottle's price first."
-                            in value for value in warnings))
-        self.assertIn("**Reflexion trial 2** · 1 lesson(s) from memory", texts)
-        # The memory came back from the first turn and went out again with the second.
-        self.assertEqual(fake.chat_payloads[1]["reflections"], ["Check the bottle's price first."])
         successes = [element.value for element in app.success]
         self.assertTrue(any(value.startswith("Mock refund 32") for value in successes))
         self.assertIn("Resolved", successes)

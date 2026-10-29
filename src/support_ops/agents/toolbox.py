@@ -68,6 +68,19 @@ def policy_search_tool(tools: SupportTools, sections: Sequence[str] | None = Non
     return ExtraTool(PolicySearchArguments, PolicySearchArguments.__doc__, run)
 
 
+def returns_lookup_tool(tools: SupportTools, checked: set[str]) -> ExtraTool:
+    """`get_returns_for_order`, recording which orders' returns the specialist has seen, so the
+    `route` tool only shows them again for orders it has not looked at."""
+    schema = next(item["function"] for item in tools.schemas if item["function"]["name"] == "get_returns_for_order")
+
+    def run(ticket_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        result = tools.execute(ticket_id, "get_returns_for_order", args)
+        checked.add(args["order_id"])
+        return result
+
+    return ExtraTool(tools.argument_models["get_returns_for_order"], schema["description"], run)
+
+
 class Toolbox:
     def __init__(self, tools: SupportTools, names: Sequence[str], extra: dict[str, ExtraTool] | None = None):
         extra = dict(extra or {})

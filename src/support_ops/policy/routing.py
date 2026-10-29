@@ -61,6 +61,8 @@ class RoutingRules:
     return_window_days: int
     operations: dict[str, Route]
     overdue_shipment_route: Route = "human"   # information-only answers about a late shipment
+    pending_return_route: Route = "human"     # any proposal on an order whose return awaits the store
+    awaiting_shop_return_statuses: tuple[str, ...] = ("requested", "received")
 
     @classmethod
     def load(cls, path: str | Path = DEFAULT_RULES_FILE) -> RoutingRules:
@@ -73,9 +75,12 @@ class RoutingRules:
             auto_max = Decimal(str(routing["refund_auto_max_amount"]))
             window = int(routing["return_window_days"])
             overdue = str(routing.get("overdue_shipment_route", "human"))
+            pending = str(routing.get("pending_return_route", "human"))
+            awaiting = tuple(str(status) for status in routing.get("awaiting_shop_return_statuses",
+                                                                   ["requested", "received"]))
             operations = {str(name): str(route) for name, route in routing["operations"].items()}
             routing_rules = cls(rules.version, str(routing["rule_id"]), rules.currency,
-                                auto_max, rules.refund_limit, window, operations, overdue)
+                                auto_max, rules.refund_limit, window, operations, overdue, pending, awaiting)
         except (KeyError, TypeError, ValueError, AttributeError, InvalidOperation) as exc:
             raise ValueError(f"invalid routing rules in {path}: {exc!r}") from exc
         if not auto_max.is_finite() or not 0 < auto_max <= rules.refund_limit:
@@ -85,8 +90,9 @@ class RoutingRules:
             raise ValueError(f"invalid routing rules in {path}: return_window_days must not be negative")
         if unknown := sorted(set(operations) - set(OPERATIONS)):
             raise ValueError(f"invalid routing rules in {path}: unknown operations {unknown}")
-        if routing_rules.overdue_shipment_route not in ROUTES:
-            raise ValueError(f"invalid routing rules in {path}: unknown overdue_shipment_route")
+        for key in ("overdue_shipment_route", "pending_return_route"):
+            if getattr(routing_rules, key) not in ROUTES:
+                raise ValueError(f"invalid routing rules in {path}: unknown {key}")
         if bad := sorted(name for name, route in operations.items() if route not in ROUTES):
             raise ValueError(f"invalid routing rules in {path}: unknown routes for {bad}")
         return routing_rules
@@ -94,7 +100,8 @@ class RoutingRules:
     def min_route(self, operation: str, amount: Any = None, *, order_total: Any = None,
                   refunded_to_date: Any = 0, goods_value: Any = None, delivered_at: datetime | None = None,
                   now: datetime | None = None, policy_exception: bool = False,
-                  overdue_shipment: bool = False) -> dict[str, Any]:
+                  overdue_shipment: bool = False, undelivered_shipment: bool = False,
+                  pending_return: bool = False, return_requested_at: datetime | None = None) -> dict[str, Any]:
         """The loosest route this proposal may take. `allowed: False` means the backend
         will refuse the write whatever the route, so the case goes to a human."""
         result: dict[str, Any] = {
@@ -125,6 +132,18 @@ class RoutingRules:
                 if value > remaining:
                     allowed = False
                     raise_to("human", "refund exceeds the order total less earlier refunds")
+            if goods_value is None:
+                # Without the lines it is for, nothing compares the amount with what those items cost.
+                raise_to("approver", "the refund names no order items, so its amount is not checked against them")
+            elif value > _amount(goods_value, "goods value"):
+                allowed = False
+                raise_to("human", "refund exceeds what was paid for the listed items")
+            if undelivered_shipment:
+                # Shipped but not delivered: the parcel may still arrive, or the claim may be wrong.
+                raise_to("approver", "refund on a shipped order that has not been delivered")
+                if overdue_shipment:
+                    raise_to("human", "refund for a shipped parcel past its estimated delivery date; "
+                                      "investigate first")
         elif operation in {"return", "exchange"} and (goods_value is not None or order_total is not None):
             # Goods coming back usually become a refund, so they use the refund value tiers. Without
             # the value of the lines coming back, the whole order is assumed.
@@ -140,13 +159,21 @@ class RoutingRules:
                 # A refund on an undelivered (e.g. cancelled) order has no window to check.
                 if operation != "refund":
                     raise_to("human", "no delivery date to check the return window against")
-            elif now is not None and (now - delivered_at).days > self.return_window_days:
-                raise_to("human", f"more than {self.return_window_days} days after delivery")
+            else:
+                # The window closes when the customer asks: a return requested in time stays in time,
+                # however long the store takes to process it.
+                asked = return_requested_at or now
+                if asked is not None and (asked - delivered_at).days > self.return_window_days:
+                    raise_to("human", f"more than {self.return_window_days} days after delivery")
 
+        if pending_return:
+            # The customer did their part; the store has not, so a person decides what happens now.
+            raise_to(self.pending_return_route, "a return the customer raised has not been processed by the store")
         if overdue_shipment and operation == "none":
             # Only when the answer is just "it is late": a proposed remedy (refund, cancellation...)
             # keeps its own tiers. The flag below still lets the reply acknowledge the delay.
             raise_to(self.overdue_shipment_route, "a shipment is past its estimated delivery date")
         if policy_exception:
             raise_to("approver", "the proposal relies on a policy exception")
-        return {**result, "route": route, "allowed": allowed, "overdue_shipment": overdue_shipment}
+        return {**result, "route": route, "allowed": allowed, "overdue_shipment": overdue_shipment,
+                "pending_return": pending_return}

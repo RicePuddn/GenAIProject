@@ -9,6 +9,9 @@ from typing import Any
 
 from support_ops.agents.models import Proposal
 
+OFF_TOPIC = ("The message is not about the store. Do not answer it. Briefly say you can help with orders, "
+             "shipments, items, payments, returns, refunds and the store's support policies, and invite a "
+             "question about those.")
 # Ticket states that end the turn resolved, as the customer sees them.
 RESOLVED_STATES = {"approved": "resolved", "executed": "resolved"}
 
@@ -21,7 +24,7 @@ def verified_facts(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def customer_outcome(*, status: str, evidence: list[dict[str, Any]], proposal: Proposal | None,
                      execution: dict[str, Any] | None, min_route: dict[str, Any] | None,
-                     customer_question: str | None, currency: str) -> dict[str, Any]:
+                     customer_question: str | None, currency: str, off_topic: bool = False) -> dict[str, Any]:
     facts = verified_facts(evidence)
     names = {item["id"]: item.get("name") for fact in facts if fact["tool"] == "get_items_for_order"
              for item in fact["result"].get("items", [])}
@@ -38,10 +41,22 @@ def customer_outcome(*, status: str, evidence: list[dict[str, Any]], proposal: P
     if proposal:
         # What the specialist found, e.g. that a shipment is past its estimated date.
         outcome["specialist_finding"] = proposal.reason
+    if existing := (min_route or {}).get("existing_requests"):
+        # Earlier returns and refunds on this order, in customer terms (no internal IDs).
+        outcome["existing_requests"] = [{key: value for key, value in request.items() if key != "id" and value}
+                                        for request in existing]
+    # Found by code from the records, so the apology does not depend on the model noticing them.
+    problems = []
     if (min_route or {}).get("overdue_shipment"):
-        # Found by code from the shipment dates, so the apology does not depend on the model's arithmetic.
-        outcome["problems"] = ["The shipment is past its estimated delivery date."]
-    outcome["tell_customer"] = _tell_customer(outcome["status"], bool(facts), executed, proposal, customer_question)
+        problems.append("The shipment is past its estimated delivery date.")
+    for request in (min_route or {}).get("existing_requests") or []:
+        if request.get("kind") == "return" and request.get("awaiting_the_store"):
+            problems.append(f"The return the customer requested on {request['requested']} has not been "
+                            "processed by the store yet.")
+    if problems:
+        outcome["problems"] = problems
+    outcome["tell_customer"] = (OFF_TOPIC if off_topic else
+                                _tell_customer(outcome["status"], bool(facts), executed, proposal, customer_question))
     return outcome
 
 

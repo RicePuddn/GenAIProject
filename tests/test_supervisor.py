@@ -25,6 +25,8 @@ def outcome(**overrides):
 class EscalationTests(unittest.TestCase):
     def test_triage_triggers_in_order_and_none_when_clear(self):
         self.assertIsNone(triage_escalation(Triage(**TRIAGE), 0.5))
+        # Off topic is not a handoff, even with no specialist; asking for a person still is.
+        self.assertIsNone(triage_escalation(Triage(**{**TRIAGE, "specialist": None, "off_topic": True}), 0.5))
         cases = {"customer asked for a human": {"wants_human": True, "duplicate_of": "T0"},
                  "duplicate of open ticket T0": {"duplicate_of": "T0"},
                  "no specialist covers this request": {"specialist": None},
@@ -50,6 +52,26 @@ class EscalationTests(unittest.TestCase):
         self.assertIn("stopped before a proposal", packet.recommendation)
 
 
+class MissingRecordTests(unittest.TestCase):
+    def test_missing_records_come_from_lookups_and_route_errors_once_each(self):
+        from support_ops.supervisor.escalation import missing_records
+
+        evidence = [
+            {"tool": "read_record", "result": {"not_found": True, "kind": "orders", "id": "ORD-9"}},
+            {"tool": "route", "result": {"error": "order ORD-9 not found: ask the customer to confirm"}},
+            {"tool": "read_record", "result": {"not_found": True, "kind": "payments", "id": "PAY-9"}},
+            {"tool": "read_record", "result": {"id": "ORD-1", "total": 5}},
+        ]
+        self.assertEqual(missing_records(evidence), [("order", "ORD-9"), ("payment", "PAY-9")])
+
+    def test_insisting_means_the_same_id_in_an_earlier_customer_turn(self):
+        from support_ops.supervisor.escalation import customer_insists
+
+        history = [{"role": "customer", "content": "It's ORD-9"}, {"role": "agent", "content": "ORD-9 not found"}]
+        self.assertTrue(customer_insists(history, "ORD-9"))
+        self.assertFalse(customer_insists(history[1:], "ORD-9"))   # only the agent mentioned it
+
+
 class OutcomeTests(unittest.TestCase):
     def test_facts_leave_out_the_route_and_failed_calls(self):
         self.assertEqual([fact["tool"] for fact in verified_facts([ITEMS, ROUTE, FAILED])], ["get_items_for_order"])
@@ -66,6 +88,8 @@ class OutcomeTests(unittest.TestCase):
             "share what the facts show": dict(status="awaiting_human", execution=None),
             "Promise nothing else": dict(status="awaiting_human", execution=None, evidence=[ROUTE]),
             "Ask: Which bottle?": dict(status="awaiting_customer", execution=None, customer_question="Which bottle?"),
+            "invite a question about those": dict(status="awaiting_customer", execution=None, proposal=None,
+                                                  evidence=[], off_topic=True),
             "if none are listed, do not apologise": dict(status="approved", execution=None),
         }
         for phrase, overrides in cases.items():

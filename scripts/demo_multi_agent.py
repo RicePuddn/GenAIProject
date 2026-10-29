@@ -2,7 +2,7 @@
 
 A client of the stateless multi-agent API (`support_ops.api_multi`): it keeps the conversation and
 sends earlier turns as `history`, and reads /chat/stream so triage, specialist tool calls,
-reflections, approvals, the write and any handoff appear while the ticket runs. Start the API
+approvals, the write and any handoff appear while the ticket runs. Start the API
 first, then from the repo root:
 
     .venv/bin/uvicorn support_ops.api_multi:app --host 127.0.0.1 --port 8001
@@ -21,7 +21,7 @@ from typing import Any, Iterator
 import streamlit as st
 
 API = os.environ.get("SUPPORT_OPS_MULTI_API", "http://127.0.0.1:8001").rstrip("/")
-STRATEGIES = ["react", "plan_and_execute", "reflexion"]
+STRATEGIES = ["react", "plan_and_execute"]
 STATUS_LABELS = {
     "resolved": ("success", "Resolved"),
     "awaiting_customer": ("info", "Waiting for the customer"),
@@ -74,8 +74,7 @@ def stream_chat(payload: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]
 
 
 def new_ticket() -> None:
-    # reflections: reflexion's long-term memory for this ticket, sent with every turn like history.
-    st.session_state.update(ticket_id=None, history=[], reflections=[], exchanges=[])
+    st.session_state.update(ticket_id=None, history=[], exchanges=[])
 
 
 # ---------------------------------------------------------------- timeline
@@ -135,11 +134,6 @@ def show_event(event: dict[str, Any]) -> None:
     elif kind == "tool_end":
         st.caption(f"`{event['tool']}` finished in {event['elapsed_s']:.2f}s")
         show_tool_result(event["tool"], event["output"])
-    elif kind == "reflexion_trial":
-        memory = f" · {len(event['memory'])} lesson(s) from memory" if event["memory"] else ""
-        st.markdown(f"**Reflexion trial {event['trial']}**{memory}")
-    elif kind == "reflection":
-        st.warning(f"Reflection after trial {event['trial']} ({event['failure'][:120]}): {event['reflection']}")
     elif kind == "approval":
         text = f"**Verdict:** {event['decision']} — {event['reason']}"
         if event["decision"] == "approve":
@@ -155,6 +149,12 @@ def show_event(event: dict[str, Any]) -> None:
             st.error(f"Write refused: {result.get('reason')}")
     elif kind == "order_id_filled":
         st.caption(f"The proposal named no order, so the one looked up ({event['order_id']}) was checked")
+    elif kind == "off_topic":
+        st.info("Not a support request: replying with what we can help with (no specialist, no handoff)")
+    elif kind == "missing_record":
+        st.info(f"Not found: {', '.join(event['records'])}. Asking the customer to check: {event['question']}")
+    elif kind == "repeated_error":
+        st.error(f"`{event['tool']}` failed {event['times']} times in a row with the same error; attempt stopped")
     elif kind == "tool_retry":
         st.caption(f"`{event['tool']}` failed ({event['error'][:150]}), running it again (attempt {event['attempt'] + 1})")
     elif kind == "json_retry":
@@ -247,8 +247,7 @@ with st.sidebar:
     strategy = st.radio("Specialist strategy", STRATEGIES,
                         index=STRATEGIES.index(default) if default in STRATEGIES else 0)
     st.button("New ticket", on_click=new_ticket, width="stretch")
-    st.caption(f"Ticket: {st.session_state.ticket_id or 'new'} · {len(st.session_state.history)} turns sent as history"
-               f" · {len(st.session_state.reflections)} reflexion lesson(s) in memory")
+    st.caption(f"Ticket: {st.session_state.ticket_id or 'new'} · {len(st.session_state.history)} turns sent as history")
     st.caption("Return windows are counted from today: try orders delivered in the last 30 days, "
                "e.g. ORD-2026-00031, ORD-2026-00040, ORD-2026-00041.")
 
@@ -258,8 +257,7 @@ for index, exchange in enumerate(exchanges):
 
 if message := st.chat_input("Write as the customer, e.g. One bottle in ORD-2026-00031 arrived dented."):
     exchange: dict[str, Any] = {"message": message}
-    payload = {"customer_message": message, "strategy": strategy, "history": st.session_state.history,
-               "reflections": st.session_state.reflections}
+    payload = {"customer_message": message, "strategy": strategy, "history": st.session_state.history}
     if st.session_state.ticket_id:
         payload["ticket_id"] = st.session_state.ticket_id
     with st.chat_message("user"):
@@ -284,6 +282,5 @@ if message := st.chat_input("Write as the customer, e.g. One bottle in ORD-2026-
     if "response" in exchange:
         st.session_state.ticket_id = exchange["response"]["ticket_id"]
         st.session_state.history = exchange["response"]["history"]
-        st.session_state.reflections = exchange["response"].get("reflections", [])
     exchanges.append(exchange)
     st.rerun()

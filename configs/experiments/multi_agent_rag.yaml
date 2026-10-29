@@ -1,6 +1,6 @@
 extends: base.yaml
 # S3: multi-agent (supervisor, specialists, approver, gateway) with rag policy retrieval.
-# Set agent.strategy to react, plan_and_execute or reflexion per run.
+# Set agent.strategy to react or plan_and_execute per run.
 
 system: multi_agent
 policy:
@@ -9,8 +9,6 @@ multi_agent:
   triage_confidence_min: 0.5   # below this, hand off rather than guess the specialist
   max_reproposals: 1           # approver rejections the specialist may fix
   max_reply_drafts: 2          # reply drafts the approver reviews before the hold reply
-  max_trials: 3                # reflexion only: attempts per specialist run, each with a fresh conversation
-  reflection_window: 3         # reflexion only: newest lessons a trial sees from the ticket's memory
   policy_sections:              # each specialist's policy search scope: section names in the corpus
     orders_shipping: [Orders and shipping]
     returns_refunds: [Returns and refunds]

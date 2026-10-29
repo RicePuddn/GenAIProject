@@ -17,7 +17,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from functools import lru_cache
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
@@ -38,7 +38,6 @@ from support_ops.systems.multi_agent import MultiAgentWorkflow
 
 log = logging.getLogger("uvicorn.error")
 DEFAULT_CONFIG = "configs/experiments/multi_agent_rag.yaml"
-MAX_REFLECTIONS = 20   # lessons carried between turns; trials only see the newest few
 
 
 class MultiChatRequest(BaseModel):
@@ -46,12 +45,9 @@ class MultiChatRequest(BaseModel):
 
     customer_message: str = Field(min_length=1, max_length=20_000)
     ticket_id: str | None = Field(default=None, min_length=1, max_length=100)
-    strategy: Literal["react", "plan_and_execute", "reflexion"] | None = None
+    strategy: Literal["react", "plan_and_execute"] | None = None
     # Stateless: the client sends the earlier turns of the ticket; the server keeps nothing.
     history: list[Turn] = Field(default_factory=list, max_length=MAX_HISTORY_TURNS)
-    # Reflexion's long-term memory for this ticket, sent back from the previous response like history.
-    reflections: list[Annotated[str, Field(min_length=1, max_length=2_000)]] = Field(
-        default_factory=list, max_length=MAX_REFLECTIONS)
 
 
 class MultiChatResponse(BaseModel):
@@ -67,7 +63,6 @@ class MultiChatResponse(BaseModel):
     execution: dict[str, Any] | None = None
     handoff_packet: dict[str, Any] | None = None
     evidence: list[dict[str, Any]] = Field(default_factory=list)
-    reflections: list[str] = Field(default_factory=list)
     audit_log: list[dict[str, Any]] = Field(default_factory=list)
     tool_call_count: int = 0
     tool_calls: list[dict[str, Any]] = Field(default_factory=list)
@@ -140,11 +135,10 @@ def _run_chat(request: MultiChatRequest, tracer: Tracer,
     workflow = MultiAgentWorkflow(llm, cfg, clock=Clock(datetime.now(timezone.utc)), cancellation=cancellation)
     history = [turn.model_dump() for turn in request.history]
     result = workflow.invoke(tracer.ticket_id, request.customer_message, strategy=request.strategy,
-                             tracer=tracer, history=history, reflections=request.reflections)
+                             tracer=tracer, history=history)
     tracer = result.pop("trace")
     reply = result.pop("reply")
     result.pop("history")
-    result["reflections"] = result["reflections"][-MAX_REFLECTIONS:]
     return MultiChatResponse(
         **result, reply=reply, tool_call_count=tracer.tool_call_count, tool_calls=tracer.tool_calls,
         trace=tracer.summary(),

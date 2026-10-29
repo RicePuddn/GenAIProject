@@ -42,7 +42,10 @@ class ProposalTests(unittest.TestCase):
     def test_fields_an_action_does_not_use_are_dropped_and_item_aliases_accepted(self):
         ret = Proposal.model_validate({**REFUND, "action": "return", "items": [{"order_item_id": "ITM-1"}]})
         self.assertEqual((ret.amount, ret.items[0].item_id), (None, "ITM-1"))
-        self.assertEqual(Proposal.model_validate({**REFUND, "items": [{"id": "ITM-1"}]}).items, [])
+        refund = Proposal.model_validate({**REFUND, "items": [{"id": "ITM-1"}]})   # refunds keep their items
+        self.assertEqual(refund.items[0].item_id, "ITM-1")
+        self.assertEqual(Proposal.model_validate({**REFUND, "action": "order_change", "amount": None,
+                                                  "items": [{"id": "ITM-1"}]}).items, [])
         question = Proposal(specialist="returns_refunds", action="none", route="auto", reason="Need detail.",
                             items=[{"item_id": "ITM-1"}], customer_question="Is it unused?")
         self.assertEqual(question.items, [])

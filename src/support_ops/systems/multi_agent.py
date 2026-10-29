@@ -17,11 +17,12 @@ from typing import Any, Callable, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from support_ops.agents.approver import Approver
-from support_ops.agents.guard import classify
+from support_ops.agents.guard import screen
 from support_ops.agents.models import ApprovalResult, Proposal, Triage
 from support_ops.agents.runtime import AgentContext, Budget, BudgetExceeded, Retries, llm_from_config
 from support_ops.agents.specialist import STRATEGIES, Specialist
-from support_ops.agents.toolbox import ORDERS_SHIPPING_TOOLS, RETURNS_REFUNDS_TOOLS, Toolbox, policy_search_tool
+from support_ops.agents.toolbox import (ORDERS_SHIPPING_TOOLS, RETURNS_REFUNDS_TOOLS, Toolbox, policy_search_tool,
+                                        returns_lookup_tool)
 from support_ops.backend.postgres import PostgresReader
 from support_ops.gateway.approvals import TicketFlow
 from support_ops.gateway.route import RouteTool
@@ -35,7 +36,8 @@ from support_ops.policy.provider import PolicyProvider
 from support_ops.policy.routing import RoutingRules
 from support_ops.policy.rules import Rules
 from support_ops.policy.rag import RagPolicy
-from support_ops.supervisor.escalation import FIXED_REPLY_TRIGGERS, HOLD_REPLY, handoff_packet, triage_escalation
+from support_ops.supervisor.escalation import (FIXED_REPLY_TRIGGERS, HOLD_REPLY, confirm_question, customer_insists,
+                                              handoff_packet, missing_records, triage_escalation)
 from support_ops.supervisor.outcome import customer_outcome
 from support_ops.supervisor.supervisor import Supervisor
 from support_ops.systems.tools import SupportTools
@@ -64,8 +66,6 @@ class MultiAgentState(TypedDict, total=False):
     feedback: list[str]
     reproposals: int
     evidence: list[dict[str, Any]]
-    reflections: list[str]            # reflexion: the ticket's long-term memory of lessons
-    pending_failure: str | None       # reflexion: why the last trial failed, still to reflect on
     execution: dict[str, Any] | None
     customer_question: str | None
     handoff_reason: str | None
@@ -112,9 +112,7 @@ class MultiAgentWorkflow:
     # ------------------------------------------------------------- run
 
     def invoke(self, ticket_id: str, customer_message: str, strategy: str | None = None,
-               tracer: Tracer | None = None, history: list[dict[str, str]] | None = None,
-               reflections: list[str] | None = None) -> dict[str, Any]:
-        """Run one turn. `reflections` is the ticket's reflexion memory from earlier turns."""
+               tracer: Tracer | None = None, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
         selected = strategy or self.cfg.get("agent", {}).get("strategy", "react")
         if selected not in STRATEGIES:
             raise ValueError(f"strategy must be one of {', '.join(STRATEGIES)}")
@@ -129,8 +127,7 @@ class MultiAgentWorkflow:
         state = self.graph.invoke({
             "ticket_id": ticket_id, "customer_message": customer_message, "history": history,
             "strategy": selected, "triage": None, "proposal": None, "min_route": None, "approval": None,
-            "feedback": [], "reproposals": 0, "evidence": [], "reflections": list(reflections or []),
-            "pending_failure": None, "execution": None,
+            "feedback": [], "reproposals": 0, "evidence": [], "execution": None,
             "customer_question": None, "handoff_reason": None, "handoff_packet": None,
         }, {"recursion_limit": 40})
         status = self.flow.status(ticket_id)
@@ -143,7 +140,7 @@ class MultiAgentWorkflow:
             "triage": dump(state.get("triage")), "proposal": dump(state.get("proposal")),
             "min_route": state.get("min_route"), "approval": dump(state.get("approval")),
             "reply_review": dump(state.get("reply_review")), "execution": state.get("execution"),
-            "evidence": state.get("evidence", []), "reflections": state.get("reflections", []),
+            "evidence": state.get("evidence", []),
             "audit_log": list(self.flow.audit_log), "history": history, "trace": self.tracer,
         }
 
@@ -187,7 +184,7 @@ class MultiAgentWorkflow:
 
     def _guard(self, state: MultiAgentState) -> dict[str, Any]:
         self._event("node_start", node="guard", ticket_id=state["ticket_id"])
-        flag = classify(self._chat, self.cfg, state["customer_message"], self._event)
+        flag = screen(self._chat, self.cfg, state["history"], state["customer_message"], self._event)
         return {"next": "triage"} if flag == "benign" else self._to_handoff(f"guard: {flag}")
 
     def _triage(self, state: MultiAgentState) -> dict[str, Any]:
@@ -199,41 +196,65 @@ class MultiAgentWorkflow:
         update: dict[str, Any] = {"triage": triage}
         if reason := triage_escalation(triage, self.settings["triage_confidence_min"]):
             return {**update, **self._to_handoff(reason)}
+        if triage.off_topic:
+            # Unrelated to support: no specialist and no person; the reply says what we can help with.
+            self._event("off_topic", intent=triage.intent)
+            self.flow.transition(state["ticket_id"], "awaiting_customer", reason="off topic")
+            return {**update, "next": "reply"}
         return {**update, "next": "specialist"}
 
     def _specialist(self, state: MultiAgentState) -> dict[str, Any]:
         name = state["triage"].specialist
-        route = RouteTool(self.reader, self.routing, self.clock, name)
-        reads = [tool for tool in SPECIALIST_TOOLS[name] if tool != "policy"]
+        returns_checked: set[str] = set()
+        route = RouteTool(self.reader, self.routing, self.clock, name, returns_checked)
+        wrapped = {"policy", "get_returns_for_order"}
+        reads = [tool for tool in SPECIALIST_TOOLS[name] if tool not in wrapped]
         sections = self.settings["policy_sections"].get(name)
         self._check_sections(name, sections)
-        toolbox = Toolbox(self.tools, reads, {"policy": policy_search_tool(self.tools, sections),
-                                              "route": route.as_tool()})
-        specialist = Specialist(name, toolbox, self.ctx, self.cfg)
-        brief, memory = self._brief(state), list(state["reflections"])
-        if state["strategy"] == "reflexion":
-            # The trial before was rejected by the approver: reflect on it first. The lesson replaces the
-            # raw feedback, and the new trial starts with a fresh conversation.
-            brief.pop("approver_feedback", None)
-            if state.get("pending_failure"):
-                memory.append(specialist.reflect(brief, state["evidence"], state.get("proposal"),
-                                                 state["pending_failure"], memory, trial=state["reproposals"]))
-        result = specialist.run(state["ticket_id"], brief, state["strategy"], memory=memory)
+        extra = {"policy": policy_search_tool(self.tools, sections)}
+        if "get_returns_for_order" in SPECIALIST_TOOLS[name]:
+            extra["get_returns_for_order"] = returns_lookup_tool(self.tools, returns_checked)
+        toolbox = Toolbox(self.tools, reads, {**extra, "route": route.as_tool()})
+        result = Specialist(name, toolbox, self.ctx, self.cfg).run(
+            state["ticket_id"], self._brief(state), state["strategy"])
         update: dict[str, Any] = {
             "evidence": [*state["evidence"], *result.evidence],
-            "reflections": [*memory, *result.reflections], "pending_failure": None,
             "proposal": result.proposal, "min_route": result.min_route,
         }
+        if decided := self._missing_record_decision(state, result):
+            return {**update, **decided}
         if result.error:
             reason = f"budget: {result.error}" if "budget" in result.error or "limit" in result.error \
                 else f"specialist: {result.error}"
             return {**update, **self._to_handoff(reason)}
         proposal = result.proposal
-        if proposal.action == "none" and proposal.customer_question:
+        # A question for the customer only ends the turn when no person has to decide: a human route
+        # (chosen, or forced by the rules) goes to a human even if the proposal also asks something.
+        if proposal.action == "none" and proposal.customer_question and proposal.route != "human":
             self.flow.transition(state["ticket_id"], "awaiting_customer")
             return {**update, "customer_question": proposal.customer_question, "next": "reply"}
         self.flow.transition(state["ticket_id"], "proposed", route=proposal.route, operation=proposal.action)
         return {**update, "next": "decide"}
+
+    def _missing_record_decision(self, state: MultiAgentState, result) -> dict[str, Any] | None:
+        """A record the customer named was not found and the specialist has nothing else to do: ask the
+        customer to check it, or, if they already gave the same ID before, hand it to a person."""
+        missing = missing_records(result.evidence)
+        proposal = result.proposal
+        nothing_else = result.error is not None or (proposal is not None and proposal.action == "none")
+        if not missing or not nothing_else:
+            return None
+        insisted = [(name, record_id) for name, record_id in missing if customer_insists(state["history"], record_id)]
+        if insisted:
+            name, record_id = insisted[0]
+            return self._to_handoff(f"the customer confirmed {name} {record_id}, but it cannot be found")
+        if proposal is not None and proposal.customer_question and proposal.route != "human":
+            return None   # the specialist is already asking the customer
+        question = (proposal.customer_question if proposal and proposal.customer_question
+                    else confirm_question(missing))
+        self._event("missing_record", records=[f"{name} {record_id}" for name, record_id in missing], question=question)
+        self.flow.transition(state["ticket_id"], "awaiting_customer")
+        return {"customer_question": question, "next": "reply"}
 
     def _check_sections(self, name: str, sections: list[str] | None) -> None:
         """Flag configured sections the corpus does not have, so an empty search is never a silent mystery."""
@@ -257,7 +278,6 @@ class MultiAgentWorkflow:
             if approval.decision == "reject" and state["reproposals"] < self.settings["max_reproposals"]:
                 self.flow.transition(ticket_id, "triaged", reason="approver rejected the proposal")
                 return {"approval": approval, "feedback": approval.issues,
-                        "pending_failure": f"the approver rejected the proposal: {'; '.join(approval.issues)}",
                         "reproposals": state["reproposals"] + 1, "next": "specialist"}
             if approval.decision != "approve":
                 return {"approval": approval,
@@ -301,7 +321,8 @@ class MultiAgentWorkflow:
         outcome = customer_outcome(
             status=status, evidence=state["evidence"], proposal=state.get("proposal"),
             execution=state.get("execution"), min_route=state.get("min_route"),
-            customer_question=state.get("customer_question"), currency=self.routing.currency)
+            customer_question=state.get("customer_question"), currency=self.routing.currency,
+            off_topic=bool(state.get("triage") and state["triage"].off_topic))
         brief, issues, review = self._brief(state), None, None
         try:
             for _ in range(self.settings["max_reply_drafts"]):

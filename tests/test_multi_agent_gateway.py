@@ -37,8 +37,8 @@ def reader(total=80, refunds=(), delivered_days_ago=5):
 
 
 def draft(**overrides):
-    return {"action": "refund", "order_id": ORDER, "amount": 20, "cited_clauses": ["REF-1"],
-            "route": "auto", "reason": "Damaged item.", **overrides}
+    return {"action": "refund", "order_id": ORDER, "amount": 20, "items": [{"item_id": "ITM-1", "quantity": 1}],
+            "cited_clauses": ["REF-1"], "route": "auto", "reason": "Damaged item.", **overrides}
 
 
 class ToolboxTests(unittest.TestCase):
@@ -130,6 +130,8 @@ class RouteToolTests(unittest.TestCase):
     def test_facts_come_from_the_backend(self):
         tool = self.tool(total=80, refunds=[{"amount": "70", "status": "processed"},
                                             {"amount": "50", "status": "failed"}])
+        with self.assertRaisesRegex(ValueError, "already has returns or refunds on record"):
+            tool.run("T1", draft(amount=20, route="approver"))   # first shown the earlier refund
         with self.assertRaisesRegex(ValueError, "exceeds the order total"):
             tool.run("T1", draft(amount=20, route="approver"))
         self.assertFalse(tool.check(Proposal(specialist="returns_refunds", **draft(amount=20)))["allowed"])
@@ -137,6 +139,10 @@ class RouteToolTests(unittest.TestCase):
             self.tool(delivered_days_ago=45).run("T1", draft(action="return", amount=None, items=[{"item_id": "ITM-2"}]))
         with self.assertRaisesRegex(ValueError, "not found"):
             self.tool().run("T1", draft(order_id="ORD-NOPE"))
+        # Information only (e.g. asking the customer to confirm the number) is fine without the order.
+        self.assertEqual(self.tool().run("T1", {"action": "none", "order_id": "ORD-NOPE", "route": "auto",
+                                                "reason": "Not found.", "customer_question": "Which order?"})
+                         ["status"], "recorded")
 
     def test_returns_are_priced_from_the_order_lines_not_the_order_total(self):
         tool = self.tool(total=275.77)
@@ -182,6 +188,39 @@ class RouteToolTests(unittest.TestCase):
             self.assertEqual(tool.run("T1", {"action": "none", "route": "human", "reason": "Not mine."})["route"],
                              "human")
 
+    def test_existing_returns_are_shown_once_unless_the_specialist_already_looked(self):
+        pending = {"returns": [{"id": "RET-1", "status": "in_transit", "reason": "unsuitable fit",
+                                "requested_at": NOW - timedelta(days=20), "received_at": None}],
+                   "refunds": [{"id": "RFD-9", "status": "failed", "amount": "10"}]}   # void: not listed
+        question = {"action": "none", "order_id": ORDER, "route": "auto", "reason": "Asked about a return."}
+        tool = self.tool()
+        tool.reader.returns_for_order.return_value = pending
+        with self.assertRaisesRegex(ValueError, "already has returns or refunds.*RET-1.*in_transit"):
+            tool.run("T1", question)
+        result = tool.run("T1", question)
+        self.assertEqual([r["id"] for r in result["min_route"]["existing_requests"]], ["RET-1"])
+
+        looked = RouteTool(tool.reader, RoutingRules.load(), Clock(NOW), "returns_refunds", returns_checked={ORDER})
+        self.assertEqual(looked.run("T1", question)["status"], "recorded")   # no bounce: it already looked
+
+    def test_a_refund_is_capped_at_what_was_paid_for_its_items(self):
+        with self.assertRaisesRegex(ValueError, "refund 40.00 exceeds the 32.00 paid for the listed items"):
+            self.tool().run("T1", draft(amount=40, route="approver", items=[{"item_id": "ITM-2", "quantity": 1}]))
+        both = self.tool().run("T1", draft(amount=64, route="approver", items=[{"item_id": "ITM-2", "quantity": 2}]))
+        self.assertEqual(both["status"], "recorded")
+        no_items = self.tool().check(Proposal(specialist="returns_refunds", **draft(items=[])))
+        self.assertEqual(no_items["route"], "approver")
+
+    def test_a_refund_on_a_shipped_parcel_that_has_not_arrived(self):
+        tool = self.tool()
+        late = {"id": "S", "status": "in_transit", "shipped_at": NOW - timedelta(days=9),
+                "estimated_delivery": (NOW - timedelta(days=2)).date(), "delivered_at": None}
+        for name, shipment, expected in (("in transit", {**late, "estimated_delivery": (NOW + timedelta(days=2)).date()},
+                                          "approver"), ("overdue", late, "human")):
+            with self.subTest(name):
+                tool.reader.shipments_for_order.return_value = [shipment]
+                self.assertEqual(tool.check(Proposal(specialist="returns_refunds", **draft()))["route"], expected)
+
     def test_information_only_proposal_reads_nothing(self):
         tool = self.tool()
         tool.run("T1", {"action": "none", "route": "auto", "reason": "Tracking shared."})
@@ -199,7 +238,7 @@ class FlowTests(unittest.TestCase):
         proposal = Proposal(specialist="returns_refunds", **draft(**overrides))
         self.flow.transition(ticket, "triaged")
         self.flow.transition(ticket, "proposed")
-        return proposal, self.rules.min_route(proposal.action, proposal.amount)
+        return proposal, self.rules.min_route(proposal.action, proposal.amount, goods_value=1000)
 
     def write(self, token, ticket="T1", amount=20, key="K1", order=ORDER):
         return self.writes.execute(ticket, token=token, operation="refund", order_id=order,
