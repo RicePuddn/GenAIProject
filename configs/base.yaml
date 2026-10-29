@@ -37,10 +37,25 @@ agent:
   strategy: react           # react | plan_and_execute
 
 policy:
-  rules_file: policy/rules.yaml   # hard rules (not created yet)
+  mode: skills              # skills | rag
+  rules_file: policy/rules.yaml   # shared hard limits
   skills_dir: policy/skills
   corpus_dir: policy/corpus
-  corpus_size: 5p           # 5p | 20p | 50p
+  corpus_size: mini         # mini | 5p | 20p | 50p (mini mirrors policy/skills until the corpus exists)
+  rag:                      # rag mode only; each stage can be switched off for experiments
+    chunking: clause        # clause | window
+    window_words: 180       # window chunking only
+    window_overlap: 30
+    dense: true             # all-MiniLM embeddings, cosine
+    bm25: true              # keyword search; with dense, fused by reciprocal rank fusion
+    rrf_k: 60
+    n_prime: 20             # candidates passed to the reranker
+    rerank: true            # cross-encoder rerank
+    contextual: true        # prepend the section name before indexing
+    k: 4                    # clauses returned to the agent
+    expand_exceptions: true # also return exceptions of returned clauses
+    embedding_model: sentence-transformers/all-MiniLM-L6-v2
+    rerank_model: cross-encoder/ms-marco-MiniLM-L-6-v2
 
 limits:                     # enforced by the workflow between calls
   max_steps_per_ticket: 40  # maximum tool executions

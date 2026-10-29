@@ -1,37 +1,34 @@
-"""Progressive disclosure of policy skills and a shared mock approval rule."""
+"""Progressive disclosure of policy skills."""
 from __future__ import annotations
 
-from decimal import Decimal
+import json
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from support_ops.helpers.config import ROOT
-
-REFUND_LIMIT = Decimal("100.00")
-
-
-def check_operation(operation: str, amount: Any) -> dict[str, Any]:
-    """This prototype only approves simulated refunds in SGD."""
-    if operation != "refund":
-        return {"allowed": False, "requires_human": True, "reason": "unsupported mock operation"}
-    if amount is None:
-        raise ValueError("refund amount is required")
-    value = Decimal(str(amount))
-    if not value.is_finite() or value <= 0:
-        raise ValueError("refund amount must be finite and positive")
-    return {
-        "allowed": value <= REFUND_LIMIT,
-        "requires_human": value > REFUND_LIMIT,
-        "rule": "mock_refund_limit_100", "limit": float(REFUND_LIMIT), "currency": "SGD",
-    }
+from support_ops.policy.rules import Rules
+from support_ops.systems.tools import PolicyArguments
 
 
 class SkillsPolicy:
-    def __init__(self, root: str | Path = ROOT / "policy/skills"):
+    arguments = PolicyArguments
+    description = PolicyArguments.__doc__
+    prompt_hint = ("Discover policies, open the matching SKILL.md, then read the relevant clause "
+                   "before advising. Never invent policy filenames or missing facts.")
+
+    def __init__(self, root: str | Path = ROOT / "policy/skills", rules: Rules | None = None):
         path = Path(root)
         self.root = (path if path.is_absolute() else ROOT / path).resolve()
+        self.rules = rules or Rules.load()
+
+    def warm_up(self) -> None:
+        """Skills read files on demand; there is nothing to load up front."""
+
+    def planner_context(self) -> str:
+        return ("Available policy filenames (contents must still be read with tools): "
+                + json.dumps(self.catalog()))
 
     def catalog(self) -> list[dict[str, Any]]:
         if not self.root.exists():
@@ -57,7 +54,7 @@ class SkillsPolicy:
     def run(self, args: dict[str, Any]) -> dict[str, Any]:
         action = args.get("action")
         if action == "check":
-            return check_operation(args.get("operation", ""), args.get("amount"))
+            return self.rules.check(args.get("operation", ""), args.get("amount"))
         if action == "list":
             catalog = self.catalog()
             return {"skills": [item["skill"] for item in catalog], "catalog": catalog}

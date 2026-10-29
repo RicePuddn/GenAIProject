@@ -8,5 +8,8 @@ fictional ecommerce fixtures. Run it from the repository root after configuring
 .venv/bin/python scripts/seed_backend.py
 ```
 
+`demo_app.py` is a Streamlit chat page for the running API that shows each agent
+step; see "Demo page" in the [application README](../README.md).
+
 See the [application README](../README.md) for setup and the
 [fixture README](../data/backend_seed/README.md) for sample IDs and reset instructions.

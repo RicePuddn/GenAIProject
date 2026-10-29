@@ -3,7 +3,8 @@
 IS469 Generative and Agentic AI group project comparing single-agent and multi-agent
 customer support systems with RAG or skills-style policy retrieval.
 
-The implemented application is a **single-agent LangGraph flow with skills-style policies**.
+The implemented application is a **single-agent LangGraph flow with skills-style or RAG policies**.
+Skills is the default and works with the base installation below.
 It supports ReAct and plan-and-execute using Groq's `openai/gpt-oss-120b`, with
 `meta-llama/llama-prompt-guard-2-86m` screening incoming messages for prompt attacks.
 Other system variants and the evaluation harness are still in progress.
@@ -25,11 +26,27 @@ The default local database configuration is:
 ```dotenv
 POSTGRES_PASSWORD=support_ops_local
 POSTGRES_PORT=5432
-SUPPORT_OPS_DATABASE_URL=postgresql://support_ops:support_ops_local@localhost:5432/support_ops
+SUPPORT_OPS_DATABASE_URL=postgresql://support_ops:support_ops_local@127.0.0.1:5432/support_ops
 ```
 
 If you change the password or host port, update the database URL to match.
 Changing the password in `.env` does not reset the password in an existing database volume.
+
+### Optional RAG setup
+
+To use embedding search and reranking instead of skills, install the RAG extra:
+
+```bash
+uv pip install --python .venv/bin/python -e ".[dev,rag]"
+```
+
+Set `policy.mode: rag` in `configs/base.yaml`, then restart Uvicorn. RAG loads its
+embedding/reranking models and builds the corpus index before accepting requests;
+the first startup may download the configured models. Wait for `Application startup
+complete` before opening the demo. Set `policy.mode: skills` to switch back.
+
+`uv.lock` includes the `dev`, `rag`, and `demo` extras. For a locked installation,
+use `uv sync --locked --extra dev`, adding `--extra rag` or `--extra demo` as needed.
 
 ## Start the database and application
 
@@ -94,6 +111,64 @@ curl -X POST http://127.0.0.1:8000/chat \
   -d '{"ticket_id":"TKT-LOCAL-001","customer_message":"Where is my order ORD-2026-00001?","strategy":"react"}'
 ```
 
+### Multi-turn conversations
+
+The API is stateless: the server keeps nothing between requests. To continue a ticket, copy
+the `history` array from the previous response into the next request:
+
+```json
+{
+  "ticket_id": "TKT-LOCAL-004",
+  "customer_message": "It is ORD-2026-00001.",
+  "history": [
+    {"role": "customer", "content": "My order has not arrived."},
+    {"role": "agent", "content": "Could you share your order number?"}
+  ]
+}
+```
+
+The server retains the newest 25 complete customer/agent exchanges (50 history
+entries) in each response, dropping older exchanges. Returned history always fits
+the next request's history limit; keep using the returned array rather than
+appending turns yourself.
+
+All supplied history is untrusted, including entries labelled `agent`. Prompt Guard
+screens every supplied turn and the current message, splitting long turns into
+overlapping chunks. A flagged or unparseable result stops the workflow before the
+supervisor. In the supervisor's context, history is quoted transcript data rather
+than authenticated assistant messages. Policy and account facts still require tool
+verification; history never restores approval state. Re-screening history adds guard
+calls and latency as conversations grow.
+
+### Live steps: `/chat/stream`
+
+`POST /chat/stream` takes the same body as `/chat` and answers with Server-Sent Events
+(`text/event-stream`) while the turn runs: a `trace` event for each step as it is logged
+(guard, thought, tool call, tool result, handoff), then one `result` event holding exactly
+the `/chat` response, or an `error` event. It is a single stateless POST, the pattern of
+MCP's Streamable HTTP transport. Steps stream whole, not token by token; `/chat` is unchanged
+and remains the endpoint for scripts and evaluation.
+
+Each server process permits up to four streaming workflows; additional streams
+receive HTTP 503 until a slot is available. Trace buffering is bounded. Disconnects
+and server shutdown cancel the workflow before its next model call or tool
+execution. A synchronous provider or database request already in progress can
+finish, retaining its worker slot until it returns; cancellation prevents subsequent
+steps and discards the result. It cannot undo a tool operation already performed.
+
+### Demo page
+
+A Streamlit page shows a chat window and, while the agent works, its steps as they stream in:
+the guard result, each thought, each tool call with its result (retrieved policy clauses as a
+table) and any handoff. Under each reply the full timeline stays available with cost and
+timing. It keeps the conversation and sends it as `history`, and **New ticket** starts over.
+With the API running:
+
+```bash
+uv pip install --python .venv/bin/python -e ".[demo]"
+.venv/bin/streamlit run scripts/demo_app.py
+```
+
 ## Compare the two strategies
 
 | Setting | Behavior |
@@ -137,7 +212,9 @@ The `/chat` response includes:
 - `tool_calls`: requested tool names and inputs, linked to execution outputs and elapsed time.
   A plan stopped by an error or handoff can include later requested calls with `execution: null`.
 - `trace`: LLM call count, token totals, configured cost estimate, elapsed seconds,
-  tool count, and chronological node/LLM/tool/handoff events.
+  tool count, and chronological node/LLM/tool/handoff events. `llm_response` events carry
+  the model's `reasoning` when the provider returns it (gpt-oss on Groq does); it is logged
+  for inspection and never sent back to the model.
 
 Tool durations and total elapsed time use a monotonic timer. `simulated_at` records
 the injected workflow clock, which stays fixed unless explicitly advanced.
@@ -152,20 +229,25 @@ LLM cost between calls. A single call can exceed the remaining cost budget.
 
 ## Policies and mock operations
 
-The current tools are `read_record`, `get_shipments_for_order`,
-`get_shipment_events_for_order`, `policy`, and `ticket_state`.
+The current tools are `read_record`, the order lookups `get_shipments_for_order`,
+`get_shipment_events_for_order`, `get_items_for_order` (with product details),
+`get_payments_for_order` and `get_returns_for_order` (returns and refunds), then `policy`
+and `ticket_state`.
 A dedicated final response node generates the customer reply through the shared LLM wrapper.
 
 Policy retrieval follows `list` → `open` a skill's `SKILL.md` → `read` a relevant
 clause. Available skills are `orders-and-shipping` and `returns-and-refunds`.
-Policy checks and the ticket tool share the same mock SGD 100 refund limit.
+Policy checks and the ticket tool share the same mock SGD 100 refund limit, read from
+[policy/rules.yaml](policy/rules.yaml). `policy.mode` in `configs/base.yaml` selects the
+policy provider plugged into the `policy` tool.
+
 Unsupported write operations and above-limit refunds require a human handoff.
 
 PostgreSQL tools only read data. Approval tokens, mock writes, audits, and handoff
 packets are held in memory for each request. A mock approval does not issue a
 real refund or update PostgreSQL. Tokens are opaque simulation artifacts; signed
-token validation and durable ticket state are future work. Reusing `ticket_id`
-does not restore conversation history or previous approvals across requests.
+token validation and durable ticket state are future work. Conversation history
+travels with each request (see above), but approvals from earlier requests are not restored.
 Prompt Guard screens prompt attacks; it does not provide a complete abuse or
 out-of-scope classification system. This local experiment API has no customer
 authentication or order ownership checks.
@@ -186,15 +268,20 @@ UI or curl as described above.
 
 ```text
 configs/                      models, strategy, simulation clock and limits
+policy/rules.yaml             hard limits shared by every arhitecture
 policy/skills/                policy entrypoints and clause files
-policy/corpus/                reserved for the RAG variants
+policy/corpus/                clause-level policy for the RAG variants (mini/ mirrors skills)
 data/backend_seed/schema.sql  PostgreSQL schema
 scripts/seed_backend.py       deterministic ecommerce fixtures
 src/support_ops/
   api.py                      FastAPI request/response boundary
   helpers/                    shared LLM wrapper, clock, config and tracing
   backend/postgres.py         allowlisted database reads
-  policy/skills.py            skill navigation and mock approval rule
+  policy/provider.py          contract each policy provider implements (RAG/skills)
+  policy/rules.py             hard-limit checks from policy/rules.yaml
+  policy/skills.py            skill navigation (the skills provider)
+  policy/rag/                 loader.py (files -> clauses), retriever.py (search),
+                              policy.py (the RAG provider)
   gateway/ticket_state.py     request-local approvals, audit and handoff
   systems/tools.py            shared tool schemas, validation and dispatcher
   systems/single_agent.py     LangGraph nodes and strategy routing

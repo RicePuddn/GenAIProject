@@ -10,13 +10,14 @@ from datetime import timedelta
 from typing import Any
 
 from support_ops.helpers.clock import Clock
-from support_ops.policy.skills import check_operation
+from support_ops.policy.rules import Rules
 
 
 class TicketState:
-    def __init__(self, clock: Clock, token_ttl_seconds: int = 300):
+    def __init__(self, clock: Clock, token_ttl_seconds: int = 300, rules: Rules | None = None):
         self.clock = clock
         self.token_ttl_seconds = token_ttl_seconds
+        self.rules = rules or Rules.load()
         self.audit_log: list[dict[str, Any]] = []
         self.writes: dict[tuple[str, str, str], dict[str, Any]] = {}
         self.handoffs: list[dict[str, Any]] = []
@@ -37,7 +38,7 @@ class TicketState:
         operation, record_id = args.get("operation"), args.get("record_id")
         if not operation or not record_id:
             raise ValueError("write requires operation and record_id")
-        decision = check_operation(operation, args.get("amount"))
+        decision = self.rules.check(operation, args.get("amount"))
         if not decision["allowed"]:
             return self.run(ticket_id, {
                 **args, "action": "handoff",
@@ -53,7 +54,7 @@ class TicketState:
         result = {
             "status": "approved_mock_write", "mock": True,
             "approval_token": secrets.token_urlsafe(18), "operation": operation,
-            "record_id": record_id, "amount": args["amount"], "currency": "SGD",
+            "record_id": record_id, "amount": args["amount"], "currency": self.rules.currency,
             "issued_at": issued_at.isoformat(),
             "expires_at": (issued_at + timedelta(seconds=self.token_ttl_seconds)).isoformat(),
         }
