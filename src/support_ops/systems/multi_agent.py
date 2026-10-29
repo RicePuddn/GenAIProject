@@ -28,6 +28,7 @@ from support_ops.gateway.approvals import TicketFlow
 from support_ops.gateway.route import RouteTool
 from support_ops.gateway.ticket_state import TicketState
 from support_ops.gateway.writes import MockWrites
+from support_ops.helpers.cancellation import CancellationToken
 from support_ops.helpers.clock import Clock
 from support_ops.helpers.llm import ChatResult, LLM
 from support_ops.helpers.tracing import Tracer
@@ -75,7 +76,8 @@ class MultiAgentState(TypedDict, total=False):
 
 class MultiAgentWorkflow:
     def __init__(self, llm: LLM, cfg: dict[str, Any], *, reader: PostgresReader | None = None,
-                 policy: PolicyProvider | None = None, clock: Clock | None = None, tracer: Tracer | None = None):
+                 policy: PolicyProvider | None = None, clock: Clock | None = None, tracer: Tracer | None = None,
+                 cancellation: CancellationToken | None = None):
         if cfg["policy"].get("mode") != "rag":
             raise ValueError("the multi-agent arm is S3 only: set policy.mode to rag")
         self.llm, self.cfg = llm, cfg
@@ -83,6 +85,8 @@ class MultiAgentWorkflow:
         self.retries = Retries.from_config(cfg)
         self.clock = clock or Clock(datetime.fromisoformat(cfg["run"]["clock_start"]))
         self._provided_tracer = tracer
+        # Checked at every logged step (each LLM call, tool call and node), as in the single agent.
+        self.cancellation = cancellation or CancellationToken()
         rules = Rules.load(cfg["policy"]["rules_file"])
         self.routing = RoutingRules.load(cfg["policy"]["rules_file"])
         self.reader = reader or PostgresReader()
@@ -141,6 +145,7 @@ class MultiAgentWorkflow:
         }
 
     def _event(self, kind: str, **payload: Any) -> None:
+        self.cancellation.check()
         self.tracer.log(kind, simulated_at=self.clock.now().isoformat(), **payload)
 
     def _chat(self, role: str, messages: list[dict[str, Any]], *, tools=None, json_mode=False) -> ChatResult:

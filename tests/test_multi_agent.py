@@ -381,6 +381,34 @@ class RetryTests(Base):
                 self.run_flow()
 
 
+class CancellationTests(Base):
+    def test_a_cancelled_ticket_does_not_start(self):
+        from support_ops.helpers.cancellation import CancellationToken, WorkflowCancelled
+
+        token = CancellationToken()
+        token.cancel()
+        workflow = MultiAgentWorkflow(self.llm, self.cfg, reader=reader(), policy=rag_policy(), clock=Clock(NOW),
+                                      cancellation=token)
+        with self.assertRaises(WorkflowCancelled):
+            workflow.invoke("T1", "Refund please", "react")
+        self.assertEqual(self.llm.calls, [])
+
+    def test_cancelling_mid_ticket_stops_before_approval_and_any_write(self):
+        from support_ops.helpers.cancellation import CancellationToken, WorkflowCancelled
+
+        token = CancellationToken()
+        def specialist_then_disconnect(messages, tools):
+            token.cancel()   # the client goes away while the specialist is thinking
+            return route(50, "approver")
+        self.llm.push("supervisor", triage()).on("specialist", specialist_then_disconnect)
+        workflow = MultiAgentWorkflow(self.llm, self.cfg, reader=reader(), policy=rag_policy(), clock=Clock(NOW),
+                                      cancellation=token)
+        with self.assertRaises(WorkflowCancelled):
+            workflow.invoke("T1", "Refund please", "react")
+        self.assertNotIn("approver", self.roles())
+        self.assertEqual((workflow.writes.executed, workflow.flow.tokens), ({}, {}))
+
+
 class StrategyTests(Base):
     def test_plan_and_execute_runs_the_plan_then_submits_the_proposal(self):
         plan = {"calls": [{"name": "get_returns_for_order", "arguments": {"order_id": ORDER}},
@@ -465,6 +493,60 @@ class ApiTests(Base):
                   if block]
         self.assertTrue(blocks[0].startswith("event: trace"))
         self.assertTrue(blocks[-1].startswith("event: result"))
+
+    def test_a_client_that_disconnects_stops_its_ticket(self):
+        import threading
+        import time
+
+        from support_ops import api_multi
+        from support_ops.helpers.cancellation import WorkflowCancelled
+
+        outcome, ended = {}, threading.Event()
+        real_run_chat = api_multi._run_chat
+        def run_chat(*args, **kwargs):
+            try:
+                return real_run_chat(*args, **kwargs)
+            except BaseException as exc:
+                outcome["error"] = exc
+                raise
+            finally:
+                ended.set()
+        def slow(result):
+            def respond(messages, tools):
+                time.sleep(0.3)   # each agent step takes a while, so the hang-up lands mid-ticket
+                return result
+            return respond
+        self.llm.on("supervisor", slow(triage())).on("specialist", slow(route(50, "approver"))).on(
+            "approver", slow(verdict()))
+        days = 2 - (datetime.now(timezone.utc) - NOW).days
+        workflow = partial(MultiAgentWorkflow, reader=reader(delivered_days_ago=days), policy=rag_policy())
+        with patch("support_ops.api_multi._runtime", return_value=(self.cfg, self.llm)), \
+             patch("support_ops.api_multi.MultiAgentWorkflow", workflow), \
+             patch("support_ops.api_multi._run_chat", run_chat):
+            with TestClient(app).stream("POST", "/chat/stream", json={"customer_message": "Refund"}) as response:
+                next(response.iter_lines())   # read the first event, then disconnect
+            self.assertTrue(ended.wait(10))
+        self.assertIsInstance(outcome.get("error"), WorkflowCancelled)
+        self.assertNotIn("approver", self.roles())
+        self.assertLessEqual(self.roles().count("supervisor"), 1)   # never reached drafting the reply
+
+    def test_a_full_stream_pool_answers_503(self):
+        busy = Mock(submit=Mock(side_effect=RuntimeError("stream capacity reached; retry when another request finishes")))
+        with patch("support_ops.api_multi._stream_workers", return_value=busy):
+            response = TestClient(app).post("/chat/stream", json={"customer_message": "Hi"})
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("stream capacity reached", response.json()["detail"])
+
+    def test_returned_history_keeps_the_newest_exchanges_within_the_limit(self):
+        from support_ops.api import MAX_HISTORY_TURNS
+
+        earlier = [{"role": role, "content": f"{role} {i}"} for i in range(MAX_HISTORY_TURNS // 2)
+                   for role in ("customer", "agent")]
+        self.llm.push("supervisor", triage(), text("Recorded.")).push("specialist", route()).push("approver", verdict())
+        history = self.post("/chat", {"customer_message": "Refund", "history": earlier}).json()["history"]
+        self.assertEqual(len(history), MAX_HISTORY_TURNS)
+        self.assertEqual(history[-2:], [{"role": "customer", "content": "Refund"},
+                                        {"role": "agent", "content": "Recorded."}])
 
     def test_reflexion_is_accepted_and_unknown_strategies_are_rejected(self):
         self.llm.push("supervisor", triage(), text("Recorded.")).push(
