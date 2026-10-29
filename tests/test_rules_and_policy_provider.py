@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Literal
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from support_ops.backend.postgres import PostgresReader
 from support_ops.helpers.arguments import NonEmpty, ToolArguments
@@ -83,6 +83,9 @@ class FakePolicy:
 class WorkflowWiringTests(unittest.TestCase):
     def setUp(self):
         self.cfg = load_config()
+        build = patch("support_ops.policy.rag.policy.shared_retriever", return_value=Mock())
+        build.start()
+        self.addCleanup(build.stop)
         self.reader = Mock(spec=PostgresReader)
 
     def test_configured_rules_reach_both_the_gateway_and_the_policy_check(self):

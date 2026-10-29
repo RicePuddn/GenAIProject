@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any, Protocol
 
-from support_ops.helpers.config import ROOT
 from support_ops.policy.rag.retriever import RagSettings, shared_retriever
 from support_ops.policy.rules import Rules
 from support_ops.systems.tools import RagPolicyArguments
@@ -21,9 +19,6 @@ class Retriever(Protocol):
         """Section names in corpus order."""
         ...
 
-    def warm_up(self) -> None:
-        """Load models and build the index now rather than on the first search."""
-        ...
 
 
 class RagPolicy:
@@ -39,12 +34,8 @@ class RagPolicy:
     @classmethod
     def from_config(cls, cfg: dict[str, Any], rules: Rules) -> RagPolicy:
         policy = cfg["policy"]
-        folder = Path(policy["corpus_dir"]) / policy["corpus_size"]
-        folder = (folder if folder.is_absolute() else ROOT / folder).resolve()
-        return cls(shared_retriever(str(folder), RagSettings.from_config(policy.get("rag", {}))), rules)
-
-    def warm_up(self) -> None:
-        self.retriever.warm_up()
+        settings = RagSettings.from_config(policy.get("rag", {}))
+        return cls(shared_retriever(settings), rules)
 
     def planner_context(self) -> str:
         return ("Policy sections (contents must still be searched with tools): "

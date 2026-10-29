@@ -1,0 +1,12 @@
+{
+  "embedding_model": "nomic-ai/nomic-embed-text-v1.5",
+  "dimension": 768,
+  "metric": "cosine",
+  "contextual": true,
+  "document_prefix": "search_document: ",
+  "query_prefix": "search_query: ",
+  "normalization": "layer_norm_then_l2",
+  "count": 51,
+  "data_sha256": "61a40c28a3e11b2f8cc8d69a79e8881983c4b14c940208ef93d4d26d8671c9d8",
+  "corpus_hash": "2bf23aa8216ee9af667002179b0cdda880d88ad53fe3145c274ee16c4f3e4f89"
+}

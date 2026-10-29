@@ -1,0 +1,6 @@
+# Cosine search only; all other settings inherit from base.yaml.
+policy:
+  rag:
+    dense: true
+    bm25: false
+    rerank: false

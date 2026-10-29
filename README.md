@@ -3,10 +3,10 @@
 IS469 Generative and Agentic AI group project comparing single-agent and multi-agent
 customer support systems with RAG or skills-style policy retrieval.
 
-The implemented application is a **single-agent LangGraph flow with skills-style policies**.
+The implemented application is a **single-agent LangGraph flow with RAG or skills-style policies**.
 It supports ReAct and plan-and-execute using Groq's `openai/gpt-oss-120b`, with
 `meta-llama/llama-prompt-guard-2-86m` screening incoming messages for prompt attacks.
-Other system variants and the evaluation harness are still in progress.
+Other system variants are still in progress.
 
 ## Install and configure
 
@@ -15,7 +15,7 @@ with Docker Compose. Start Docker Desktop before starting PostgreSQL.
 
 ```bash
 uv venv --python 3.12 .venv
-uv pip install --python .venv/bin/python -e ".[dev]"
+uv pip install --python .venv/bin/python -e ".[dev,rag]"
 cp .env.example .env
 ```
 
@@ -30,6 +30,27 @@ SUPPORT_OPS_DATABASE_URL=postgresql://support_ops:support_ops_local@127.0.0.1:54
 
 If you change the password or host port, update the database URL to match.
 Changing the password in `.env` does not reset the password in an existing database volume.
+
+## RAG
+
+Set `PINECONE_API_KEY` in `.env`. Default models and parameters are in
+`configs/base.yaml`; evaluation profiles are in `configs/rag/`.
+
+```python
+from support_ops.policy.rag import retrieve
+
+chunks = retrieve("Can I return a damaged final-sale item?")
+```
+
+After changing policies, regenerate embeddings and upload to the existing index:
+
+```bash
+.venv/bin/python -m support_ops.policy.rag.embeddings
+.venv/bin/python -m support_ops.policy.rag.pinecone_store
+```
+
+For evaluation, open `src/support_ops/policy/rag/evaluation.ipynb`, select the `.venv`
+kernel and run all cells. Detailed and summary JSON results go to `results/rag/`.
 
 ## Start the database and application
 
@@ -80,8 +101,9 @@ For policy discovery and clause reading:
 ```
 
 The policy example should retrieve order/delivery facts and the returns policy.
-Inspect `tool_calls` for `policy` inputs and outputs, including `SKILL.md` and
-`eligibility.md`. Tool order can vary with the model. Return eligibility depends
+Inspect `tool_calls` for `policy` inputs and outputs. RAG mode returns retrieved
+section IDs and evidence; skills mode reads `SKILL.md` and supporting files.
+Tool order can vary with the model. Return eligibility depends
 on the workflow date: the API uses the current UTC date, while programmatic workflows
 use `run.clock_start` unless a clock is injected. This order was delivered on
 5 September 2026, so its eligibility changes with the date you run it.
@@ -237,7 +259,9 @@ UI or curl as described above.
 configs/                      models, strategy, simulation clock and limits
 policy/rules.yaml             hard limits shared by every arhitecture
 policy/skills/                policy entrypoints and clause files
-policy/corpus/                clause-level policy for the RAG variants (mini/ mirrors skills)
+policy/raw_policy/            source policy PDFs and Markdown
+policy/chunk_policy/          section chunks with reference IDs
+policy/embed_chunk/           saved vectors and upload manifest
 data/backend_seed/schema.sql  PostgreSQL schema
 scripts/seed_backend.py       deterministic ecommerce fixtures
 src/support_ops/
@@ -247,8 +271,7 @@ src/support_ops/
   policy/provider.py          contract each policy provider implements (RAG/skills)
   policy/rules.py             hard-limit checks from policy/rules.yaml
   policy/skills.py            skill navigation (the skills provider)
-  policy/rag/                 loader.py (files -> clauses), retriever.py (search),
-                              policy.py (the RAG provider)
+  policy/rag/                 policy chunking, embeddings, retrieval and evaluation
   gateway/ticket_state.py     request-local approvals, audit and handoff
   systems/tools.py            shared tool schemas, validation and dispatcher
   systems/single_agent.py     LangGraph nodes and strategy routing

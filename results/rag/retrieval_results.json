@@ -1,0 +1,1580 @@
+{
+  "k": 4,
+  "candidate_pool": 20,
+  "rrf_k": 60,
+  "corpus_hash": "2bf23aa8216ee9af667002179b0cdda880d88ad53fe3145c274ee16c4f3e4f89",
+  "rows": [
+    {
+      "case_id": "q01",
+      "question": "I received my item on 5 October. What is the last day I can request a return?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-2.1"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-2.1",
+        "returns-and-refunds-policy-2.6",
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-4.2"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-4.5"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q01",
+      "question": "I received my item on 5 October. What is the last day I can request a return?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-2.1"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-2.1",
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-1",
+        "orders-and-shipping-policy-6.3"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.6"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q01",
+      "question": "I received my item on 5 October. What is the last day I can request a return?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-2.1"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-2.1",
+        "returns-and-refunds-policy-2.6",
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-6.1"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-7.1",
+        "returns-and-refunds-policy-7.2",
+        "returns-and-refunds-policy-7.3",
+        "returns-and-refunds-policy-7.4",
+        "returns-and-refunds-policy-7.5"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q02",
+      "question": "My items arrived in separate parcels on different dates. When does each return period start?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-2.1",
+        "orders-and-shipping-policy-6.3"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-2.1",
+        "orders-and-shipping-policy-6.3",
+        "returns-and-refunds-policy-4.2",
+        "returns-and-refunds-policy-1"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.6",
+        "returns-and-refunds-policy-4.5"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q02",
+      "question": "My items arrived in separate parcels on different dates. When does each return period start?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-2.1",
+        "orders-and-shipping-policy-6.3"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-6.3",
+        "returns-and-refunds-policy-2.1",
+        "returns-and-refunds-policy-6.4",
+        "orders-and-shipping-policy-2.2"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.6",
+        "orders-and-shipping-policy-2.1"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q02",
+      "question": "My items arrived in separate parcels on different dates. When does each return period start?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-2.1",
+        "orders-and-shipping-policy-6.3"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-6.3",
+        "returns-and-refunds-policy-2.1",
+        "orders-and-shipping-policy-6.1",
+        "returns-and-refunds-policy-6.4"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.6",
+        "orders-and-shipping-policy-3.2"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q03",
+      "question": "My final-sale item arrived faulty and I threw away its original box. Can I still request a return?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-2.5"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-2.3",
+        "returns-and-refunds-policy-2.4",
+        "returns-and-refunds-policy-4.4"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.1",
+        "returns-and-refunds-policy-7.3"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q03",
+      "question": "My final-sale item arrived faulty and I threw away its original box. Can I still request a return?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-2.5"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-2.4",
+        "returns-and-refunds-policy-7.2",
+        "returns-and-refunds-policy-7.4"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.1"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q03",
+      "question": "My final-sale item arrived faulty and I threw away its original box. Can I still request a return?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-2.5"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-2.4",
+        "returns-and-refunds-policy-4.4",
+        "returns-and-refunds-policy-2.3"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.1",
+        "returns-and-refunds-policy-7.3"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q04",
+      "question": "I changed my mind about a final-sale item, but it is unopened. Is it returnable?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-2.4",
+        "returns-and-refunds-policy-2.5"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-2.4",
+        "returns-and-refunds-policy-7.4",
+        "returns-and-refunds-policy-4.4"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.1"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q04",
+      "question": "I changed my mind about a final-sale item, but it is unopened. Is it returnable?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-2.4",
+        "returns-and-refunds-policy-2.5"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-2.4",
+        "returns-and-refunds-policy-7.4",
+        "returns-and-refunds-policy-5.2"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.1"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q04",
+      "question": "I changed my mind about a final-sale item, but it is unopened. Is it returnable?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-2.4",
+        "returns-and-refunds-policy-2.5"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-2.4",
+        "returns-and-refunds-policy-5.2",
+        "returns-and-refunds-policy-7.4"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.1"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q05",
+      "question": "The battery is leaking. I cannot safely switch it on to record evidence. Will my claim be rejected?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-3.2"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-7.5",
+        "returns-and-refunds-policy-3.2",
+        "returns-and-refunds-policy-4.6",
+        "orders-and-shipping-policy-7.4"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-3.1",
+        "orders-and-shipping-policy-7.1"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.5,
+      "ndcg_at_k": 0.6309297535714575
+    },
+    {
+      "case_id": "q05",
+      "question": "The battery is leaking. I cannot safely switch it on to record evidence. Will my claim be rejected?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-3.2"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-7.4",
+        "returns-and-refunds-policy-3.2",
+        "returns-and-refunds-policy-4.6",
+        "returns-and-refunds-policy-3.1"
+      ],
+      "reference_chunk_ids": [
+        "orders-and-shipping-policy-7.1"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.5,
+      "ndcg_at_k": 0.6309297535714575
+    },
+    {
+      "case_id": "q05",
+      "question": "The battery is leaking. I cannot safely switch it on to record evidence. Will my claim be rejected?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-3.2"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-3.2",
+        "returns-and-refunds-policy-4.6",
+        "returns-and-refunds-policy-7.2",
+        "returns-and-refunds-policy-4.4"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-3.1",
+        "returns-and-refunds-policy-2.5"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q06",
+      "question": "My return was approved today. How long do I have to hand it to the carrier?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-4.2"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-4.2",
+        "returns-and-refunds-policy-4.3",
+        "returns-and-refunds-policy-4.1",
+        "orders-and-shipping-policy-7.2"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-4.5",
+        "returns-and-refunds-policy-5.1",
+        "orders-and-shipping-policy-7.1"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q06",
+      "question": "My return was approved today. How long do I have to hand it to the carrier?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-4.2"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-4.2",
+        "returns-and-refunds-policy-4.3",
+        "returns-and-refunds-policy-4.1",
+        "returns-and-refunds-policy-2.1"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-4.5",
+        "returns-and-refunds-policy-5.1",
+        "returns-and-refunds-policy-2.6"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q06",
+      "question": "My return was approved today. How long do I have to hand it to the carrier?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-4.2"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-4.2",
+        "returns-and-refunds-policy-2.1",
+        "returns-and-refunds-policy-6.4",
+        "returns-and-refunds-policy-6.1"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-4.5",
+        "returns-and-refunds-policy-2.6",
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-7.1",
+        "returns-and-refunds-policy-7.2",
+        "returns-and-refunds-policy-7.3",
+        "returns-and-refunds-policy-7.4",
+        "returns-and-refunds-policy-7.5"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q07",
+      "question": "The store-arranged return pickup failed and my dispatch deadline is passing. What happens?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-4.5"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-4.5",
+        "returns-and-refunds-policy-4.2",
+        "returns-and-refunds-policy-4.3",
+        "orders-and-shipping-policy-7.3"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-5.1"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q07",
+      "question": "The store-arranged return pickup failed and my dispatch deadline is passing. What happens?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-4.5"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-4.5",
+        "returns-and-refunds-policy-4.2",
+        "orders-and-shipping-policy-7.3",
+        "returns-and-refunds-policy-4.3"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-5.1"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q07",
+      "question": "The store-arranged return pickup failed and my dispatch deadline is passing. What happens?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-4.5"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-4.5",
+        "returns-and-refunds-policy-4.2",
+        "orders-and-shipping-policy-7.3",
+        "returns-and-refunds-policy-6.5"
+      ],
+      "reference_chunk_ids": [],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q08",
+      "question": "Can I pay a courier myself and claim back shipping for an accepted faulty-item return?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-5.1"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-5.1",
+        "orders-and-shipping-policy-7.3",
+        "returns-and-refunds-policy-4.3",
+        "orders-and-shipping-policy-3.3"
+      ],
+      "reference_chunk_ids": [],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q08",
+      "question": "Can I pay a courier myself and claim back shipping for an accepted faulty-item return?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-5.1"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-5.1",
+        "returns-and-refunds-policy-4.1",
+        "returns-and-refunds-policy-2.2",
+        "orders-and-shipping-policy-3.3"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-6.1",
+        "returns-and-refunds-policy-6.2",
+        "returns-and-refunds-policy-6.3",
+        "returns-and-refunds-policy-6.4",
+        "returns-and-refunds-policy-6.5"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q08",
+      "question": "Can I pay a courier myself and claim back shipping for an accepted faulty-item return?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-5.1"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-3.3",
+        "returns-and-refunds-policy-5.1",
+        "orders-and-shipping-policy-7.3",
+        "returns-and-refunds-policy-5.2"
+      ],
+      "reference_chunk_ids": [],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.5,
+      "ndcg_at_k": 0.6309297535714575
+    },
+    {
+      "case_id": "q09",
+      "question": "For a change-of-mind return, who pays return shipping and do I get the original shipping fee back?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-5.1",
+        "returns-and-refunds-policy-5.2"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-5.2",
+        "returns-and-refunds-policy-2.4",
+        "returns-and-refunds-policy-5.1",
+        "returns-and-refunds-policy-7.4"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.1",
+        "returns-and-refunds-policy-2.5"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 0.9197207891481876
+    },
+    {
+      "case_id": "q09",
+      "question": "For a change-of-mind return, who pays return shipping and do I get the original shipping fee back?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-5.1",
+        "returns-and-refunds-policy-5.2"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-5.2",
+        "returns-and-refunds-policy-2.4",
+        "orders-and-shipping-policy-3.3",
+        "returns-and-refunds-policy-5.1"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.1",
+        "returns-and-refunds-policy-2.5"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 0.8772153153380493
+    },
+    {
+      "case_id": "q09",
+      "question": "For a change-of-mind return, who pays return shipping and do I get the original shipping fee back?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-5.1",
+        "returns-and-refunds-policy-5.2"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-5.1",
+        "returns-and-refunds-policy-5.2",
+        "orders-and-shipping-policy-3.3",
+        "returns-and-refunds-policy-2.4"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.1",
+        "returns-and-refunds-policy-2.5"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q10",
+      "question": "Is my partial refund calculated using the current catalogue price?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-6.2"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-6.2",
+        "returns-and-refunds-policy-5.2",
+        "orders-and-shipping-policy-3.3",
+        "orders-and-shipping-policy-6.3"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-5.1"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q10",
+      "question": "Is my partial refund calculated using the current catalogue price?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-6.2"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-6.2",
+        "orders-and-shipping-policy-3.3",
+        "returns-and-refunds-policy-5.2",
+        "orders-and-shipping-policy-6.3"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-5.1"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q10",
+      "question": "Is my partial refund calculated using the current catalogue price?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-6.2"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-6.2",
+        "orders-and-shipping-policy-3.1",
+        "orders-and-shipping-policy-3.3",
+        "returns-and-refunds-policy-5.2"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-5.1"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q11",
+      "question": "Can my refund be sent to a different bank account I provide in this chat?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-6.3"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-6.3",
+        "returns-and-refunds-policy-6.5",
+        "returns-and-refunds-policy-4.1",
+        "returns-and-refunds-policy-5.2"
+      ],
+      "reference_chunk_ids": [],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q11",
+      "question": "Can my refund be sent to a different bank account I provide in this chat?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-6.3"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-6.3",
+        "returns-and-refunds-policy-4.1",
+        "returns-and-refunds-policy-2.3",
+        "returns-and-refunds-policy-7.2"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-7.3",
+        "returns-and-refunds-policy-2.5"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q11",
+      "question": "Can my refund be sent to a different bank account I provide in this chat?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-6.3"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-6.3",
+        "returns-and-refunds-policy-7.1",
+        "returns-and-refunds-policy-7.2",
+        "returns-and-refunds-policy-2.6"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.5"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q12",
+      "question": "After my card refund is processed, when should I see the money?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-6.4"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-6.4",
+        "orders-and-shipping-policy-4.2",
+        "returns-and-refunds-policy-6.1",
+        "returns-and-refunds-policy-2.1"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-7.1",
+        "returns-and-refunds-policy-7.2",
+        "returns-and-refunds-policy-7.3",
+        "returns-and-refunds-policy-7.4",
+        "returns-and-refunds-policy-7.5",
+        "returns-and-refunds-policy-2.6"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q12",
+      "question": "After my card refund is processed, when should I see the money?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-6.4"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-4.2",
+        "returns-and-refunds-policy-6.4",
+        "returns-and-refunds-policy-2.6",
+        "returns-and-refunds-policy-6.1"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-7.1",
+        "returns-and-refunds-policy-7.2",
+        "returns-and-refunds-policy-7.3",
+        "returns-and-refunds-policy-7.4",
+        "returns-and-refunds-policy-7.5"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.5,
+      "ndcg_at_k": 0.6309297535714575
+    },
+    {
+      "case_id": "q12",
+      "question": "After my card refund is processed, when should I see the money?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-6.4"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-6.4",
+        "orders-and-shipping-policy-4.2",
+        "returns-and-refunds-policy-6.5",
+        "returns-and-refunds-policy-6.1"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-7.1",
+        "returns-and-refunds-policy-7.2",
+        "returns-and-refunds-policy-7.3",
+        "returns-and-refunds-policy-7.4",
+        "returns-and-refunds-policy-7.5"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q13",
+      "question": "The warehouse says my returned parcel contained the wrong item, but I disagree. Can they reject me immediately?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-7.2"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-2.3",
+        "returns-and-refunds-policy-6.1",
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-7.4"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-7.3",
+        "returns-and-refunds-policy-7.1",
+        "returns-and-refunds-policy-7.2",
+        "returns-and-refunds-policy-7.5",
+        "returns-and-refunds-policy-2.1",
+        "returns-and-refunds-policy-2.4"
+      ],
+      "recall_at_k": 0.0,
+      "mrr_at_k": 0.0,
+      "ndcg_at_k": 0.0
+    },
+    {
+      "case_id": "q13",
+      "question": "The warehouse says my returned parcel contained the wrong item, but I disagree. Can they reject me immediately?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-7.2"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-7.2",
+        "returns-and-refunds-policy-2.2",
+        "returns-and-refunds-policy-2.3",
+        "returns-and-refunds-policy-2.1"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-6.1",
+        "returns-and-refunds-policy-6.2",
+        "returns-and-refunds-policy-6.3",
+        "returns-and-refunds-policy-6.4",
+        "returns-and-refunds-policy-6.5",
+        "returns-and-refunds-policy-7.3",
+        "returns-and-refunds-policy-2.6"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q13",
+      "question": "The warehouse says my returned parcel contained the wrong item, but I disagree. Can they reject me immediately?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-7.2"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-7.2",
+        "returns-and-refunds-policy-7.1",
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-2.3"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.1",
+        "returns-and-refunds-policy-7.3"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q14",
+      "question": "I think my purchase is counterfeit. Am I automatically entitled to double compensation?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-7.3"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-7.3",
+        "returns-and-refunds-policy-2.3",
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-7.2"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.1"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q14",
+      "question": "I think my purchase is counterfeit. Am I automatically entitled to double compensation?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-7.3"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-7.3",
+        "returns-and-refunds-policy-2.3",
+        "returns-and-refunds-policy-7.2",
+        "returns-and-refunds-policy-2.5"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.1"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q14",
+      "question": "I think my purchase is counterfeit. Am I automatically entitled to double compensation?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-7.3"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-7.3",
+        "returns-and-refunds-policy-2.3",
+        "orders-and-shipping-policy-3.3",
+        "returns-and-refunds-policy-7.2"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.5"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q15",
+      "question": "I returned an unused item but inspection says it was used. How do I dispute the finding?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-7.4"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-7.4",
+        "returns-and-refunds-policy-2.3",
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-3.1"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.4",
+        "returns-and-refunds-policy-7.3",
+        "returns-and-refunds-policy-2.1",
+        "returns-and-refunds-policy-3.2"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q15",
+      "question": "I returned an unused item but inspection says it was used. How do I dispute the finding?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-7.4"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-7.4",
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-2.2",
+        "returns-and-refunds-policy-7.2"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.4",
+        "returns-and-refunds-policy-2.1",
+        "returns-and-refunds-policy-6.1",
+        "returns-and-refunds-policy-6.2",
+        "returns-and-refunds-policy-6.3",
+        "returns-and-refunds-policy-6.4",
+        "returns-and-refunds-policy-6.5"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q15",
+      "question": "I returned an unused item but inspection says it was used. How do I dispute the finding?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-7.4"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-7.4",
+        "returns-and-refunds-policy-6.1",
+        "returns-and-refunds-policy-3.3",
+        "returns-and-refunds-policy-7.2"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.4",
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-7.1",
+        "returns-and-refunds-policy-7.3",
+        "returns-and-refunds-policy-7.5"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q16",
+      "question": "Can you guarantee delivery at 3 pm tomorrow?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-2.2"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-2.1",
+        "orders-and-shipping-policy-2.2",
+        "orders-and-shipping-policy-1",
+        "orders-and-shipping-policy-7.1"
+      ],
+      "reference_chunk_ids": [
+        "orders-and-shipping-policy-7.2",
+        "orders-and-shipping-policy-7.4"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.5,
+      "ndcg_at_k": 0.6309297535714575
+    },
+    {
+      "case_id": "q16",
+      "question": "Can you guarantee delivery at 3 pm tomorrow?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-2.2"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-2.1",
+        "orders-and-shipping-policy-1",
+        "orders-and-shipping-policy-4.4",
+        "orders-and-shipping-policy-2.2"
+      ],
+      "reference_chunk_ids": [
+        "orders-and-shipping-policy-7.3",
+        "orders-and-shipping-policy-7.4"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.25,
+      "ndcg_at_k": 0.43067655807339306
+    },
+    {
+      "case_id": "q16",
+      "question": "Can you guarantee delivery at 3 pm tomorrow?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-2.2"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-2.2",
+        "orders-and-shipping-policy-7.3",
+        "orders-and-shipping-policy-4.3",
+        "orders-and-shipping-policy-7.1"
+      ],
+      "reference_chunk_ids": [
+        "orders-and-shipping-policy-2.1",
+        "orders-and-shipping-policy-7.2",
+        "orders-and-shipping-policy-7.4"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q17",
+      "question": "A label has been generated but the courier has not collected it. Can I change the address?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-4.4"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-4.4",
+        "orders-and-shipping-policy-4.1",
+        "returns-and-refunds-policy-4.3",
+        "orders-and-shipping-policy-5.1"
+      ],
+      "reference_chunk_ids": [
+        "orders-and-shipping-policy-7.3",
+        "orders-and-shipping-policy-7.4",
+        "returns-and-refunds-policy-5.1"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q17",
+      "question": "A label has been generated but the courier has not collected it. Can I change the address?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-4.4"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-4.1",
+        "orders-and-shipping-policy-4.4",
+        "returns-and-refunds-policy-4.3",
+        "orders-and-shipping-policy-2.3"
+      ],
+      "reference_chunk_ids": [
+        "orders-and-shipping-policy-7.3",
+        "orders-and-shipping-policy-7.4",
+        "returns-and-refunds-policy-5.1"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.5,
+      "ndcg_at_k": 0.6309297535714575
+    },
+    {
+      "case_id": "q17",
+      "question": "A label has been generated but the courier has not collected it. Can I change the address?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-4.4"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-4.1",
+        "orders-and-shipping-policy-4.4",
+        "returns-and-refunds-policy-4.3",
+        "orders-and-shipping-policy-2.3"
+      ],
+      "reference_chunk_ids": [
+        "orders-and-shipping-policy-7.3",
+        "orders-and-shipping-policy-7.4",
+        "returns-and-refunds-policy-5.1"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.5,
+      "ndcg_at_k": 0.6309297535714575
+    },
+    {
+      "case_id": "q18",
+      "question": "My order says processing but packing has started. Can I cancel it through the ordinary process?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-4.1",
+        "orders-and-shipping-policy-4.3"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-4.1",
+        "orders-and-shipping-policy-4.3",
+        "orders-and-shipping-policy-4.2",
+        "orders-and-shipping-policy-5.1"
+      ],
+      "reference_chunk_ids": [],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q18",
+      "question": "My order says processing but packing has started. Can I cancel it through the ordinary process?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-4.1",
+        "orders-and-shipping-policy-4.3"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-4.1",
+        "orders-and-shipping-policy-5.1",
+        "orders-and-shipping-policy-4.2",
+        "orders-and-shipping-policy-4.5"
+      ],
+      "reference_chunk_ids": [],
+      "recall_at_k": 0.5,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 0.6131471927654584
+    },
+    {
+      "case_id": "q18",
+      "question": "My order says processing but packing has started. Can I cancel it through the ordinary process?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-4.1",
+        "orders-and-shipping-policy-4.3"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-4.1",
+        "orders-and-shipping-policy-5.1",
+        "orders-and-shipping-policy-4.3",
+        "orders-and-shipping-policy-4.5"
+      ],
+      "reference_chunk_ids": [],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 0.9197207891481876
+    },
+    {
+      "case_id": "q19",
+      "question": "My order has three tracking numbers. Do I owe three delivery charges?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-3.2",
+        "orders-and-shipping-policy-6.1"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-3.2",
+        "orders-and-shipping-policy-6.1",
+        "orders-and-shipping-policy-7.4",
+        "orders-and-shipping-policy-5.1"
+      ],
+      "reference_chunk_ids": [
+        "orders-and-shipping-policy-7.1"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q19",
+      "question": "My order has three tracking numbers. Do I owe three delivery charges?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-3.2",
+        "orders-and-shipping-policy-6.1"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-3.2",
+        "orders-and-shipping-policy-6.1",
+        "orders-and-shipping-policy-5.1",
+        "orders-and-shipping-policy-7.4"
+      ],
+      "reference_chunk_ids": [
+        "orders-and-shipping-policy-7.1"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q19",
+      "question": "My order has three tracking numbers. Do I owe three delivery charges?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-3.2",
+        "orders-and-shipping-policy-6.1"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-6.1",
+        "orders-and-shipping-policy-3.2",
+        "orders-and-shipping-policy-5.1",
+        "orders-and-shipping-policy-1"
+      ],
+      "reference_chunk_ids": [],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q20",
+      "question": "Only one of my three parcels arrived. Does delivered mean everything has arrived?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-5.1",
+        "orders-and-shipping-policy-6.2"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-6.2",
+        "orders-and-shipping-policy-5.1",
+        "orders-and-shipping-policy-7.1",
+        "orders-and-shipping-policy-6.1"
+      ],
+      "reference_chunk_ids": [
+        "orders-and-shipping-policy-7.2",
+        "orders-and-shipping-policy-7.3",
+        "orders-and-shipping-policy-7.4",
+        "orders-and-shipping-policy-7.5",
+        "orders-and-shipping-policy-3.2"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q20",
+      "question": "Only one of my three parcels arrived. Does delivered mean everything has arrived?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-5.1",
+        "orders-and-shipping-policy-6.2"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-5.1",
+        "orders-and-shipping-policy-6.2",
+        "orders-and-shipping-policy-7.1",
+        "orders-and-shipping-policy-6.1"
+      ],
+      "reference_chunk_ids": [
+        "orders-and-shipping-policy-7.2",
+        "orders-and-shipping-policy-7.3",
+        "orders-and-shipping-policy-7.4",
+        "orders-and-shipping-policy-7.5",
+        "orders-and-shipping-policy-3.2"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q20",
+      "question": "Only one of my three parcels arrived. Does delivered mean everything has arrived?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-5.1",
+        "orders-and-shipping-policy-6.2"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-6.2",
+        "orders-and-shipping-policy-5.1",
+        "orders-and-shipping-policy-6.1",
+        "orders-and-shipping-policy-7.1"
+      ],
+      "reference_chunk_ids": [
+        "orders-and-shipping-policy-7.2",
+        "orders-and-shipping-policy-7.3",
+        "orders-and-shipping-policy-7.4",
+        "orders-and-shipping-policy-7.5",
+        "orders-and-shipping-policy-3.2"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q21",
+      "question": "There is no reliable estimated delivery date on my shipment. Should you invent a delivery date?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-5.3",
+        "orders-and-shipping-policy-7.1"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-5.3",
+        "orders-and-shipping-policy-2.2",
+        "orders-and-shipping-policy-7.1",
+        "orders-and-shipping-policy-7.4"
+      ],
+      "reference_chunk_ids": [
+        "orders-and-shipping-policy-2.1",
+        "orders-and-shipping-policy-7.2"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 0.9197207891481876
+    },
+    {
+      "case_id": "q21",
+      "question": "There is no reliable estimated delivery date on my shipment. Should you invent a delivery date?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-5.3",
+        "orders-and-shipping-policy-7.1"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-5.3",
+        "orders-and-shipping-policy-7.1",
+        "orders-and-shipping-policy-2.2",
+        "returns-and-refunds-policy-2.1"
+      ],
+      "reference_chunk_ids": [
+        "orders-and-shipping-policy-2.1",
+        "orders-and-shipping-policy-7.2",
+        "orders-and-shipping-policy-7.4",
+        "returns-and-refunds-policy-2.6"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q21",
+      "question": "There is no reliable estimated delivery date on my shipment. Should you invent a delivery date?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-5.3",
+        "orders-and-shipping-policy-7.1"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-7.1",
+        "orders-and-shipping-policy-5.3",
+        "orders-and-shipping-policy-2.2",
+        "returns-and-refunds-policy-2.1"
+      ],
+      "reference_chunk_ids": [
+        "orders-and-shipping-policy-7.2",
+        "orders-and-shipping-policy-7.4",
+        "orders-and-shipping-policy-2.1",
+        "returns-and-refunds-policy-2.6"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q22",
+      "question": "The carrier has confirmed my parcel is lost. Must I wait another three days before investigation?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-7.2"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-7.1",
+        "orders-and-shipping-policy-7.2",
+        "orders-and-shipping-policy-7.4",
+        "returns-and-refunds-policy-4.2"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-4.5"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.5,
+      "ndcg_at_k": 0.6309297535714575
+    },
+    {
+      "case_id": "q22",
+      "question": "The carrier has confirmed my parcel is lost. Must I wait another three days before investigation?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-7.2"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-7.1",
+        "orders-and-shipping-policy-7.2",
+        "orders-and-shipping-policy-7.4",
+        "returns-and-refunds-policy-2.2"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-6.1",
+        "returns-and-refunds-policy-6.2",
+        "returns-and-refunds-policy-6.3",
+        "returns-and-refunds-policy-6.4",
+        "returns-and-refunds-policy-6.5"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.5,
+      "ndcg_at_k": 0.6309297535714575
+    },
+    {
+      "case_id": "q22",
+      "question": "The carrier has confirmed my parcel is lost. Must I wait another three days before investigation?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-7.2"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-7.1",
+        "orders-and-shipping-policy-7.2",
+        "returns-and-refunds-policy-2.2",
+        "orders-and-shipping-policy-7.4"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-6.1",
+        "returns-and-refunds-policy-6.2",
+        "returns-and-refunds-policy-6.3",
+        "returns-and-refunds-policy-6.4",
+        "returns-and-refunds-policy-6.5"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.5,
+      "ndcg_at_k": 0.6309297535714575
+    },
+    {
+      "case_id": "q23",
+      "question": "Tracking says delivered, but nobody at my address received anything. Must I wait three days?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-7.4"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-7.4",
+        "orders-and-shipping-policy-7.1",
+        "returns-and-refunds-policy-2.1",
+        "orders-and-shipping-policy-2.1"
+      ],
+      "reference_chunk_ids": [
+        "orders-and-shipping-policy-7.2",
+        "returns-and-refunds-policy-2.6"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q23",
+      "question": "Tracking says delivered, but nobody at my address received anything. Must I wait three days?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-7.4"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-7.4",
+        "orders-and-shipping-policy-7.1",
+        "orders-and-shipping-policy-4.4",
+        "returns-and-refunds-policy-2.1"
+      ],
+      "reference_chunk_ids": [
+        "orders-and-shipping-policy-7.2",
+        "orders-and-shipping-policy-7.3",
+        "returns-and-refunds-policy-2.6"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q23",
+      "question": "Tracking says delivered, but nobody at my address received anything. Must I wait three days?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "orders-and-shipping-policy-7.4"
+      ],
+      "retrieved_chunk_ids": [
+        "orders-and-shipping-policy-7.4",
+        "orders-and-shipping-policy-7.1",
+        "returns-and-refunds-policy-6.1",
+        "returns-and-refunds-policy-2.2"
+      ],
+      "reference_chunk_ids": [
+        "orders-and-shipping-policy-7.2",
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-7.1",
+        "returns-and-refunds-policy-7.2",
+        "returns-and-refunds-policy-7.3",
+        "returns-and-refunds-policy-7.4",
+        "returns-and-refunds-policy-7.5",
+        "returns-and-refunds-policy-6.2",
+        "returns-and-refunds-policy-6.3",
+        "returns-and-refunds-policy-6.4",
+        "returns-and-refunds-policy-6.5"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0
+    },
+    {
+      "case_id": "q24",
+      "question": "I received the item sixteen days ago and want to return it because I changed my mind. What conditions matter?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-2.1",
+        "returns-and-refunds-policy-2.4"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-7.4",
+        "returns-and-refunds-policy-2.4",
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-4.4"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.1"
+      ],
+      "recall_at_k": 0.5,
+      "mrr_at_k": 0.5,
+      "ndcg_at_k": 0.38685280723454163
+    },
+    {
+      "case_id": "q24",
+      "question": "I received the item sixteen days ago and want to return it because I changed my mind. What conditions matter?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-2.1",
+        "returns-and-refunds-policy-2.4"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-7.4",
+        "returns-and-refunds-policy-2.4",
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-2.1"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-2.6"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.5,
+      "ndcg_at_k": 0.6509209298071326
+    },
+    {
+      "case_id": "q24",
+      "question": "I received the item sixteen days ago and want to return it because I changed my mind. What conditions matter?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "returns-and-refunds-policy-2.1",
+        "returns-and-refunds-policy-2.4"
+      ],
+      "retrieved_chunk_ids": [
+        "returns-and-refunds-policy-2.3",
+        "returns-and-refunds-policy-7.4",
+        "returns-and-refunds-policy-2.4",
+        "returns-and-refunds-policy-4.4"
+      ],
+      "reference_chunk_ids": [
+        "returns-and-refunds-policy-7.3",
+        "returns-and-refunds-policy-2.5",
+        "returns-and-refunds-policy-2.1"
+      ],
+      "recall_at_k": 0.5,
+      "mrr_at_k": 0.3333333333333333,
+      "ndcg_at_k": 0.3065735963827292
+    }
+  ]
+}

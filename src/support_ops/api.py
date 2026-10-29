@@ -2,11 +2,8 @@
 from __future__ import annotations
 
 import json
-import logging
 import queue
 import threading
-import time
-from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any, Literal
@@ -20,11 +17,7 @@ from support_ops.helpers.clock import Clock
 from support_ops.helpers.config import load_config
 from support_ops.helpers.llm import OpenAICompatLLM
 from support_ops.helpers.tracing import Tracer
-from support_ops.policy.rules import Rules
-from support_ops.systems.single_agent import SingleAgentWorkflow, policy_from_config
-
-log = logging.getLogger("uvicorn.error")   # shown in the uvicorn console
-
+from support_ops.systems.single_agent import SingleAgentWorkflow
 
 class Turn(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
@@ -62,18 +55,7 @@ def _runtime() -> tuple[dict[str, Any], OpenAICompatLLM]:
     return cfg, OpenAICompatLLM(cfg)
 
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    # Pay one-off policy setup (RAG models, corpus embeddings) at startup, not in the first ticket.
-    cfg = load_config()
-    started = time.perf_counter()
-    policy_from_config(cfg, Rules.load(cfg["policy"]["rules_file"])).warm_up()
-    log.info("policy mode %r ready in %.1fs", cfg["policy"].get("mode", "skills"), time.perf_counter() - started)
-    yield
-
-
-app = FastAPI(title="Policy-Bound Support Ops", version="0.1.0", lifespan=lifespan)
-
+app = FastAPI(title="Policy-Bound Support Ops", version="0.1.0")
 
 @app.get("/health")
 def health() -> dict[str, str]:

@@ -1,0 +1,23 @@
+[
+  {
+    "approach": "vector",
+    "questions": 24,
+    "recall_at_k": 0.938,
+    "mrr_at_k": 0.875,
+    "ndcg_at_k": 0.88
+  },
+  {
+    "approach": "hybrid",
+    "questions": 24,
+    "recall_at_k": 0.979,
+    "mrr_at_k": 0.865,
+    "ndcg_at_k": 0.879
+  },
+  {
+    "approach": "hybrid_rerank",
+    "questions": 24,
+    "recall_at_k": 0.979,
+    "mrr_at_k": 0.91,
+    "ndcg_at_k": 0.922
+  }
+]
