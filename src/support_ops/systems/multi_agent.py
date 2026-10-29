@@ -18,10 +18,9 @@ from langgraph.graph import END, START, StateGraph
 
 from support_ops.agents.approver import Approver
 from support_ops.agents.guard import classify
-from support_ops.agents.models import ApprovalResult, HandoffPacket, Proposal, Triage
+from support_ops.agents.models import ApprovalResult, Proposal, Triage
 from support_ops.agents.runtime import AgentContext, Budget, BudgetExceeded, Retries, llm_from_config
 from support_ops.agents.specialist import STRATEGIES, Specialist
-from support_ops.agents.supervisor import Supervisor
 from support_ops.agents.toolbox import ORDERS_SHIPPING_TOOLS, RETURNS_REFUNDS_TOOLS, Toolbox, policy_search_tool
 from support_ops.backend.postgres import PostgresReader
 from support_ops.gateway.approvals import TicketFlow
@@ -36,6 +35,9 @@ from support_ops.policy.provider import PolicyProvider
 from support_ops.policy.routing import RoutingRules
 from support_ops.policy.rules import Rules
 from support_ops.policy.rag import RagPolicy
+from support_ops.supervisor.escalation import FIXED_REPLY_TRIGGERS, HOLD_REPLY, handoff_packet, triage_escalation
+from support_ops.supervisor.outcome import customer_outcome
+from support_ops.supervisor.supervisor import Supervisor
 from support_ops.systems.tools import SupportTools
 
 SPECIALIST_TOOLS = {"orders_shipping": ORDERS_SHIPPING_TOOLS, "returns_refunds": RETURNS_REFUNDS_TOOLS}
@@ -47,9 +49,6 @@ DEFAULTS = {
 }
 # Earlier turns arrive with each request (the API is stateless).
 HISTORY_ROLES = {"customer", "agent"}
-HOLD_REPLY = "I’ve referred your request to a support specialist for review."
-# Handoffs from these triggers get the fixed hold reply with no further LLM calls.
-FIXED_REPLY_TRIGGERS = ("guard", "budget")
 
 
 class MultiAgentState(TypedDict, total=False):
@@ -194,14 +193,8 @@ class MultiAgentWorkflow:
             return self._to_handoff(f"triage failed: {exc}")
         self.flow.transition(state["ticket_id"], "triaged", intent=triage.intent, specialist=triage.specialist)
         update: dict[str, Any] = {"triage": triage}
-        if triage.wants_human:
-            return {**update, **self._to_handoff("customer asked for a human")}
-        if triage.duplicate_of:
-            return {**update, **self._to_handoff(f"duplicate of open ticket {triage.duplicate_of}")}
-        if triage.specialist is None:
-            return {**update, **self._to_handoff("no specialist covers this request")}
-        if triage.confidence < self.settings["triage_confidence_min"]:
-            return {**update, **self._to_handoff(f"low triage confidence ({triage.confidence:.2f})")}
+        if reason := triage_escalation(triage, self.settings["triage_confidence_min"]):
+            return {**update, **self._to_handoff(reason)}
         return {**update, "next": "specialist"}
 
     def _specialist(self, state: MultiAgentState) -> dict[str, Any]:
@@ -277,71 +270,14 @@ class MultiAgentWorkflow:
 
     def _handoff(self, state: MultiAgentState) -> dict[str, Any]:
         self._event("node_start", node="handoff", reason=state["handoff_reason"])
-        proposal, triage = state.get("proposal"), state.get("triage")
-        actions = [f"{item['agent']}: {item['tool']}" + (" (error)" if "error" in item["result"] else "")
-                   for item in state["evidence"]]
-        if state.get("execution"):
-            actions.append(f"write {state['execution']['status']}: {state['execution'].get('operation')}")
-        packet = HandoffPacket(
-            ticket_id=state["ticket_id"], reason=state["handoff_reason"],
-            summary=f"{triage.intent if triage else 'request'}: {state['customer_message'][:500]}",
-            actions_taken=actions, cited_clauses=proposal.cited_clauses if proposal else [],
-            recommendation=(f"Specialist proposes {proposal.action} via {proposal.route}: {proposal.reason}"
-                            if proposal else "Review the request; the automated flow stopped before a proposal."),
-            proposal=proposal, min_route=state.get("min_route"),
-        )
+        packet = handoff_packet(
+            ticket_id=state["ticket_id"], reason=state["handoff_reason"], customer_message=state["customer_message"],
+            triage=state.get("triage"), proposal=state.get("proposal"), min_route=state.get("min_route"),
+            evidence=state["evidence"], execution=state.get("execution"))
         if self.flow.status(state["ticket_id"]) != "awaiting_human":
             self.flow.handoff(packet)
         self._event("handoff_created", packet=packet.model_dump(mode="json"))
         return {"handoff_packet": packet.model_dump(mode="json"), "next": "reply"}
-
-    @staticmethod
-    def _verified_facts(state: MultiAgentState) -> list[dict[str, Any]]:
-        """Successful read and policy results, so the reply rests on what the tools returned."""
-        return [{"tool": item["tool"], "result": item["result"]} for item in state["evidence"]
-                if item["tool"] != "route" and "error" not in item["result"]]
-
-    def _customer_outcome(self, state: MultiAgentState, status: str) -> dict[str, Any]:
-        """What the reply may say, in customer terms. Routes, approvals, rule names, thresholds and
-        clause or item IDs stay internal, so the reply cannot leak or misread them."""
-        facts = self._verified_facts(state)
-        names = {item["id"]: item.get("name") for fact in facts if fact["tool"] == "get_items_for_order"
-                 for item in fact["result"].get("items", [])}
-        proposal, execution = state.get("proposal"), state.get("execution")
-        executed = bool(execution and execution.get("status") == "executed")
-        outcome: dict[str, Any] = {"status": {"approved": "resolved", "executed": "resolved"}.get(status, status),
-                                   "facts": facts}
-        if proposal and proposal.action != "none":
-            request: dict[str, Any] = {"action": proposal.action, "order_id": proposal.order_id}
-            if proposal.amount is not None:
-                request["amount"] = f"{proposal.amount:.2f} {self.routing.currency}"
-            if proposal.items:
-                request["items"] = [{"product": names.get(line.item_id) or "the item", "quantity": line.quantity}
-                                    for line in proposal.items]
-            outcome["request"] = request
-        if proposal:
-            # What the specialist found, e.g. that a shipment is past its estimated date.
-            outcome["specialist_finding"] = proposal.reason
-        if (state.get("min_route") or {}).get("overdue_shipment"):
-            # Found by code from the shipment dates, so the apology does not depend on the model's arithmetic.
-            outcome["problems"] = ["The shipment is past its estimated delivery date."]
-        if outcome["status"] == "awaiting_human" and facts:
-            outcome["tell_customer"] = (
-                "Share what the facts show that answers the customer (e.g. the current status and "
-                "estimated dates). Acknowledge every item in problems, if any, and apologise; likewise "
-                "anything else that has gone wrong, such as a damaged item. Then say a support specialist will review the request and "
-                "follow up. Promise no outcome, refund, compensation or timeline.")
-        elif outcome["status"] == "awaiting_human":
-            outcome["tell_customer"] = "A support specialist will review the request. Promise nothing else."
-        elif outcome["status"] == "awaiting_customer":
-            outcome["tell_customer"] = f"Ask: {state.get('customer_question')}"
-        elif executed:
-            outcome["tell_customer"] = (f"The {proposal.action} is recorded and complete; nothing is pending "
-                                        "review. Say what was recorded.")
-        else:
-            outcome["tell_customer"] = ("Answer the question from the facts. Acknowledge every item in "
-                                        "problems, if any, and apologise. No action was taken.")
-        return outcome
 
     def _reply(self, state: MultiAgentState) -> dict[str, Any]:
         ticket_id = state["ticket_id"]
@@ -349,7 +285,10 @@ class MultiAgentWorkflow:
         if reason.startswith(FIXED_REPLY_TRIGGERS):
             return {"reply": HOLD_REPLY}
         status = self.flow.status(ticket_id)
-        outcome = self._customer_outcome(state, status)
+        outcome = customer_outcome(
+            status=status, evidence=state["evidence"], proposal=state.get("proposal"),
+            execution=state.get("execution"), min_route=state.get("min_route"),
+            customer_question=state.get("customer_question"), currency=self.routing.currency)
         brief, issues, review = self._brief(state), None, None
         try:
             for _ in range(self.settings["max_reply_drafts"]):
