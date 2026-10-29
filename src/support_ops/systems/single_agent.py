@@ -224,8 +224,7 @@ class SingleAgentWorkflow:
             return {**update, **self._plan(state)}
         result = self._chat("supervisor", [
             {"role": "system", "content": self._system_prompt() +
-             " Choose exactly one tool call per turn. When ready to answer, call respond_to_customer "
-             "with the complete customer-facing reply. Do not use another tool after that call."},
+             " Choose exactly one tool call per turn. When ready to answer, return without a tool call."},
             *state["messages"],
         ], tools=self.tools.schemas)
         if not result.tool_calls:
@@ -248,8 +247,8 @@ class SingleAgentWorkflow:
             "Use only these tool schemas: " + json.dumps(self.tools.schemas) + ". " +
             (policy_context + ". " if policy_context else "") +
             "Use literal known IDs and arguments; never invent results of earlier calls. "
-            "If responding directly, use respond_to_customer as the final call and include the full "
-            "customer-facing reply. If clarification is required, ask the customer. Correct any previous "
+            "Plan only the necessary operational tool calls; the workflow will draft the customer reply "
+            "after those calls finish. If clarification is required, ask the customer. Correct any previous "
             "error using the execution evidence, and do not repeat completed writes."
         )
         result = self._chat("supervisor", [
@@ -272,8 +271,6 @@ class SingleAgentWorkflow:
                 if not isinstance(call, dict) or set(call) != {"name", "arguments"}:
                     raise ValueError("each call requires exactly name and arguments")
                 normalized.append((call["name"], self.tools.validate(call["name"], call["arguments"])))
-            if any(name == "respond_to_customer" for name, _ in normalized[:-1]):
-                raise ValueError("respond_to_customer must be the final planned call")
         except (ValueError, TypeError) as exc:
             return self._retry_plan(state, str(exc))
         return {
@@ -299,14 +296,6 @@ class SingleAgentWorkflow:
         for call in state["planned_calls"]:
             if steps >= self.cfg["limits"]["max_steps_per_ticket"]:
                 return {"error": "tool execution limit reached", "evidence": evidence, "tool_steps": steps}
-            if call["name"] == "respond_to_customer":
-                reply = call["arguments"]["reply"]
-                self._event("tool_start", call_id=call["id"], tool=call["name"], input=call["arguments"])
-                self._event("tool_end", call_id=call["id"], tool=call["name"], elapsed_s=0,
-                            output={"status": "replied"})
-                self._event("customer_reply", reply=reply)
-                return {"reply": reply, "evidence": evidence, "messages": messages,
-                        "tool_steps": steps + 1, "planned_calls": []}
             started = time.perf_counter()
             self._event("tool_start", call_id=call["id"], tool=call["name"], input=call["arguments"])
             recoverable = False
@@ -351,10 +340,6 @@ class SingleAgentWorkflow:
         self._event("node_start", node="final_reply")
         if self.tracer and self.tracer.cost_usd >= self.cfg["limits"]["max_cost_usd_per_ticket"]:
             return self._handoff_reply({**state, "error": "LLM cost budget reached"})
-        reply_schema = next(
-            schema for schema in self.tools.schemas
-            if schema["function"]["name"] == "respond_to_customer"
-        )
         result = self._chat("supervisor", [
             {"role": "system", "content": self._system_prompt() +
              " Draft a concise final reply using only the supplied status and successful evidence. "
@@ -367,17 +352,9 @@ class SingleAgentWorkflow:
                 "message": state["customer_message"], "status": state["ticket_status"],
                 "evidence": [item for item in state["evidence"] if "error" not in item["result"]],
             }, default=str)},
-        ], tools=[reply_schema])
-        if result.tool_calls and result.tool_calls[0].name == "respond_to_customer":
-            tool = result.tool_calls[0]
-            call = self._requested_call(tool.name, tool.arguments, state["strategy"])
-            self._event("tool_start", call_id=call["id"], tool=call["name"], input=call["arguments"])
-            reply = tool.arguments.get("reply", "")
-            self._event("tool_end", call_id=call["id"], tool=call["name"], elapsed_s=0,
-                        output={"status": "replied"})
-            self._event("customer_reply", reply=reply)
-        else:
-            reply = result.content or "I’m unable to complete that request right now."
+        ])
+        reply = result.content or "I’m unable to complete that request right now."
+        self._event("customer_reply", reply=reply)
         return {"reply": reply}
 
     def _handoff_reply(self, state: SupportState) -> dict[str, Any]:
