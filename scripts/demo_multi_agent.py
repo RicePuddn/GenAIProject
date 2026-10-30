@@ -22,7 +22,7 @@ import streamlit as st
 
 API = os.environ.get("SUPPORT_OPS_MULTI_API", "http://127.0.0.1:8001").rstrip("/")
 STRATEGIES = ["react", "plan_and_execute"]
-ORCHESTRATIONS = [*STRATEGIES, "supervisor"]   # supervisor: the pure-supervisor workflow chooses every step
+DESIGNS = {"workflow": "Fixed workflow", "supervisor": "Pure supervisor"}
 STATUS_LABELS = {
     "resolved": ("success", "Resolved"),
     "awaiting_customer": ("info", "Waiting for the customer"),
@@ -166,6 +166,11 @@ def show_event(event: dict[str, Any]) -> None:
         st.markdown(f"#### Supervisor · {event['tool'].replace('_', ' ')}")
         if arguments:
             st.caption(arguments)
+    elif kind == "supervisor_plan":
+        st.markdown("#### Supervisor · " + ("plan again" if event.get("again") else "plan"))
+        st.caption(" → ".join(step["tool"].replace("_", " ") for step in event["steps"]))
+    elif kind == "supervisor_replan":
+        st.warning(f"Planning again ({event['replans']}): {event['reason']}")
     elif kind == "supervisor_refused":
         st.error(f"Refused {'`' + event['tool'] + '`' if event.get('tool') else 'the step'}: {event['reason']}")
     elif kind == "supervisor_limit":
@@ -235,9 +240,9 @@ def show_outcome(response: dict[str, Any]) -> None:
 
 def summary(response: dict[str, Any]) -> str:
     trace = response["trace"]
+    design = DESIGNS.get(response.get("design", "workflow"), "Fixed workflow").lower()
     orchestration = response.get("orchestration", response["strategy"])
-    supervisor = "pure supervisor" if orchestration == "supervisor" else f"supervisor {orchestration}"
-    return (f"What the agents did · {supervisor} · "
+    return (f"What the agents did · {design} · supervisor {orchestration} · "
             f"specialists {response['strategy']} · {trace['tool_call_count']} tools · "
             f"{trace['llm_calls']} LLM calls · ${trace['cost_usd']:.4f} · {trace['elapsed_s']:.1f}s")
 
@@ -288,12 +293,17 @@ with st.sidebar:
         info = {"default_strategy": "react"}
         st.error(str(exc))
     default = info.get("default_strategy", "react")
+    default_design = info.get("default_design", "workflow")
+    design = st.radio("Multi-agent design", list(DESIGNS), format_func=DESIGNS.get,
+                      index=list(DESIGNS).index(default_design) if default_design in DESIGNS else 0,
+                      help="Fixed workflow: code runs triage → specialist → decide → execute. Pure supervisor: "
+                           "the supervisor chooses every step; the gateway refuses unsafe ones.")
     default_orchestration = info.get("default_orchestration", default)
-    orchestration = st.radio("Supervisor (orchestration)", ORCHESTRATIONS,
-                             index=ORCHESTRATIONS.index(default_orchestration) if default_orchestration in ORCHESTRATIONS else 0,
-                             help="react: picks each part after seeing the last result. plan_and_execute: "
-                                  "plans every part at triage. supervisor: no fixed steps; the supervisor "
-                                  "chooses every step and the gateway refuses unsafe ones.")
+    orchestration = st.radio("Supervisor strategy", STRATEGIES,
+                             index=STRATEGIES.index(default_orchestration) if default_orchestration in STRATEGIES else 0,
+                             help="react: decides each step after seeing the last result. plan_and_execute: "
+                                  "plans the steps first (fixed workflow: the parts at triage) and plans again "
+                                  "when a step goes differently.")
     strategy = st.radio("Specialists", STRATEGIES, index=STRATEGIES.index(default) if default in STRATEGIES else 0,
                         help="react: one tool call per turn. plan_and_execute: plan the calls, then run them.")
     st.button("New ticket", on_click=new_ticket, width="stretch")
@@ -307,7 +317,7 @@ for index, exchange in enumerate(exchanges):
 
 if message := st.chat_input("Write as the customer, e.g. One bottle in ORD-2026-00031 arrived dented."):
     exchange: dict[str, Any] = {"message": message}
-    payload = {"customer_message": message, "strategy": strategy, "orchestration": orchestration,
+    payload = {"customer_message": message, "strategy": strategy, "orchestration": orchestration, "design": design,
                "history": st.session_state.history}
     if st.session_state.ticket_id:
         payload["ticket_id"] = st.session_state.ticket_id

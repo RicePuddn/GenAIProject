@@ -13,11 +13,13 @@ llm:
 policy:
   mode: skills
 multi_agent:
-  orchestration: null           # react: pick each part after seeing the last; plan_and_execute: plan at triage
+  design: workflow              # workflow: fixed steps; supervisor: the supervisor chooses every step
+  orchestration: null           # the supervisor's react or plan_and_execute (null: same as agent.strategy)
   triage_confidence_min: 0.5   # below this, hand off rather than guess the specialist
   max_reproposals: 1           # approver rejections the specialist may fix
   max_reply_drafts: 2          # reply drafts the approver reviews before the hold reply
   max_orchestration_steps: 4   # react: orchestrator decisions per ticket (delegations + finish)
+  max_supervisor_steps: 8      # design supervisor: tool calls per ticket before it is handed off
   policy_skills:                # each specialist's policy scope: skill folders under policy.skills_dir
     orders_shipping: [orders-and-shipping]
     returns_refunds: [returns-and-refunds]

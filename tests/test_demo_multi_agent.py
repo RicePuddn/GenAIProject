@@ -89,8 +89,9 @@ class DemoMultiAgentTests(unittest.TestCase):
         with patch("urllib.request.urlopen", fake):
             app = AppTest.from_file(str(ROOT / "scripts/demo_multi_agent.py"), default_timeout=30).run()
             self.assertIn("rag", app.sidebar.markdown[0].value)
-            app.sidebar.radio[0].set_value("plan_and_execute").run()
-            app.sidebar.radio[0].set_value("react").run()
+            strategy = next(radio for radio in app.sidebar.radio if radio.label == "Supervisor strategy")
+            strategy.set_value("plan_and_execute").run()
+            strategy.set_value("react").run()
             app.chat_input[0].set_value("One bottle in ORD-2026-00031 arrived dented.").run()
             app.chat_input[0].set_value("Thanks!").run()
 
