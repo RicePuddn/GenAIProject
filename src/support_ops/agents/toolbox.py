@@ -96,6 +96,11 @@ def policy_skills_tool(tools: SupportTools, skills: Sequence[str] | None = None)
                 return {**result, "scope": "all"}
             catalog = [item for item in result["catalog"] if item["skill"] in skills]
             return {"skills": [item["skill"] for item in catalog], "catalog": catalog, "scope": "own"}
+        known = {item["skill"] for item in tools.policy.catalog()}
+        if args["skill"] not in known:
+            # A guessed name: point at the real ones instead of suggesting another area.
+            choices = sorted(known) if everything else list(skills)
+            raise ValueError(f"no policy skill named {args['skill']!r}; your skills: {choices}")
         if not everything and args["skill"] not in skills:
             raise ValueError(f"{args['skill']} is outside your policy skills {list(skills)}; "
                              "use scope all if the case crosses into another area")

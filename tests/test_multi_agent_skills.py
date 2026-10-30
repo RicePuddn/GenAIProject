@@ -55,8 +55,21 @@ class SkillsToolTests(unittest.TestCase):
         self.assertIn("shipment status",
                       self.call(action="read", skill="orders-and-shipping", file="tracking.md", scope="all")["content"])
 
+    def test_unknown_skill_names_the_real_ones(self):
+        # A guessed name is not another area, so the error lists the specialist's skills, not scope all.
+        with self.assertRaisesRegex(ValueError, r"no policy skill named 'returns'; your skills: \['returns-and-refunds'\]") as error:
+            self.call(action="open", skill="returns")
+        self.assertNotIn("scope all", str(error.exception))
+        with self.assertRaisesRegex(ValueError, "your skills: \\['orders-and-shipping', 'returns-and-refunds'\\]"):
+            self.call(action="open", skill="returns", scope="all")
+        with self.assertRaisesRegex(ValueError, "outside your policy skills"):   # a real skill of another area
+            self.call(action="open", skill="orders-and-shipping")
+
     def test_no_path_escape_and_no_check(self):
+        # Out of the skill folder through the file name, e.g. into the other specialist's skill.
         with self.assertRaisesRegex(ValueError, "invalid policy path"):
+            self.call(action="read", skill="returns-and-refunds", file="../orders-and-shipping/tracking.md")
+        with self.assertRaisesRegex(ValueError, "no policy skill named '..'"):
             self.call(action="read", skill="..", file="secrets.md", scope="all")
         with self.assertRaises(ValidationError):   # the route tool applies the hard rules
             self.call(action="check", operation="refund", amount=5)
