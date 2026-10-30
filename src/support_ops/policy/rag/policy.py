@@ -19,6 +19,9 @@ class Retriever(Protocol):
         """Section names in corpus order."""
         ...
 
+    def warm_up(self) -> None:
+        """Load and exercise models before serving tickets."""
+        ...
 
 
 class RagPolicy:
@@ -37,13 +40,17 @@ class RagPolicy:
         settings = RagSettings.from_config(policy.get("rag", {}))
         return cls(shared_retriever(settings), rules)
 
+    # Preload the same cached retriever later used by the agent tool.
+    def warm_up(self) -> None:
+        self.retriever.warm_up()
+
     def planner_context(self) -> str:
         return ("Policy sections (contents must still be searched with tools): "
                 + json.dumps(self.retriever.sections()))
 
     def run(self, args: dict[str, Any]) -> dict[str, Any]:
         if args.get("action") == "check":
-            return self.rules.check(args.get("operation", ""), args.get("amount"))
+            return self.rules.check(args.get("operation", ""), args.get("amount"), args.get("facts"))
         if args.get("action") == "search":
             return {"query": args["query"], "clauses": self.retriever.search(args["query"])}
         raise ValueError("unsupported policy action")

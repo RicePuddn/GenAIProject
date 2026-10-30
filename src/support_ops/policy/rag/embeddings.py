@@ -7,11 +7,19 @@ import math
 from pathlib import Path
 
 from support_ops.helpers.config import ROOT
-from support_ops.policy.rag.loader import EMBEDDING_MODEL, load_corpus, write_chunks
-from support_ops.policy.rag.retriever import Embedder, load_embedder
+from support_ops.policy.rag.loader import load_corpus, write_chunks
+from support_ops.policy.rag.models import DIMENSION, EMBEDDING_MODEL, Embedder, load_embedder
 
 EMBEDDING_DIR = ROOT / "policy/embed_chunk"
-DIMENSION = 768
+EMBEDDING_RECIPE = {
+    "embedding_model": EMBEDDING_MODEL,
+    "dimension": DIMENSION,
+    "metric": "cosine",
+    "contextual": True,
+    "document_prefix": "search_document: ",
+    "query_prefix": "search_query: ",
+    "normalization": "layer_norm_then_l2",
+}
 
 
 # Fingerprint the exact chunk records so changed policies cannot reuse stale embeddings.
@@ -31,13 +39,15 @@ def prepare_embeddings(source: Path, output: Path = EMBEDDING_DIR,
     output.mkdir(parents=True, exist_ok=True)
 
     # Step 2: Reuse saved vectors only when the complete corpus and model recipe match.
-    if (output / "manifest.json").exists():
+    try:
         manifest, _ = read_embeddings(output)
-        if manifest["corpus_hash"] == corpus_hash:
-            return manifest
+    except (FileNotFoundError, ValueError):
+        manifest = None  # Missing or incompatible cached data must be rebuilt.
+    if manifest is not None and manifest["corpus_hash"] == corpus_hash:
+        return manifest
 
     # Step 3: Use the same model and preprocessing later used for query embeddings.
-    texts = [clause.indexed_text(True) for clause in clauses]
+    texts = [clause.indexed_text() for clause in clauses]
     vectors = (embedder or load_embedder(EMBEDDING_MODEL)).encode([f"search_document: {text}" for text in texts])
     if len(vectors) != len(records):
         raise ValueError("embedding count does not match the chunk count")
@@ -53,10 +63,7 @@ def prepare_embeddings(source: Path, output: Path = EMBEDDING_DIR,
     # Step 4: Save upload-ready JSONL and a manifest describing the embedding recipe.
     data = "".join(json.dumps(doc, ensure_ascii=False) + "\n" for doc in documents)
     (output / "policies.jsonl").write_text(data, encoding="utf-8")
-    manifest = {"corpus_hash": corpus_hash, "embedding_model": EMBEDDING_MODEL,
-                "dimension": DIMENSION, "metric": "cosine", "contextual": True,
-                "document_prefix": "search_document: ", "query_prefix": "search_query: ",
-                "normalization": "layer_norm_then_l2", "count": len(documents),
+    manifest = {"corpus_hash": corpus_hash, **EMBEDDING_RECIPE, "count": len(documents),
                 "data_sha256": hashlib.sha256(data.encode()).hexdigest()}
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return manifest
@@ -66,10 +73,8 @@ def prepare_embeddings(source: Path, output: Path = EMBEDDING_DIR,
 def read_embeddings(folder: Path = EMBEDDING_DIR) -> tuple[dict, list[dict]]:
     manifest = json.loads((folder / "manifest.json").read_text())
     data = (folder / "policies.jsonl").read_text(encoding="utf-8")
-    if manifest.get("embedding_model") != EMBEDDING_MODEL or manifest.get("dimension") != DIMENSION:
-        raise ValueError("saved embeddings use a different model or dimension; regenerate them")
-    if manifest.get("normalization") != "layer_norm_then_l2":
-        raise ValueError("saved embeddings use a different preprocessing recipe")
+    if any(manifest.get(key) != value for key, value in EMBEDDING_RECIPE.items()):
+        raise ValueError("saved embeddings use a different model recipe; regenerate them")
     if hashlib.sha256(data.encode()).hexdigest() != manifest["data_sha256"]:
         raise ValueError("saved embedding file does not match its manifest")
     documents = [json.loads(line) for line in data.splitlines() if line.strip()]
@@ -88,5 +93,5 @@ if __name__ == "__main__":
     from support_ops.helpers.config import load_config
 
     policy = load_config()["policy"]
-    manifest = prepare_embeddings(ROOT / policy["corpus_dir"] / policy["corpus_size"])
+    manifest = prepare_embeddings(ROOT / policy["corpus_dir"])
     print(f"Saved {manifest['count']} embeddings ({manifest['dimension']} dimensions) in {EMBEDDING_DIR}")

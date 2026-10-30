@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
+from contextlib import asynccontextmanager
 import queue
 import threading
 from datetime import datetime, timezone
@@ -17,7 +20,8 @@ from support_ops.helpers.clock import Clock
 from support_ops.helpers.config import load_config
 from support_ops.helpers.llm import OpenAICompatLLM
 from support_ops.helpers.tracing import Tracer
-from support_ops.systems.single_agent import SingleAgentWorkflow
+from support_ops.policy.rules import Rules
+from support_ops.systems.single_agent import SingleAgentWorkflow, policy_from_config
 
 class Turn(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
@@ -55,7 +59,17 @@ def _runtime() -> tuple[dict[str, Any], OpenAICompatLLM]:
     return cfg, OpenAICompatLLM(cfg)
 
 
-app = FastAPI(title="Policy-Bound Support Ops", version="0.1.0")
+# Load the configured policy retriever once, before accepting chat requests.
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    cfg = load_config()
+    started = time.perf_counter()
+    policy_from_config(cfg, Rules.load(cfg["policy"]["rules_file"])).warm_up()
+    logging.getLogger("uvicorn.error").info("Policy ready in %.1fs", time.perf_counter() - started)
+    yield
+
+
+app = FastAPI(title="Policy-Bound Support Ops", version="0.1.0", lifespan=lifespan)
 
 @app.get("/health")
 def health() -> dict[str, str]:
@@ -69,7 +83,7 @@ def info() -> dict[str, Any]:
     policy = cfg["policy"]
     return {
         "policy_mode": policy.get("mode", "skills"),
-        "corpus": policy["corpus_size"] if policy.get("mode") == "rag" else policy["skills_dir"],
+        "corpus": policy["corpus_dir"] if policy.get("mode") == "rag" else policy["skills_dir"],
         "default_strategy": cfg.get("agent", {}).get("strategy", "react"),
         "model": cfg["llm"]["models"]["supervisor"],
         "reasoning_effort": cfg["llm"].get("reasoning_effort"),

@@ -15,9 +15,9 @@ from concurrent.futures import ThreadPoolExecutor
 from collections import defaultdict
 from dataclasses import dataclass, fields
 from functools import lru_cache
-from typing import Any, Protocol
+from typing import Any
 
-from support_ops.policy.rag.loader import EMBEDDING_MODEL
+from support_ops.policy.rag.models import EMBEDDING_MODEL, RERANK_MODEL, load_embedder, load_reranker
 
 # search_text is the existing index's BM25 field and the only stored copy of chunk text.
 FIELDS = ["source", "domain", "category", "section_id", "section_title", "search_text", "references"]
@@ -39,10 +39,10 @@ class RagSettings:
     n_prime: int = 20                # candidates kept for the reranker
     rerank: bool = True              # cross-encoder over the N' candidates
     contextual: bool = True          # prepend the section name to each chunk before indexing
-    k: int = 4                       # clauses returned to the agent
+    k: int = 4                       # ranked clauses, before adding direct references
     expand_references: bool = True   # include directly referenced sections after top K
     embedding_model: str = EMBEDDING_MODEL
-    rerank_model: str = "BAAI/bge-reranker-v2-m3"
+    rerank_model: str = RERANK_MODEL
 
     def __post_init__(self) -> None:
         flags = {"dense": self.dense, "bm25": self.bm25, "rerank": self.rerank}
@@ -76,90 +76,50 @@ def reciprocal_rank_fusion(rankings: list[list[str]], k: int) -> dict[str, float
     return fused
 
 
-# ---------------------------------------------------------------- models
-
-class Embedder(Protocol):
-    def encode(self, texts: list[str]) -> list[list[float]]: ...
-
-
-class Reranker(Protocol):
-    def score(self, query: str, passages: list[str]) -> list[float]: ...
-
-
-def _sentence_transformers():
-    try:
-        import sentence_transformers
-    except ImportError as exc:
-        raise RuntimeError("RAG search needs the rag extra: pip install -e '.[rag]'") from exc
-    return sentence_transformers
-
-
-class SentenceTransformerEmbedder:
-    def __init__(self, name: str):
-        self.name = name
-        self.model = _sentence_transformers().SentenceTransformer(name)
-
-    def encode(self, texts: list[str]) -> list[list[float]]:
-        import torch.nn.functional as F
-
-        for text in texts:
-            if len(self.model.tokenizer.encode(text, truncation=False)) > self.model.max_seq_length:
-                raise ValueError("text exceeds the embedding model input limit; revise the source section")
-        vectors = self.model.encode(texts, batch_size=16, convert_to_tensor=True, show_progress_bar=False)
-        # Nomic's prescribed post-processing; keep all 768 dimensions.
-        if self.name == EMBEDDING_MODEL:
-            vectors = F.layer_norm(vectors, normalized_shape=(vectors.shape[1],))
-        return F.normalize(vectors, p=2, dim=1).cpu().tolist()
-
-
-class CrossEncoderReranker:
-    def __init__(self, name: str):
-        self.model = _sentence_transformers().CrossEncoder(name)
-
-    def score(self, query: str, passages: list[str]) -> list[float]:
-        return [float(score) for score in self.model.predict(
-            [[query, passage] for passage in passages], batch_size=8, show_progress_bar=False,
-        )]
-
-
-@lru_cache(maxsize=4)
-def load_embedder(name: str) -> Embedder:
-    return SentenceTransformerEmbedder(name)
-
-
-@lru_cache(maxsize=4)
-def load_reranker(name: str) -> Reranker:
-    return CrossEncoderReranker(name)
-
-
 # ---------------------------------------------------------------- retrieval
 
 # Convert Pinecone documents into the existing agent policy-tool result format.
 def document_hit(document, score=None, via: str = "search") -> dict:
-    return {"id": document.id, "title": document.get("section_title"),
-            "section": document.get("domain"), "score": score, "via": via,
-            **{field: document.get(field, [] if field == "references" else None)
-               for field in FIELDS if field != "search_text"}, "text": document.get("search_text")}
+    hit = {field: document.get(field) for field in FIELDS if field != "search_text"}
+    hit.update(
+        id=document.id,
+        title=document.get("section_title"),
+        section=document.get("domain"),
+        score=score,
+        via=via,
+        text=document.get("search_text"),
+        references=document.get("references", []),
+    )
+    return hit
 
 
 class PineconeRetriever:
     # Connect to an existing index. This class never creates an index or uploads data.
-    def __init__(self, settings: RagSettings, *, index=None, manifest: dict | None = None):
+    def __init__(self, settings: RagSettings, *, index=None):
         self.settings = settings
         from support_ops.policy.rag.embeddings import read_embeddings
-        from support_ops.policy.rag.pinecone_store import pinecone_client
+        from support_ops.policy.rag.pinecone_store import pinecone_client, verify_upload
 
-        self.manifest = manifest or read_embeddings()[0]
+        self.manifest, documents = read_embeddings()
         if settings.embedding_model != self.manifest["embedding_model"] or not settings.contextual:
             raise ValueError("query model/context settings must match the saved document embedding recipe")
         self.index = index if index is not None else pinecone_client().index(
             os.environ.get("PINECONE_INDEX", "support-policies"))
         self.namespace = os.environ.get("PINECONE_NAMESPACE", "policies")
+        verify_upload(self.index, self.namespace, self.manifest, documents)
         self._embedder, self._reranker = None, None
 
     # Give the planner only the domains available in this fixed policy corpus.
     def sections(self) -> list[str]:
         return ["Orders and Shipping Policy", "Returns and Refunds Policy"]
+
+    # Load and exercise the selected models before the server starts timing tickets.
+    def warm_up(self) -> None:
+        self._embedder = load_embedder(self.settings.embedding_model)
+        self._embedder.encode(["search_query: warm-up"])
+        if self.settings.rerank:
+            self._reranker = load_reranker(self.settings.rerank_model)
+            self._reranker.score("warm-up", ["Policy retrieval warm-up."])
 
     # Ask the existing index for cosine matches or BM25 keyword matches.
     def _search(self, scoring: dict) -> list[dict]:

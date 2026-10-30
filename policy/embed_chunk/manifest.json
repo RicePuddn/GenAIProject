@@ -1,4 +1,5 @@
 {
+  "corpus_hash": "27e83bc5126c2c02756d4ec12235fe638edaea0c94e784620ae1fb696167ee38",
   "embedding_model": "nomic-ai/nomic-embed-text-v1.5",
   "dimension": 768,
   "metric": "cosine",
@@ -6,7 +7,6 @@
   "document_prefix": "search_document: ",
   "query_prefix": "search_query: ",
   "normalization": "layer_norm_then_l2",
-  "count": 51,
-  "data_sha256": "61a40c28a3e11b2f8cc8d69a79e8881983c4b14c940208ef93d4d26d8671c9d8",
-  "corpus_hash": "2bf23aa8216ee9af667002179b0cdda880d88ad53fe3145c274ee16c4f3e4f89"
+  "count": 52,
+  "data_sha256": "3d75a361be0bf118a91eb9feab8fe612a898a22497844344d0e545934a201d4e"
 }

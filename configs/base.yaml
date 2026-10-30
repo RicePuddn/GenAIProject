@@ -37,10 +37,9 @@ agent:
 
 policy:
   mode: rag              # skills | rag
-  rules_file: policy/rules.yaml   # shared hard limits
+  rules_file: src/support_ops/policy/rules/rules.json   # shared hard limits
   skills_dir: policy/skills
-  corpus_dir: policy/raw_policy
-  corpus_size: pdf          # pdf | markdown; load one format, not both copies
+  corpus_dir: policy/raw_policy/pdf  # fixed policy corpus; PDF only
   rag:                      # organisation selection; notebook compares the three approaches
     dense: true             # Nomic embeddings, cosine
     bm25: true              # keyword search; with dense, fused by reciprocal rank fusion
@@ -48,7 +47,7 @@ policy:
     n_prime: 20             # candidates passed to the reranker
     rerank: true            # cross-encoder rerank
     contextual: true        # prepend the section name before indexing
-    k: 4                    # clauses returned to the agent
+    k: 4                    # ranked clauses; direct references are added afterwards
     expand_references: true # also include directly referenced sections
     embedding_model: nomic-ai/nomic-embed-text-v1.5
     rerank_model: BAAI/bge-reranker-v2-m3

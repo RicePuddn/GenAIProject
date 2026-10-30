@@ -186,6 +186,13 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual([event["kind"] for event in seen], ["step", "llm_call"])
         self.assertIs(seen[0], tracer.events[0])
 
+    def test_server_startup_prepares_policy_once_before_requests(self):
+        with patch("support_ops.api.policy_from_config") as build:
+            with TestClient(app) as client:
+                self.assertEqual(client.get("/health").status_code, 200)
+                build.return_value.warm_up.assert_called_once()
+            build.assert_called_once()
+
     def test_info_reports_the_configured_policy_mode(self):
         body = TestClient(app).get("/info").json()
         self.assertEqual(body["policy_mode"], load_config()["policy"]["mode"])
@@ -249,7 +256,7 @@ class ToolTests(unittest.TestCase):
 
     def test_refund_limit_shared_and_above_limit_handoff_does_not_recurse(self):
         gateway = TicketState(self.clock)
-        self.assertTrue(Rules.load().check("refund", 100)["allowed"])
+        self.assertFalse(Rules.load().check("refund", 100)["allowed"])
         args = {"action": "write", "operation": "refund", "record_id": "O1", "amount": 100.01}
         result = gateway.run("T1", args)
         self.assertEqual(result["status"], "awaiting_human")
@@ -259,7 +266,10 @@ class ToolTests(unittest.TestCase):
 
     def test_mock_write_is_idempotent_and_rejects_conflicting_amount(self):
         gateway = TicketState(self.clock)
-        args = {"action": "write", "operation": "refund", "record_id": "O1", "amount": 50}
+        args = {"action": "write", "operation": "refund", "record_id": "O1", "amount": 50,
+                "facts": {"payment_status": "captured", "currency": "SGD", "captured_amount": 100,
+                          "refunded_amount": 0, "pending_refund_amount": 0, "approved_refund_amount": 100,
+                          "original_payment_method": True, "request_accepted": True, "inspection_or_waiver": True}}
         first = gateway.run("T1", args)
         self.assertEqual(first, gateway.run("T1", args))
         self.assertEqual(len(gateway.audit_log), 1)

@@ -23,6 +23,9 @@ class SkillsPolicy:
         self.root = (path if path.is_absolute() else ROOT / path).resolve()
         self.rules = rules or Rules.load()
 
+    def warm_up(self) -> None:
+        """Skills are read on demand; no models need preloading."""
+
     def planner_context(self) -> str:
         return ("Available policy filenames (contents must still be read with tools): "
                 + json.dumps(self.catalog()))
@@ -51,7 +54,7 @@ class SkillsPolicy:
     def run(self, args: dict[str, Any]) -> dict[str, Any]:
         action = args.get("action")
         if action == "check":
-            return self.rules.check(args.get("operation", ""), args.get("amount"))
+            return self.rules.check(args.get("operation", ""), args.get("amount"), args.get("facts"))
         if action == "list":
             catalog = self.catalog()
             return {"skills": [item["skill"] for item in catalog], "catalog": catalog}

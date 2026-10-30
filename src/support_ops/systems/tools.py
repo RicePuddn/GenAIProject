@@ -7,12 +7,25 @@ from __future__ import annotations
 
 from typing import Any, Literal, Self
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from support_ops.backend.postgres import PostgresReader, RECORD_KINDS
 from support_ops.gateway.ticket_state import TicketState
 from support_ops.helpers.arguments import Amount, NonEmpty, ToolArguments
 from support_ops.policy.provider import PolicyProvider
+
+
+RULE_FACTS = (
+    "Use recorded facts, never assumed customer claims. "
+    "refund: payment_status, currency, captured_amount, refunded_amount, pending_refund_amount, "
+    "approved_refund_amount, original_payment_method, request_accepted, inspection_or_waiver. "
+    "return_request: delivered_at, requested_at, reason (change_of_mind, damaged, faulty, wrong_item, missing_item), "
+    "evidence_status; change_of_mind also needs final_sale, unused, original_packaging, tags_complete, accessories_complete. "
+    "return_dispatch: approved_at, handed_over_at, carrier_accepted; extension_until and extension_approved if applicable. "
+    "cancel: order_status, label_created, packing_started, any_quantity_fulfilled, carrier_collected. "
+    "delivery: delivery_status, estimated_delivery, as_of. "
+    "Dates are ISO dates/timestamps; condition flags are booleans. Missing facts require human review."
+)
 
 
 class ReadArguments(ToolArguments):
@@ -26,12 +39,13 @@ class OrderArguments(ToolArguments):
 
 
 class PolicyArguments(ToolArguments):
-    """list: discover skills; open: read SKILL.md; read: read a discovered clause; check: mock refund limit."""
+    """list: discover skills; open: read SKILL.md; read: read a discovered clause; check: deterministic refund, return_request, return_dispatch, cancel or delivery checks using recorded facts."""
     action: Literal["list", "open", "read", "check"]
     skill: NonEmpty | None = None
     file: NonEmpty | None = None
     operation: NonEmpty | None = None
     amount: Amount | None = None
+    facts: dict[str, Any] | None = Field(default=None, description=RULE_FACTS)
 
     @model_validator(mode="after")
     def required_for_action(self) -> Self:
@@ -47,11 +61,12 @@ class PolicyArguments(ToolArguments):
 
 
 class RagPolicyArguments(ToolArguments):
-    """search: retrieve the policy clauses most relevant to a query, with their exceptions; check: mock refund limit."""
+    """search: retrieve the policy clauses most relevant to a query, with their exceptions; check: deterministic refund, return_request, return_dispatch, cancel or delivery checks using recorded facts."""
     action: Literal["search", "check"]
     query: NonEmpty | None = None
     operation: NonEmpty | None = None
     amount: Amount | None = None
+    facts: dict[str, Any] | None = Field(default=None, description=RULE_FACTS)
 
     @model_validator(mode="after")
     def required_for_action(self) -> Self:
@@ -70,6 +85,7 @@ class TicketArguments(ToolArguments):
     operation: NonEmpty | None = None
     record_id: NonEmpty | None = None
     amount: Amount | None = None
+    facts: dict[str, Any] | None = Field(default=None, description=RULE_FACTS)
     reason: NonEmpty | None = None
 
     @model_validator(mode="after")

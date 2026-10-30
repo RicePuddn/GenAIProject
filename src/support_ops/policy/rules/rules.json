@@ -1,0 +1,499 @@
+{
+  "version": "2026-10-30",
+  "currency": "SGD",
+  "timezone": "Asia/Singapore",
+  "policy_documents": {
+    "orders-and-shipping-policy.pdf": "ab25e74752ce6b25d9e217a8cf6480d14dc2dfab9996beb444472fd19a1c8a4b",
+    "returns-and-refunds-policy.pdf": "17777e4813dc1a0a0343110ac8f6cc08d9b8614d757231b646e9de0da321c9ab"
+  },
+  "unsupported_operation": {
+    "allowed": false,
+    "requires_human": true,
+    "reason": "Unsupported operation requires human review."
+  },
+  "groups": {
+    "human_review": {
+      "rule_id": "mandatory_human_review",
+      "description": "Run these shared checks first. If none matches, continue to the selected operation.",
+      "evidence_statuses": [
+        "unavailable",
+        "inaccessible",
+        "unsafe"
+      ],
+      "return_reasons": [
+        "counterfeit"
+      ],
+      "item_types": [
+        "digital",
+        "service",
+        "standalone_gift"
+      ],
+      "sources": [
+        "RET-ReturnEligibility-2.6",
+        "RET-SupportingEvidence-3.2",
+        "RET-ReturnProcedure-4.6",
+        "RET-ReturnParcelDisputes-7.2",
+        "RET-ReturnParcelDisputes-7.3",
+        "RET-ReturnParcelDisputes-7.4"
+      ],
+      "checks": {
+        "invalid_risk_flags": {
+          "given": "A supplied disputed, unsafe_item or human_requested flag is not a boolean.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "Risk flags must be verified booleans."
+          }
+        },
+        "disputed_facts": {
+          "given": "The facts or findings are disputed.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "Conflicting facts require human review."
+          }
+        },
+        "unsafe_goods": {
+          "given": "The goods are unsafe to handle or demonstrate.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "Unsafe goods require human review and specific handling instructions."
+          }
+        },
+        "human_requested": {
+          "given": "The customer requests human assistance.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "The customer requested human review."
+          }
+        },
+        "evidence_unavailable": {
+          "given": "Evidence is unavailable, inaccessible or unsafe to obtain.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "Review the evidence limitation; do not automatically reject the request."
+          }
+        },
+        "counterfeit_claim": {
+          "given": "The return reason concerns counterfeit goods.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "An authenticity claim requires human assessment."
+          }
+        },
+        "unsupported_item_type": {
+          "given": "The item is digital, a service or a standalone promotional gift.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "This item is outside the standard physical-return process and needs human review."
+          }
+        }
+      }
+    },
+    "refund": {
+      "rule_id": "refund_limit_100",
+      "description": "Check the approval limit, recorded payment, approved amount and remaining balance.",
+      "max_auto_amount": "100.00",
+      "required_payment_status": "captured",
+      "required_facts": [
+        "payment_status",
+        "currency",
+        "captured_amount",
+        "refunded_amount",
+        "pending_refund_amount",
+        "approved_refund_amount",
+        "original_payment_method",
+        "request_accepted",
+        "inspection_or_waiver"
+      ],
+      "sources": [
+        "REF-Refunds-6.1",
+        "REF-Refunds-6.2",
+        "REF-Refunds-6.3",
+        "REF-Refunds-6.6",
+        "ODR-OrderChangeCancel-4.2"
+      ],
+      "checks": {
+        "currency_mismatch": {
+          "given": "The recorded payment currency differs from the configured policy currency.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "The payment currency is outside the configured policy; review it before applying the refund limit."
+          }
+        },
+        "limit_exceeded": {
+          "given": "The requested refund exceeds max_auto_amount in the configured currency.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "The refund exceeds the automatic approval limit and requires human review."
+          }
+        },
+        "missing_facts": {
+          "given": "Any required payment or approval fact is missing.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "Recorded payment and approval facts are required before refund processing."
+          }
+        },
+        "payment_not_captured": {
+          "given": "Payment status differs from required_payment_status.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "The payment has not been established as captured; review the payment before refunding."
+          }
+        },
+        "different_payment_method": {
+          "given": "Refund to the original payment method is not confirmed.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "Do not redirect the refund to a different payment method."
+          }
+        },
+        "request_not_accepted": {
+          "given": "Acceptance of the request is not confirmed.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "The request must be accepted before refund payment."
+          }
+        },
+        "inspection_incomplete": {
+          "given": "Required receipt/inspection or an approved waiver is not confirmed.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "Complete the required inspection or establish an approved waiver before payment."
+          }
+        },
+        "balance_exceeded": {
+          "given": "The refund exceeds captured amount minus completed and pending refunds.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "The refund exceeds the remaining captured balance; review possible duplicate or excess payment."
+          }
+        },
+        "approved_amount_exceeded": {
+          "given": "The refund exceeds the recorded approved_refund_amount.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "The requested amount exceeds the approved resolution and needs review."
+          }
+        },
+        "passed": {
+          "given": "Every preceding refund check passes.",
+          "outcome": {
+            "allowed": true,
+            "requires_human": false,
+            "reason": "Refund hard checks passed; this result does not issue payment."
+          }
+        }
+      }
+    },
+    "return_request": {
+      "rule_id": "return_request_conditions",
+      "description": "Check the affected item's dates, return reason, evidence and change-of-mind conditions.",
+      "window_calendar_days": 30,
+      "deadline_inclusive": true,
+      "allowed_reasons": [
+        "change_of_mind",
+        "damaged",
+        "faulty",
+        "wrong_item",
+        "missing_item"
+      ],
+      "change_of_mind_required": [
+        "unused",
+        "original_packaging",
+        "tags_complete",
+        "accessories_complete"
+      ],
+      "sources": [
+        "RET-ReturnEligibility-2.1",
+        "RET-ReturnEligibility-2.4",
+        "RET-ReturnEligibility-2.5",
+        "RET-ReturnEligibility-2.6"
+      ],
+      "checks": {
+        "missing_dates": {
+          "given": "The affected item's delivered_at or requested_at date is missing.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "The affected item's delivery and request dates are required."
+          }
+        },
+        "request_before_delivery": {
+          "given": "The recorded request date is earlier than the recorded delivery date.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "The request and delivery dates conflict and need review."
+          }
+        },
+        "window_exceeded": {
+          "given": "The request falls after the configured inclusive return deadline.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "The request is outside the ordinary return window; human review must consider any exception."
+          }
+        },
+        "unsupported_reason": {
+          "given": "The reason is not in allowed_reasons and no shared review check already matched.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "The return reason needs human assessment."
+          }
+        },
+        "unverified_evidence": {
+          "given": "Relevant evidence has not been verified.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "Relevant evidence needs verification before ordinary return checks can pass."
+          }
+        },
+        "missing_item_conditions": {
+          "given": "For change_of_mind, final_sale or any change_of_mind_required condition is missing or not a boolean.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "The change-of-mind item conditions are incomplete or unverified."
+          }
+        },
+        "final_sale": {
+          "given": "The verified reason is change_of_mind and the item was final sale at purchase.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": false,
+            "reason": "Verified final-sale goods do not qualify for an ordinary change-of-mind return."
+          }
+        },
+        "item_conditions_failed": {
+          "given": "For a verified change-of-mind return, unused, packaging, tags or accessories conditions fail.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": false,
+            "reason": "Verified change-of-mind conditions are not satisfied; the ordinary return request cannot proceed."
+          }
+        },
+        "passed": {
+          "given": "The request is within its window and all checks for its recorded reason pass.",
+          "outcome": {
+            "allowed": true,
+            "requires_human": false,
+            "reason": "Ordinary return-request checks passed; refund payment checks remain separate."
+          }
+        }
+      }
+    },
+    "return_dispatch": {
+      "rule_id": "return_dispatch_deadline",
+      "description": "Check authorization, actual carrier handover and any recorded deadline extension.",
+      "window_calendar_days": 7,
+      "deadline_inclusive": true,
+      "sources": [
+        "RET-ReturnProcedure-4.1",
+        "RET-ReturnProcedure-4.2",
+        "RET-ReturnProcedure-4.5",
+        "RET-ReturnProcedure-4.6"
+      ],
+      "checks": {
+        "missing_dates": {
+          "given": "The approval date or actual carrier handover date is missing.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "Return approval and actual handover dates are required."
+          }
+        },
+        "unapproved_extension": {
+          "given": "An extension date is supplied without recorded human approval.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "The dispatch extension needs recorded human approval."
+          }
+        },
+        "handover_unverified": {
+          "given": "Actual carrier acceptance is not confirmed; a label alone is insufficient.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "Carrier handover must be established; a label alone does not prove dispatch."
+          }
+        },
+        "dispatch_before_approval": {
+          "given": "Handover is recorded before return approval.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "Handover predates return approval; review authorization and dates."
+          }
+        },
+        "deadline_exceeded": {
+          "given": "Handover is after the ordinary deadline or the recorded human-approved replacement deadline.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "Dispatch is outside its authorized deadline; review it rather than automatically cancelling the return."
+          }
+        },
+        "passed": {
+          "given": "Authorized handover is confirmed within the applicable inclusive deadline.",
+          "outcome": {
+            "allowed": true,
+            "requires_human": false,
+            "reason": "Return dispatch was within the authorized deadline."
+          }
+        }
+      }
+    },
+    "cancel": {
+      "rule_id": "cancellation_before_fulfillment",
+      "description": "Check the order is processing and every fulfillment blocker is confirmed absent.",
+      "allowed_order_status": "processing",
+      "blockers": [
+        "label_created",
+        "packing_started",
+        "any_quantity_fulfilled",
+        "carrier_collected"
+      ],
+      "sources": [
+        "ODR-OrderChangeCancel-4.1",
+        "ODR-OrderChangeCancel-4.3"
+      ],
+      "checks": {
+        "already_cancelled": {
+          "given": "The order is already cancelled.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": false,
+            "reason": "The order is already cancelled; do not cancel it again."
+          }
+        },
+        "wrong_order_status": {
+          "given": "The order status is missing or differs from allowed_order_status.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "Ordinary cancellation requires an unfulfilled processing order."
+          }
+        },
+        "unverified_fulfillment": {
+          "given": "Any configured fulfillment blocker is missing or not a verified boolean.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "The fulfillment status is incomplete or unverified."
+          }
+        },
+        "fulfillment_started": {
+          "given": "A label exists, packing began, any quantity was fulfilled or the carrier collected the parcel.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "Fulfillment has begun; cancellation or amendment requires human review."
+          }
+        },
+        "passed": {
+          "given": "The order is processing and all fulfillment blockers are confirmed false.",
+          "outcome": {
+            "allowed": true,
+            "requires_human": false,
+            "reason": "Ordinary cancellation checks passed; confirmation and the actual update are still required."
+          }
+        }
+      }
+    },
+    "delivery": {
+      "rule_id": "delivery_investigation",
+      "description": "Check immediate investigation cases before counting days beyond the estimated delivery date.",
+      "investigate_after_calendar_days": 3,
+      "immediate_human_statuses": [
+        "lost",
+        "transit_damaged",
+        "delivered_but_not_received",
+        "returning_to_sender",
+        "delivery_failed",
+        "failed_delivery"
+      ],
+      "ordinary_statuses": [
+        "processing",
+        "shipped",
+        "in_transit",
+        "delayed",
+        "out_for_delivery"
+      ],
+      "sources": [
+        "SHP-DeliveryProblems-7.1",
+        "SHP-DeliveryProblems-7.2",
+        "SHP-DeliveryProblems-7.3",
+        "SHP-DeliveryProblems-7.4"
+      ],
+      "checks": {
+        "immediate_investigation": {
+          "given": "The recorded status is in immediate_human_statuses.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "The recorded delivery issue requires immediate human investigation."
+          }
+        },
+        "delivered": {
+          "given": "Delivery is recorded and no dispute or shared human-review trigger was supplied.",
+          "outcome": {
+            "allowed": true,
+            "requires_human": false,
+            "reason": "Recorded delivery; denied receipt must be flagged for investigation. This is not refund approval."
+          }
+        },
+        "unknown_status": {
+          "given": "The shipment status is missing or unrecognized.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "The recorded shipment status must be established."
+          }
+        },
+        "missing_dates": {
+          "given": "An ordinary undelivered shipment lacks estimated_delivery or as_of.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "The estimated delivery and assessment dates are required."
+          }
+        },
+        "waiting_period_exceeded": {
+          "given": "An undelivered shipment is more than investigate_after_calendar_days after its estimate.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "The shipment is beyond the ordinary waiting period and requires human investigation."
+          }
+        },
+        "passed": {
+          "given": "The shipment is before its estimate or no more than the configured number of days late.",
+          "outcome": {
+            "allowed": true,
+            "requires_human": false,
+            "reason": "Ordinary tracking follow-up can continue; this is not refund approval."
+          }
+        }
+      }
+    }
+  }
+}

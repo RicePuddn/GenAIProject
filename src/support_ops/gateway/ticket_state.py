@@ -38,7 +38,9 @@ class TicketState:
         operation, record_id = args.get("operation"), args.get("record_id")
         if not operation or not record_id:
             raise ValueError("write requires operation and record_id")
-        decision = self.rules.check(operation, args.get("amount"))
+        if operation != "refund":
+            return self.run(ticket_id, {**args, "action": "handoff", "reason": "unsupported mock write operation"})
+        decision = self.rules.check(operation, args.get("amount"), args.get("facts"))
         if not decision["allowed"]:
             return self.run(ticket_id, {
                 **args, "action": "handoff",

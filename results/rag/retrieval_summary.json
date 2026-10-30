@@ -1,23 +1,23 @@
 [
   {
     "approach": "vector",
-    "questions": 24,
+    "questions": 40,
     "recall_at_k": 0.938,
-    "mrr_at_k": 0.875,
-    "ndcg_at_k": 0.88
+    "mrr_at_k": 0.852,
+    "ndcg_at_k": 0.866
   },
   {
     "approach": "hybrid",
-    "questions": 24,
-    "recall_at_k": 0.979,
-    "mrr_at_k": 0.865,
-    "ndcg_at_k": 0.879
+    "questions": 40,
+    "recall_at_k": 0.888,
+    "mrr_at_k": 0.815,
+    "ndcg_at_k": 0.824
   },
   {
     "approach": "hybrid_rerank",
-    "questions": 24,
-    "recall_at_k": 0.979,
-    "mrr_at_k": 0.91,
-    "ndcg_at_k": 0.922
+    "questions": 40,
+    "recall_at_k": 0.988,
+    "mrr_at_k": 0.921,
+    "ndcg_at_k": 0.935
   }
 ]

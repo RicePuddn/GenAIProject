@@ -1,7 +1,8 @@
 {
   "index": "support-policies",
   "namespace": "policies",
-  "corpus_hash": "2bf23aa8216ee9af667002179b0cdda880d88ad53fe3145c274ee16c4f3e4f89",
-  "count": 51,
+  "corpus_hash": "27e83bc5126c2c02756d4ec12235fe638edaea0c94e784620ae1fb696167ee38",
+  "data_sha256": "3d75a361be0bf118a91eb9feab8fe612a898a22497844344d0e545934a201d4e",
+  "count": 52,
   "dimension": 768
 }

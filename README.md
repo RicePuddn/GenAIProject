@@ -33,8 +33,10 @@ Changing the password in `.env` does not reset the password in an existing datab
 
 ## RAG
 
-Set `PINECONE_API_KEY` in `.env`. Default models and parameters are in
+RAG uses the PDFs in `policy/raw_policy/pdf/`. Set `PINECONE_API_KEY` in `.env`.
+Default models and parameters are in
 `configs/base.yaml`; evaluation profiles are in `configs/rag/`.
+The API preloads models at startup and verifies the uploaded corpus.
 
 ```python
 from support_ops.policy.rag import retrieve
@@ -226,8 +228,10 @@ A dedicated final response node generates the customer reply through the shared 
 
 Policy retrieval follows `list` → `open` a skill's `SKILL.md` → `read` a relevant
 clause. Available skills are `orders-and-shipping` and `returns-and-refunds`.
-Policy checks and the ticket tool share the same mock SGD 100 refund limit, read from
-[policy/rules.yaml](policy/rules.yaml). `policy.mode` in `configs/base.yaml` selects the
+Policy checks and the ticket tool share [rules.json](src/support_ops/policy/rules/rules.json):
+refund limits, return deadlines, cancellation conditions and human-review routes.
+Checks require recorded facts; missing facts need human review. PDF fingerprints
+flag policy changes that require a rules review. `policy.mode` in `configs/base.yaml` selects the
 policy provider plugged into the `policy` tool.
 
 Unsupported write operations and above-limit refunds require a human handoff.
@@ -257,9 +261,8 @@ UI or curl as described above.
 
 ```text
 configs/                      models, strategy, simulation clock and limits
-policy/rules.yaml             hard limits shared by every arhitecture
 policy/skills/                policy entrypoints and clause files
-policy/raw_policy/            source policy PDFs and Markdown
+policy/raw_policy/            source policy PDFs
 policy/chunk_policy/          section chunks with reference IDs
 policy/embed_chunk/           saved vectors and upload manifest
 data/backend_seed/schema.sql  PostgreSQL schema
@@ -269,7 +272,7 @@ src/support_ops/
   helpers/                    shared LLM wrapper, clock, config and tracing
   backend/postgres.py         allowlisted database reads
   policy/provider.py          contract each policy provider implements (RAG/skills)
-  policy/rules.py             hard-limit checks from policy/rules.yaml
+  policy/rules/               grouped JSON rules and deterministic checks
   policy/skills.py            skill navigation (the skills provider)
   policy/rag/                 policy chunking, embeddings, retrieval and evaluation
   gateway/ticket_state.py     request-local approvals, audit and handoff

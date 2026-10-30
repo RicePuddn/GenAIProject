@@ -6,7 +6,7 @@ resolved config next to its results.
 
 Planned experiments, to be confirmed by the team:
 - architecture comparison (S1-S4)
-- policy size (5, 20, 50 pages)
+- retrieval comparison (cosine, hybrid RRF, hybrid + reranking) on one fixed PDF corpus
 - S4 supervisor strategy (ReAct vs plan-and-execute)
 - ablations (remove one component at a time)
 - failure injection (tool timeouts, duplicate requests, policy change mid-run)
