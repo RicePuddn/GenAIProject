@@ -25,7 +25,7 @@ REFUND_FACTS = {
 
 def write_rules(directory: str, limit: str) -> Path:
     data = json.loads((ROOT / "src/support_ops/policy/rules/rules.json").read_text())
-    data["groups"]["refund"].update(rule_id="test_limit", max_auto_amount=limit)
+    data["groups"]["refund"].update(rule_id="test_limit", max_reviewed_amount=limit, max_auto_amount="10.00")
     path = Path(directory) / "rules.json"
     path.write_text(json.dumps(data))
     return path
@@ -38,7 +38,7 @@ class RulesTests(unittest.TestCase):
         decision = rules.check("refund", 100, REFUND_FACTS)
         self.assertTrue(decision["allowed"])
         self.assertEqual((decision["rule"], decision["limit"], decision["currency"]),
-                         ("refund_limit_100", 100.0, "SGD"))
+                         ("refund_approval_requirements", 100.0, "SGD"))
         above = rules.check("refund", 100.01)
         self.assertFalse(above["allowed"])
         self.assertTrue(above["requires_human"])
@@ -70,7 +70,8 @@ class RulesTests(unittest.TestCase):
             with self.subTest(change=change):
                 result = rules.check("refund", 50, {**REFUND_FACTS, **change})
                 self.assertFalse(result["allowed"])
-                self.assertTrue(result["requires_human"])
+                self.assertEqual(result["requires_human"], not any(
+                    key in change for key in ("pending_refund_amount", "approved_refund_amount")))
 
     def test_return_window_day_30_is_included_and_late_requests_get_review(self):
         rules = Rules.load()
@@ -113,7 +114,8 @@ class RulesTests(unittest.TestCase):
 
     def test_cancellation_checks_label_packing_fulfillment_and_pickup(self):
         rules = Rules.load()
-        facts = {"order_status": "processing", **{name: False for name in rules.data["cancel"]["blockers"]}}
+        facts = {"order_status": "processing", "authority_verified": True,
+                 **{name: False for name in rules.data["cancel"]["blockers"]}}
         self.assertTrue(rules.check("cancel", facts=facts)["allowed"])
         for name in rules.data["cancel"]["blockers"]:
             with self.subTest(blocker=name):
@@ -139,7 +141,7 @@ class RulesTests(unittest.TestCase):
                                     ("delivery", "SHP-DeliveryProblems-7.1", "investigate_after_calendar_days")):
             days = int(re.search(r"\((\d+)\) calendar days", clauses[section]).group(1))
             self.assertEqual(days, rules.data[key][field])
-        amount = re.search(r"SGD ([0-9.]+)", clauses["REF-Refunds-6.6"]).group(1)
+        amount = max(float(value) for value in re.findall(r"SGD ([0-9.]+)", clauses["REF-Refunds-6.6"]))
         self.assertEqual(float(amount), float(rules.refund_limit))
 
     def test_policy_change_blocks_stale_rules_until_they_are_reviewed(self):
@@ -162,7 +164,7 @@ class RulesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "rules.json"
             outcome = original["groups"]["cancel"]["checks"]["already_cancelled"]["outcome"]
-            outcome.update(requires_human=True, reason="Review the recorded cancellation.")
+            outcome.update(requires_human=True, route="human", reason="Review the recorded cancellation.")
             path.write_text(json.dumps(original))
             result = Rules.load(path).check("cancel", facts={"order_status":"cancelled"})
             self.assertEqual(result["check"], "cancel.already_cancelled")

@@ -1,4 +1,8 @@
-"""Evaluate recorded facts against the grouped checks and outcomes in rules.json."""
+"""Python evaluates the checks; the LLM receives the result.
+
+Run shared human-review checks, then only the requested operation.
+Every decision copies its complete outcome from rules.json.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -55,6 +59,14 @@ def _validate_outcome(outcome: dict) -> None:
         raise ValueError("rule outcomes need boolean allowed and requires_human values")
     if outcome["allowed"] and outcome["requires_human"]:
         raise ValueError("a rule cannot allow automatic processing and require human review together")
+    if outcome["requires_human"]:
+        expected_routes = {"human"}
+    elif outcome["allowed"]:
+        expected_routes = {"auto", "approver"}
+    else:
+        expected_routes = {None}
+    if outcome.get("route") not in expected_routes:
+        raise ValueError("rule route must agree with allowed and requires_human")
     if not isinstance(outcome.get("reason"), str) or not outcome["reason"].strip():
         raise ValueError("rule outcomes need a reason")
 
@@ -64,6 +76,7 @@ class Rules:
     version: str
     currency: str
     refund_limit: Decimal
+    refund_auto_limit: Decimal
     timezone: str
     data: dict[str, Any]
     unsupported_operation: dict
@@ -81,9 +94,10 @@ class Rules:
             data = config["groups"]
             if set(data) != set(GROUPS):
                 raise ValueError("rules.json must contain the six supported rule groups")
-            limit = _money(data["refund"]["max_auto_amount"])
-            if limit <= 0:
-                raise ValueError("refund limit must be positive")
+            limit = _money(data["refund"]["max_reviewed_amount"])
+            auto_limit = _money(data["refund"]["max_auto_amount"])
+            if not 0 < auto_limit <= limit:
+                raise ValueError("refund limits must satisfy 0 < max_auto_amount <= max_reviewed_amount")
             ZoneInfo(config["timezone"])
             for group, field in (("return_request", "window_calendar_days"),
                                  ("return_dispatch", "window_calendar_days"),
@@ -111,6 +125,7 @@ class Rules:
             version=str(config["version"]),
             currency=config["currency"],
             refund_limit=limit,
+            refund_auto_limit=auto_limit,
             timezone=config["timezone"],
             data=data,
             unsupported_operation=config["unsupported_operation"],
@@ -165,7 +180,7 @@ class Rules:
 
     # -------------------- Group 2: Refund --------------------
 
-    # Check currency, approval limit, payment prerequisites and available balance.
+    # Step 1: Check refund prerequisites. Step 2: Select the JSON outcome for its amount.
     def _refund(self, amount: Any, facts: dict) -> dict:
         group, config = "refund", self.data["refund"]
         value = _money(amount)
@@ -174,8 +189,6 @@ class Rules:
         details = {"limit": float(self.refund_limit), "currency": self.currency}
         if facts.get("currency") is not None and facts["currency"] != self.currency:
             return self._result(group, "currency_mismatch", **details)
-        if value > self.refund_limit:
-            return self._result(group, "limit_exceeded", **details)
         missing = sorted(key for key in config["required_facts"] if facts.get(key) is None)
         if missing:
             return self._result(group, "missing_facts", missing_facts=missing, **details)
@@ -192,13 +205,23 @@ class Rules:
             return self._result(group, "balance_exceeded", **details)
         if value > _money(facts["approved_refund_amount"]):
             return self._result(group, "approved_amount_exceeded", **details)
-        return self._result(group, "passed", **details)
+        if facts.get("goods_value") is not None and value > _money(facts["goods_value"]):
+            return self._result(group, "goods_value_exceeded", **details)
+        if value > self.refund_limit:
+            return self._result(group, "limit_exceeded", **details)
+        if value > self.refund_auto_limit:
+            return self._result(group, "automated_review", **details)
+        return self._result(group, "auto_approval", **details)
 
     # -------------------- Group 3: Return request --------------------
 
     # Check the affected item's dates, reason, evidence and change-of-mind conditions.
     def _return_request(self, facts: dict) -> dict:
         group, config = "return_request", self.data["return_request"]
+        if facts.get("return_scope_unverified") is True:
+            return self._result(group, "return_scope_unverified")
+        if facts.get("existing_return") is True:
+            return self._result(group, "existing_return")
         if not facts.get("delivered_at") or not facts.get("requested_at"):
             return self._result(group, "missing_dates")
         delivered = _date(facts["delivered_at"], self.timezone)
@@ -251,6 +274,8 @@ class Rules:
         group, config = "cancel", self.data["cancel"]
         if facts.get("order_status") == "cancelled":
             return self._result(group, "already_cancelled")
+        if facts.get("authority_verified") is not True:
+            return self._result(group, "authority_unverified")
         if facts.get("order_status") != config["allowed_order_status"]:
             return self._result(group, "wrong_order_status")
         if any(type(facts.get(name)) is not bool for name in config["blockers"]):
@@ -267,8 +292,8 @@ class Rules:
         status = facts.get("delivery_status")
         if status in config["immediate_human_statuses"]:
             return self._result(group, "immediate_investigation")
-        if status == "delivered":
-            return self._result(group, "delivered")
+        if status in {"delivered", "cancelled"}:
+            return self._result(group, status)
         if status not in config["ordinary_statuses"]:
             return self._result(group, "unknown_status")
         if not facts.get("estimated_delivery") or not facts.get("as_of"):

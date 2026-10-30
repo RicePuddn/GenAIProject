@@ -187,7 +187,7 @@
   },
   {
     "id": "q25",
-    "question": "My $120 refund is on hold for review. Why can't you just process it?",
+    "question": "My $60 refund has been accepted, but you say another check is needed. Does a person need to approve it?",
     "expected_chunk_ids": [
       "REF-Refunds-6.6"
     ],
@@ -313,6 +313,30 @@
     "question": "Could I get a replacement or store credit instead of a refund?",
     "expected_chunk_ids": [
       "REF-Refunds-6.5"
+    ]
+  },
+  {
+    "id": "q41",
+    "question": "My $20 refund has been accepted and the item inspection is complete. Can it be processed automatically?",
+    "expected_chunk_ids": [
+      "REF-Refunds-6.6"
+    ],
+    "expected_reference_chunk_ids": [
+      "REF-Refunds-6.1",
+      "REF-Refunds-6.2",
+      "REF-Refunds-6.3"
+    ]
+  },
+  {
+    "id": "q42",
+    "question": "My $120 refund is on hold for review. Why can't you just process it?",
+    "expected_chunk_ids": [
+      "REF-Refunds-6.6"
+    ],
+    "expected_reference_chunk_ids": [
+      "REF-Refunds-6.1",
+      "REF-Refunds-6.2",
+      "REF-Refunds-6.3"
     ]
   }
 ]

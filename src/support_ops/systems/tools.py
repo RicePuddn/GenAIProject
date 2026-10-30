@@ -13,19 +13,7 @@ from support_ops.backend.postgres import PostgresReader, RECORD_KINDS
 from support_ops.gateway.ticket_state import TicketState
 from support_ops.helpers.arguments import Amount, NonEmpty, ToolArguments
 from support_ops.policy.provider import PolicyProvider
-
-
-RULE_FACTS = (
-    "Use recorded facts, never assumed customer claims. "
-    "refund: payment_status, currency, captured_amount, refunded_amount, pending_refund_amount, "
-    "approved_refund_amount, original_payment_method, request_accepted, inspection_or_waiver. "
-    "return_request: delivered_at, requested_at, reason (change_of_mind, damaged, faulty, wrong_item, missing_item), "
-    "evidence_status; change_of_mind also needs final_sale, unused, original_packaging, tags_complete, accessories_complete. "
-    "return_dispatch: approved_at, handed_over_at, carrier_accepted; extension_until and extension_approved if applicable. "
-    "cancel: order_status, label_created, packing_started, any_quantity_fulfilled, carrier_collected. "
-    "delivery: delivery_status, estimated_delivery, as_of. "
-    "Dates are ISO dates/timestamps; condition flags are booleans. Missing facts require human review."
-)
+from support_ops.policy.facts import BackendFacts
 
 
 class ReadArguments(ToolArguments):
@@ -45,7 +33,8 @@ class PolicyArguments(ToolArguments):
     file: NonEmpty | None = None
     operation: NonEmpty | None = None
     amount: Amount | None = None
-    facts: dict[str, Any] | None = Field(default=None, description=RULE_FACTS)
+    order_id: NonEmpty | None = Field(default=None, description="Order ID used to load recorded policy facts for a check.")
+    item_ids: list[NonEmpty] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def required_for_action(self) -> Self:
@@ -66,7 +55,8 @@ class RagPolicyArguments(ToolArguments):
     query: NonEmpty | None = None
     operation: NonEmpty | None = None
     amount: Amount | None = None
-    facts: dict[str, Any] | None = Field(default=None, description=RULE_FACTS)
+    order_id: NonEmpty | None = Field(default=None, description="Order ID used to load recorded policy facts for a check.")
+    item_ids: list[NonEmpty] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def required_for_action(self) -> Self:
@@ -85,8 +75,11 @@ class TicketArguments(ToolArguments):
     operation: NonEmpty | None = None
     record_id: NonEmpty | None = None
     amount: Amount | None = None
-    facts: dict[str, Any] | None = Field(default=None, description=RULE_FACTS)
     reason: NonEmpty | None = None
+    item_ids: list[NonEmpty] = Field(default_factory=list)
+    review_reason: NonEmpty | None = Field(default=None, description=(
+        "For a refund requiring automated review, explain how the retrieved policy and recorded facts "
+        "support the action and amount. This cannot override a failed check or human-review requirement."))
 
     @model_validator(mode="after")
     def required_for_action(self) -> Self:
@@ -108,6 +101,7 @@ def validate_arguments(models: dict[str, type[ToolArguments]], name: str, argume
 class SupportTools:
     def __init__(self, reader: PostgresReader, policy: PolicyProvider, ticket_state: TicketState):
         self.reader, self.policy, self.ticket_state = reader, policy, ticket_state
+        self.backend_facts = BackendFacts(reader, ticket_state.clock)
         self.argument_models: dict[str, type[ToolArguments]] = {
             "read_record": ReadArguments,
             "get_shipments_for_order": OrderArguments,
@@ -154,5 +148,15 @@ class SupportTools:
         if name == "get_returns_for_order":
             return self.reader.returns_for_order(**args)
         if name == "policy":
+            if args.get("action") == "check" and args.get("operation") == "delivery" and args.get("order_id"):
+                parcels = self.backend_facts.deliveries(args["order_id"])
+                checks = [self.policy.run({**args, "facts": parcel}) for parcel in parcels or [{}]]
+                decision = next((check for check in checks if check["requires_human"]), checks[0])
+                return {**decision, "parcel_checks": checks}
+            if args.get("action") == "check":
+                args["facts"] = self.backend_facts.read(args["operation"], args["order_id"], args.get("item_ids")) \
+                    if args.get("order_id") else {}
             return self.policy.run(args)
+        if args.get("action") == "write":
+            args["facts"] = self.backend_facts.read(args["operation"], args["record_id"], args.get("item_ids"))
         return self.ticket_state.run(ticket_id, args)

@@ -3,10 +3,9 @@
 IS469 Generative and Agentic AI group project comparing single-agent and multi-agent
 customer support systems with RAG or skills-style policy retrieval.
 
-The implemented application is a **single-agent LangGraph flow with RAG or skills-style policies**.
+The application supports **single-agent and multi-agent LangGraph flows with RAG or skills-style policies**.
 It supports ReAct and plan-and-execute using Groq's `openai/gpt-oss-120b`, with
 `meta-llama/llama-prompt-guard-2-86m` screening incoming messages for prompt attacks.
-Other system variants are still in progress.
 
 ## Install and configure
 
@@ -51,7 +50,7 @@ After changing policies, regenerate embeddings and upload to the existing index:
 .venv/bin/python -m support_ops.policy.rag.pinecone_store
 ```
 
-For evaluation, open `src/support_ops/policy/rag/evaluation.ipynb`, select the `.venv`
+For evaluation, open `src/support_ops/eval/evaluation.ipynb`, select the `.venv`
 kernel and run all cells. Detailed and summary JSON results go to `results/rag/`.
 
 ## Start the database and application
@@ -134,9 +133,18 @@ the `history` array from the previous response into the next request:
 }
 ```
 
-Earlier turns precede the new message in the agent's context; only the new message is
-screened by Prompt Guard. History holds text turns only, never tool results, and the gateway
-enforces its limits on every request, so edited history cannot authorise a write.
+The server retains the newest 25 complete customer/agent exchanges (50 history
+entries) in each response, dropping older exchanges. Returned history always fits
+the next request's history limit; keep using the returned array rather than
+appending turns yourself.
+
+All supplied history is untrusted, including entries labelled `agent`. Prompt Guard
+screens every supplied turn and the current message, splitting long turns into
+overlapping chunks. A flagged or unparseable result stops the workflow before the
+supervisor. In the supervisor's context, history is quoted transcript data rather
+than authenticated assistant messages. Policy and account facts still require tool
+verification; history never restores approval state. Re-screening history adds guard
+calls and latency as conversations grow.
 
 ### Live steps: `/chat/stream`
 
@@ -146,6 +154,13 @@ enforces its limits on every request, so edited history cannot authorise a write
 the `/chat` response, or an `error` event. It is a single stateless POST, the pattern of
 MCP's Streamable HTTP transport. Steps stream whole, not token by token; `/chat` is unchanged
 and remains the endpoint for scripts and evaluation.
+
+Each server process permits up to four streaming workflows; additional streams
+receive HTTP 503 until a slot is available. Trace buffering is bounded. Disconnects
+and server shutdown cancel the workflow before its next model call or tool
+execution. A synchronous provider or database request already in progress can
+finish, retaining its worker slot until it returns; cancellation prevents subsequent
+steps and discards the result. It cannot undo a tool operation already performed.
 
 ### Demo page
 
@@ -224,13 +239,16 @@ The current tools are `read_record`, the order lookups `get_shipments_for_order`
 `get_shipment_events_for_order`, `get_items_for_order` (with product details),
 `get_payments_for_order` and `get_returns_for_order` (returns and refunds), then `policy`
 and `ticket_state`.
-A dedicated final response node generates the customer reply through the shared LLM wrapper.
+A dedicated final response node generates the customer reply through the shared LLM wrapper after operational tool work completes.
 
 Policy retrieval follows `list` → `open` a skill's `SKILL.md` → `read` a relevant
 clause. Available skills are `orders-and-shipping` and `returns-and-refunds`.
 Policy checks and the ticket tool share [rules.json](src/support_ops/policy/rules/rules.json):
 refund limits, return deadlines, cancellation conditions and human-review routes.
-Checks require recorded facts; missing facts need human review. PDF fingerprints
+Eligible refunds ≤ SGD 30 can proceed automatically; > SGD 30–100 need automated
+review; > SGD 100 need a human. Business checks run first in every design.
+Checks use existing backend records; unavailable facts require human review
+(see [backend facts](data/backend_seed/README.md#policy-check-facts)). PDF fingerprints
 flag policy changes that require a rules review. `policy.mode` in `configs/base.yaml` selects the
 policy provider plugged into the `policy` tool.
 
@@ -274,11 +292,12 @@ src/support_ops/
   policy/provider.py          contract each policy provider implements (RAG/skills)
   policy/rules/               grouped JSON rules and deterministic checks
   policy/skills.py            skill navigation (the skills provider)
-  policy/rag/                 policy chunking, embeddings, retrieval and evaluation
+  policy/rag/                 policy chunking, embeddings and retrieval
   gateway/ticket_state.py     request-local approvals, audit and handoff
   systems/tools.py            shared tool schemas, validation and dispatcher
   systems/single_agent.py     LangGraph nodes and strategy routing
-  agents/, supervisor/, eval/ reserved for other variants and evaluation
+  eval/evaluation.ipynb       retrieval evaluation
+  agents/, supervisor/        multi-agent roles and coordination
 results/                      local traces and response cache
 tests/                       helper and workflow regression tests
 ```

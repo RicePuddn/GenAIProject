@@ -40,4 +40,4 @@ packages = ["src/support_ops"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]   # ".": test modules share helpers via `from tests.… import …`

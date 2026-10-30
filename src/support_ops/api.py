@@ -1,12 +1,12 @@
 """HTTP API for interactive support-flow trials."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import queue
 import time
 from contextlib import asynccontextmanager
-import queue
-import threading
 from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any, Literal
@@ -16,12 +16,19 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from support_ops.helpers.cancellation import CancellationToken, WorkflowCancelled
 from support_ops.helpers.clock import Clock
 from support_ops.helpers.config import load_config
 from support_ops.helpers.llm import OpenAICompatLLM
 from support_ops.helpers.tracing import Tracer
+from support_ops.helpers.workers import WorkflowWorkers
 from support_ops.policy.rules import Rules
 from support_ops.systems.single_agent import SingleAgentWorkflow, policy_from_config
+
+MAX_HISTORY_TURNS = 50
+
+log = logging.getLogger("uvicorn.error")   # shown in the uvicorn console
+
 
 class Turn(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
@@ -37,7 +44,7 @@ class ChatRequest(BaseModel):
     ticket_id: str | None = Field(default=None, min_length=1, max_length=100)
     strategy: Literal["react", "plan_and_execute"] | None = None
     # Stateless: the client sends the earlier turns of the ticket; the server keeps nothing.
-    history: list[Turn] = Field(default_factory=list, max_length=50)
+    history: list[Turn] = Field(default_factory=list, max_length=MAX_HISTORY_TURNS)
 
 
 class ChatResponse(BaseModel):
@@ -50,7 +57,7 @@ class ChatResponse(BaseModel):
     tool_call_count: int = 0
     tool_calls: list[dict[str, Any]] = Field(default_factory=list)
     trace: dict[str, Any]
-    history: list[Turn] = Field(default_factory=list)   # send back as-is with the next message
+    history: list[Turn] = Field(default_factory=list, max_length=MAX_HISTORY_TURNS)
 
 
 @lru_cache(maxsize=1)
@@ -59,14 +66,23 @@ def _runtime() -> tuple[dict[str, Any], OpenAICompatLLM]:
     return cfg, OpenAICompatLLM(cfg)
 
 
-# Load the configured policy retriever once, before accepting chat requests.
+@lru_cache(maxsize=1)
+def _stream_workers() -> WorkflowWorkers:
+    return WorkflowWorkers()
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     cfg = load_config()
     started = time.perf_counter()
     policy_from_config(cfg, Rules.load(cfg["policy"]["rules_file"])).warm_up()
-    logging.getLogger("uvicorn.error").info("Policy ready in %.1fs", time.perf_counter() - started)
-    yield
+    log.info("policy mode %r ready in %.1fs", cfg["policy"].get("mode", "skills"), time.perf_counter() - started)
+    workers = _stream_workers()
+    try:
+        yield
+    finally:
+        workers.close()
+        _stream_workers.cache_clear()
 
 
 app = FastAPI(title="Policy-Bound Support Ops", version="0.1.0", lifespan=lifespan)
@@ -90,11 +106,15 @@ def info() -> dict[str, Any]:
     }
 
 
-def _run_chat(request: ChatRequest, tracer: Tracer) -> ChatResponse:
+def _run_chat(request: ChatRequest, tracer: Tracer,
+              cancellation: CancellationToken | None = None) -> ChatResponse:
     """One turn of the workflow; shared by /chat and /chat/stream."""
+    cancellation = cancellation or CancellationToken()
+    cancellation.check()
     cfg, llm = _runtime()
     # Keep mutable workflow state and its per-ticket tracer isolated per request.
-    workflow = SingleAgentWorkflow(llm, cfg, clock=Clock(datetime.now(timezone.utc)))
+    workflow = SingleAgentWorkflow(llm, cfg, clock=Clock(datetime.now(timezone.utc)),
+                                   cancellation=cancellation)
     history = [turn.model_dump() for turn in request.history]
     result = workflow.invoke(tracer.ticket_id, request.customer_message, strategy=request.strategy,
                              tracer=tracer, history=history)
@@ -110,9 +130,16 @@ def _run_chat(request: ChatRequest, tracer: Tracer) -> ChatResponse:
         tool_call_count=tracer.tool_call_count,
         tool_calls=tracer.tool_calls,
         trace=tracer.summary(),
-        history=[*history, {"role": "customer", "content": request.customer_message},
-                 *([{"role": "agent", "content": reply}] if reply else [])],
+        history=_retain_history([*history, {"role": "customer", "content": request.customer_message},
+                                 *([{"role": "agent", "content": reply}] if reply else [])]),
     )
+
+
+def _retain_history(turns: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Return the newest complete exchanges, within the next request's limit."""
+    pairs = [turns[index:index + 2] for index in range(len(turns) - 1)
+             if turns[index]["role"] == "customer" and turns[index + 1]["role"] == "agent"]
+    return [turn for pair in pairs[-(MAX_HISTORY_TURNS // 2):] for turn in pair]
 
 
 def _ticket_id(request: ChatRequest) -> str:
@@ -131,27 +158,76 @@ def _sse(event: str, data: Any) -> str:
     return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
 
 
+class CancellableStreamingResponse(StreamingResponse):
+    def __init__(self, *args, cancellation: CancellationToken, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.cancellation = cancellation
+
+    async def __call__(self, scope, receive, send):
+        # Also handles ASGI send failures, which can happen while the generator
+        # is suspended at yield rather than awaiting the next queue item.
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            self.cancellation.cancel()
+            await self.body_iterator.aclose()
+
+
 @app.post("/chat/stream")
 def chat_stream(request: ChatRequest) -> StreamingResponse:
-    """The same turn as /chat, answered as Server-Sent Events while it runs: one `trace` event
-    per step (guard, thought, tool call, tool result, handoff), then a `result` event holding
-    the /chat response, or an `error` event. One stateless POST, as in MCP's Streamable HTTP."""
-    events: queue.Queue = queue.Queue()
+    """Stream trace events and a final result with bounded, cancellable workers."""
+    events: queue.Queue = queue.Queue(maxsize=128)
     finished = object()
+    cancellation = CancellationToken()
+
+    def publish(item) -> None:
+        while True:
+            cancellation.check()
+            try:
+                events.put(item, timeout=0.1)
+                return
+            except queue.Full:
+                continue
 
     def work() -> None:
         try:
-            tracer = Tracer(_ticket_id(request), listener=lambda event: events.put(("trace", event)))
-            events.put(("result", _run_chat(request, tracer).model_dump(mode="json")))
-        except Exception as exc:
-            events.put(("error", {"detail": str(exc)}))
+            try:
+                tracer = Tracer(_ticket_id(request), listener=lambda event: publish(("trace", event)))
+                result = _run_chat(request, tracer, cancellation)
+            except WorkflowCancelled:
+                raise
+            except Exception as exc:
+                publish(("error", {"detail": str(exc)}))
+            else:
+                publish(("result", result.model_dump(mode="json")))
+            publish(finished)
+        except WorkflowCancelled:
+            pass
+
+    try:
+        future = _stream_workers().submit(cancellation, work)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    def poll():
+        try:
+            return events.get(timeout=0.1)
+        except queue.Empty:
+            return None
+
+    async def stream():
+        try:
+            while True:
+                item = await asyncio.to_thread(poll)
+                if item is finished:
+                    break
+                if item is not None:
+                    yield _sse(*item)
         finally:
-            events.put(finished)
+            cancellation.cancel()
+            future.cancel()
 
-    def stream():
-        threading.Thread(target=work, daemon=True).start()
-        while (item := events.get()) is not finished:
-            yield _sse(*item)
-
-    return StreamingResponse(stream(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return CancellableStreamingResponse(
+        stream(), cancellation=cancellation, media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

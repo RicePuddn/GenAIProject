@@ -26,7 +26,8 @@ _ENC = tiktoken.get_encoding("o200k_base")
 
 
 def count_tokens(text: str) -> int:
-    return len(_ENC.encode(text))
+    # Customer text may contain special-token strings such as <|endoftext|>; count them as plain text.
+    return len(_ENC.encode(text, disallowed_special=()))
 
 
 @dataclass
@@ -103,19 +104,32 @@ class OpenAICompatLLM:
         cached = self._cache_get(key) if cache_enabled else None
         t0 = time.perf_counter()
         if cached is None:
-            resp = self.client.chat.completions.create(**req)
-            msg = resp.choices[0].message
-            calls = [
-                ToolCall(tc.id, tc.function.name, _parse_args(tc.function.arguments))
-                for tc in (msg.tool_calls or [])
-            ]
-            usage = resp.usage
-            tin = usage.prompt_tokens if usage else count_tokens(json.dumps(messages))
-            tout = usage.completion_tokens if usage else count_tokens(msg.content or "")
-            # gpt-oss on Groq returns its thinking in a provider-specific `reasoning` field.
-            result = ChatResult(msg.content, calls, tin, tout, getattr(msg, "reasoning", None) or None)
-            if cache_enabled:
-                self._cache_put(key, result)
+            try:
+                resp = self.client.chat.completions.create(**req)
+            except Exception as exc:
+                recovered = _recover_tool_calls(exc, key) if tools else None
+                if recovered is None:
+                    raise
+                # Not cached: the provider rejected it, so the same request may succeed next time. The
+                # estimate counts what was sent (messages and tool schemas) and the call it generated.
+                result = ChatResult(None, recovered, count_tokens(json.dumps([messages, tools], default=str)),
+                                    count_tokens(json.dumps([[call.name, call.arguments] for call in recovered],
+                                                            default=str)))
+                if tracer is not None:
+                    tracer.log("tool_call_recovered", role=role, tools=[call.name for call in recovered])
+            else:
+                msg = resp.choices[0].message
+                calls = [
+                    ToolCall(tc.id, tc.function.name, _parse_args(tc.function.arguments))
+                    for tc in (msg.tool_calls or [])
+                ]
+                usage = resp.usage
+                tin = usage.prompt_tokens if usage else count_tokens(json.dumps(messages))
+                tout = usage.completion_tokens if usage else count_tokens(msg.content or "")
+                # gpt-oss on Groq returns its thinking in a provider-specific `reasoning` field.
+                result = ChatResult(msg.content, calls, tin, tout, getattr(msg, "reasoning", None) or None)
+                if cache_enabled:
+                    self._cache_put(key, result)
         else:
             result = cached
         if tracer is not None:
@@ -165,6 +179,36 @@ def _parse_args(raw: str | None) -> dict[str, Any]:
         return val if isinstance(val, dict) else {"_raw": raw}
     except json.JSONDecodeError:
         return {"_raw": raw}  # surfaced to the agent as a tool error, not a crash
+
+
+def _recover_tool_calls(exc: Exception, request_key: str = "") -> list[ToolCall] | None:
+    """Groq checks tool arguments against the schema and rejects the whole response (400 tool_use_failed)
+    on a mismatch, e.g. an alias such as order_item_id. The error carries the attempted call, so it comes
+    back as an ordinary tool call: the tool's own validation then accepts it or returns an error the agent
+    can fix. None for any other error. IDs come from `request_key` (the request's hash) and the call's
+    position, so a replayed ticket gets the same IDs and its later turns still hit the cache."""
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict) and isinstance(body.get("error"), dict):
+        body = body["error"]
+    if not isinstance(body, dict) or body.get("code") != "tool_use_failed":
+        return None
+    try:
+        generated = json.loads(body.get("failed_generation") or "")
+    except (TypeError, json.JSONDecodeError):
+        return None
+    calls = []
+    for index, attempt in enumerate(generated if isinstance(generated, list) else [generated]):
+        if not isinstance(attempt, dict) or not isinstance(attempt.get("name"), str):
+            return None
+        # Some generations name the arguments "parameters".
+        arguments = attempt.get("arguments", attempt.get("parameters", {}))
+        if isinstance(arguments, str):
+            arguments = _parse_args(arguments)
+        elif not isinstance(arguments, dict):   # e.g. a list or number: the tool reports it as an error
+            arguments = {"_raw": json.dumps(arguments, default=str)}
+        call_id = hashlib.sha256(f"{request_key}:{index}".encode()).hexdigest()[:12]
+        calls.append(ToolCall(f"recovered_{call_id}", attempt["name"], arguments))
+    return calls or None
 
 
 Responder = Callable[[list[dict[str, Any]], list[dict] | None], ChatResult]

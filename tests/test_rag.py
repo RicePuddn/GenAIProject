@@ -207,7 +207,7 @@ class PineconeRetrievalTests(unittest.TestCase):
         docs.search.assert_not_called()
 
     def test_reference_expansion_does_not_inflate_top_k_metrics(self):
-        notebook = nbformat.read(Path(__file__).resolve().parents[1] / "src/support_ops/policy/rag/evaluation.ipynb", as_version=4)
+        notebook = nbformat.read(Path(__file__).resolve().parents[1] / "src/support_ops/eval/evaluation.ipynb", as_version=4)
         cell = next(cell for cell in notebook.cells if "metrics" in cell.metadata.get("tags", []))
         namespace = {}
         exec(cell.source, namespace)
@@ -217,7 +217,7 @@ class PineconeRetrievalTests(unittest.TestCase):
         self.assertEqual(score(["c"], ["a", "c"], 2)["mrr_at_k"], 0.5)
 
     def test_reference_checks_accept_existing_search_hits_and_report_missing_links(self):
-        notebook = nbformat.read(Path(__file__).resolve().parents[1] / "src/support_ops/policy/rag/evaluation.ipynb", as_version=4)
+        notebook = nbformat.read(Path(__file__).resolve().parents[1] / "src/support_ops/eval/evaluation.ipynb", as_version=4)
         cell = next(cell for cell in notebook.cells if "reference_checks" in cell.metadata.get("tags", []))
         namespace = {}
         exec(cell.source, namespace)

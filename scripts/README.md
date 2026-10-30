@@ -13,3 +13,6 @@ step; see "Demo page" in the [application README](../README.md).
 
 See the [application README](../README.md) for setup and the
 [fixture README](../data/backend_seed/README.md) for sample IDs and reset instructions.
+
+`sync_policy_skills.py` refreshes the skills clause files from the policy PDFs.
+Run it after reviewing a policy change so RAG and skills use the same clauses.

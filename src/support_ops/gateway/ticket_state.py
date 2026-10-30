@@ -38,25 +38,31 @@ class TicketState:
         operation, record_id = args.get("operation"), args.get("record_id")
         if not operation or not record_id:
             raise ValueError("write requires operation and record_id")
-        if operation != "refund":
+        if operation not in {"refund", "return_request", "cancel"}:
             return self.run(ticket_id, {**args, "action": "handoff", "reason": "unsupported mock write operation"})
         decision = self.rules.check(operation, args.get("amount"), args.get("facts"))
-        if not decision["allowed"]:
+        if decision["requires_human"]:
             return self.run(ticket_id, {
                 **args, "action": "handoff",
-                "reason": decision.get("reason", "amount exceeds mock approval limit"),
+                "reason": decision["reason"],
             })
+        if not decision["allowed"]:
+            return {"status": "blocked", "reason": decision["reason"], "policy_check": decision}
+        if decision["route"] == "approver" and not args.get("review_reason", "").strip():
+            return {"status": "review_required", "policy_check": decision,
+                    "reason": "Review the policy and recorded facts, then supply review_reason before writing."}
         key = (ticket_id, operation, record_id)
         if key in self.writes:
             previous = self.writes[key]
-            if previous["amount"] != args["amount"]:
+            if previous["amount"] != args.get("amount"):
                 raise ValueError("conflicting amount for an existing mock write")
             return previous
         issued_at = self.clock.now()
         result = {
             "status": "approved_mock_write", "mock": True,
             "approval_token": secrets.token_urlsafe(18), "operation": operation,
-            "record_id": record_id, "amount": args["amount"], "currency": self.rules.currency,
+            "record_id": record_id, "amount": args.get("amount"), "currency": self.rules.currency,
+            "policy_check": decision, "review_reason": args.get("review_reason"),
             "issued_at": issued_at.isoformat(),
             "expires_at": (issued_at + timedelta(seconds=self.token_ttl_seconds)).isoformat(),
         }

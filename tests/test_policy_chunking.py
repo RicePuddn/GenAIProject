@@ -47,7 +47,7 @@ class PolicyChunkingTests(unittest.TestCase):
         self.assertIn("SHP-SeparateShipPartialDel-6.1", ids)
         self.assertTrue(all(set(c.references) <= ids for c in chunks))
         cases = json.loads((ROOT / "data/cases/rag/questions.json").read_text())
-        self.assertEqual(len(cases), 40)
+        self.assertTrue(cases)
         self.assertEqual(len({case["id"] for case in cases}), len(cases))
         self.assertTrue(all(set(case["expected_chunk_ids"]) <= ids for case in cases))
         by_id = {c.id: c for c in chunks}

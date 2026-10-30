@@ -44,3 +44,23 @@ docker compose up -d --wait postgres
 
 The API reads these records but keeps mock approvals, audit logs, and handoffs in
 request-local memory. It does not persist its ticket state into these tables.
+
+## Policy-check facts
+
+`policy/facts.py` collects existing records into a temporary dictionary for
+`Rules.check()`. It adds no database columns and does not accept agent-supplied facts.
+
+| Rule input | Existing source |
+| --- | --- |
+| Order status and currency | `orders` |
+| Affected goods and value | `order_items` |
+| Delivery date and observed fulfillment | `shipments` and `order_items` |
+| Captured amount | Captured `payments` |
+| Completed and pending refund totals | `refunds` |
+| Existing return records | `returns` |
+
+The current schema does not record inspection results, evidence verification,
+item-level return allocations, approved refund amounts, cancellation authority or
+all warehouse packing/label states. These values remain unknown. A return being
+received does not prove inspection passed; processing status does not prove packing
+has not begun. The rules require human review when a prerequisite is unavailable.

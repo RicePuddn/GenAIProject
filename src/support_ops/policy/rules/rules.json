@@ -1,15 +1,16 @@
 {
-  "version": "2026-10-30",
+  "version": "2026-10-31",
   "currency": "SGD",
   "timezone": "Asia/Singapore",
   "policy_documents": {
-    "orders-and-shipping-policy.pdf": "ab25e74752ce6b25d9e217a8cf6480d14dc2dfab9996beb444472fd19a1c8a4b",
-    "returns-and-refunds-policy.pdf": "17777e4813dc1a0a0343110ac8f6cc08d9b8614d757231b646e9de0da321c9ab"
+    "orders-and-shipping-policy.pdf": "9be28f79259ab50d3b3ecb5a7f767aa0c56a22675b1eb47cb094fe8b2a6f216f",
+    "returns-and-refunds-policy.pdf": "4e8771ae6e4a62852dc53a289077c283fb75bbbf38636db825b0eff7d153b329"
   },
   "unsupported_operation": {
     "allowed": false,
     "requires_human": true,
-    "reason": "Unsupported operation requires human review."
+    "reason": "Unsupported operation requires human review.",
+    "route": "human"
   },
   "groups": {
     "human_review": {
@@ -42,7 +43,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "Risk flags must be verified booleans."
+            "reason": "Risk flags must be verified booleans.",
+            "route": "human"
           }
         },
         "disputed_facts": {
@@ -50,7 +52,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "Conflicting facts require human review."
+            "reason": "Conflicting facts require human review.",
+            "route": "human"
           }
         },
         "unsafe_goods": {
@@ -58,7 +61,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "Unsafe goods require human review and specific handling instructions."
+            "reason": "Unsafe goods require human review and specific handling instructions.",
+            "route": "human"
           }
         },
         "human_requested": {
@@ -66,7 +70,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "The customer requested human review."
+            "reason": "The customer requested human review.",
+            "route": "human"
           }
         },
         "evidence_unavailable": {
@@ -74,7 +79,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "Review the evidence limitation; do not automatically reject the request."
+            "reason": "Review the evidence limitation; do not automatically reject the request.",
+            "route": "human"
           }
         },
         "counterfeit_claim": {
@@ -82,7 +88,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "An authenticity claim requires human assessment."
+            "reason": "An authenticity claim requires human assessment.",
+            "route": "human"
           }
         },
         "unsupported_item_type": {
@@ -90,15 +97,17 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "This item is outside the standard physical-return process and needs human review."
+            "reason": "This item is outside the standard physical-return process and needs human review.",
+            "route": "human"
           }
         }
       }
     },
     "refund": {
-      "rule_id": "refund_limit_100",
-      "description": "Check the approval limit, recorded payment, approved amount and remaining balance.",
-      "max_auto_amount": "100.00",
+      "rule_id": "refund_approval_requirements",
+      "description": "Check refund prerequisites first, then select human review, automated review or automatic processing by amount.",
+      "max_auto_amount": "30.00",
+      "max_reviewed_amount": "100.00",
       "required_payment_status": "captured",
       "required_facts": [
         "payment_status",
@@ -124,15 +133,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "The payment currency is outside the configured policy; review it before applying the refund limit."
-          }
-        },
-        "limit_exceeded": {
-          "given": "The requested refund exceeds max_auto_amount in the configured currency.",
-          "outcome": {
-            "allowed": false,
-            "requires_human": true,
-            "reason": "The refund exceeds the automatic approval limit and requires human review."
+            "reason": "The payment currency is outside the configured policy; review it before applying the refund limit.",
+            "route": "human"
           }
         },
         "missing_facts": {
@@ -140,7 +142,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "Recorded payment and approval facts are required before refund processing."
+            "reason": "Recorded payment and approval facts are required before refund processing.",
+            "route": "human"
           }
         },
         "payment_not_captured": {
@@ -148,7 +151,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "The payment has not been established as captured; review the payment before refunding."
+            "reason": "The payment has not been established as captured; review the payment before refunding.",
+            "route": "human"
           }
         },
         "different_payment_method": {
@@ -156,7 +160,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "Do not redirect the refund to a different payment method."
+            "reason": "Do not redirect the refund to a different payment method.",
+            "route": "human"
           }
         },
         "request_not_accepted": {
@@ -164,7 +169,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "The request must be accepted before refund payment."
+            "reason": "The request must be accepted before refund payment.",
+            "route": "human"
           }
         },
         "inspection_incomplete": {
@@ -172,31 +178,62 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "Complete the required inspection or establish an approved waiver before payment."
+            "reason": "Complete the required inspection or establish an approved waiver before payment.",
+            "route": "human"
           }
         },
         "balance_exceeded": {
           "given": "The refund exceeds captured amount minus completed and pending refunds.",
           "outcome": {
             "allowed": false,
-            "requires_human": true,
-            "reason": "The refund exceeds the remaining captured balance; review possible duplicate or excess payment."
+            "requires_human": false,
+            "reason": "The refund exceeds the remaining captured balance; correct the amount or explain why it cannot proceed.",
+            "route": null
           }
         },
         "approved_amount_exceeded": {
           "given": "The refund exceeds the recorded approved_refund_amount.",
           "outcome": {
             "allowed": false,
-            "requires_human": true,
-            "reason": "The requested amount exceeds the approved resolution and needs review."
+            "requires_human": false,
+            "reason": "The requested amount exceeds the recorded approved resolution; correct the amount before processing.",
+            "route": null
           }
         },
-        "passed": {
-          "given": "Every preceding refund check passes.",
+        "goods_value_exceeded": {
+          "given": "The refund exceeds the backend value of the affected goods (including recorded shipping and tax for a full cancellation).",
+          "outcome": {
+            "allowed": false,
+            "requires_human": false,
+            "route": null,
+            "reason": "The refund exceeds what was paid for the affected goods; correct the amount."
+          }
+        },
+        "limit_exceeded": {
+          "given": "The requested refund exceeds max_reviewed_amount in the configured currency.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "The refund exceeds the automated-review limit and requires human review.",
+            "route": "human"
+          }
+        },
+        "automated_review": {
+          "given": "All refund prerequisites pass and the amount is above max_auto_amount but at or below max_reviewed_amount.",
           "outcome": {
             "allowed": true,
             "requires_human": false,
-            "reason": "Refund hard checks passed; this result does not issue payment."
+            "route": "approver",
+            "reason": "Refund checks passed; automated review is required before processing."
+          }
+        },
+        "auto_approval": {
+          "given": "All refund prerequisites pass and the amount is at or below max_auto_amount.",
+          "outcome": {
+            "allowed": true,
+            "requires_human": false,
+            "route": "auto",
+            "reason": "Refund checks passed; the amount qualifies for automatic processing."
           }
         }
       }
@@ -223,7 +260,8 @@
         "RET-ReturnEligibility-2.1",
         "RET-ReturnEligibility-2.4",
         "RET-ReturnEligibility-2.5",
-        "RET-ReturnEligibility-2.6"
+        "RET-ReturnEligibility-2.6",
+        "RET-ReturnProcedure-4.1"
       ],
       "checks": {
         "missing_dates": {
@@ -231,7 +269,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "The affected item's delivery and request dates are required."
+            "reason": "The affected item's delivery and request dates are required.",
+            "route": "human"
           }
         },
         "request_before_delivery": {
@@ -239,7 +278,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "The request and delivery dates conflict and need review."
+            "reason": "The request and delivery dates conflict and need review.",
+            "route": "human"
           }
         },
         "window_exceeded": {
@@ -247,7 +287,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "The request is outside the ordinary return window; human review must consider any exception."
+            "reason": "The request is outside the ordinary return window; human review must consider any exception.",
+            "route": "human"
           }
         },
         "unsupported_reason": {
@@ -255,7 +296,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "The return reason needs human assessment."
+            "reason": "The return reason needs human assessment.",
+            "route": "human"
           }
         },
         "unverified_evidence": {
@@ -263,7 +305,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "Relevant evidence needs verification before ordinary return checks can pass."
+            "reason": "Relevant evidence needs verification before ordinary return checks can pass.",
+            "route": "human"
           }
         },
         "missing_item_conditions": {
@@ -271,7 +314,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "The change-of-mind item conditions are incomplete or unverified."
+            "reason": "The change-of-mind item conditions are incomplete or unverified.",
+            "route": "human"
           }
         },
         "final_sale": {
@@ -279,7 +323,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": false,
-            "reason": "Verified final-sale goods do not qualify for an ordinary change-of-mind return."
+            "reason": "Verified final-sale goods do not qualify for an ordinary change-of-mind return.",
+            "route": null
           }
         },
         "item_conditions_failed": {
@@ -287,7 +332,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": false,
-            "reason": "Verified change-of-mind conditions are not satisfied; the ordinary return request cannot proceed."
+            "reason": "Verified change-of-mind conditions are not satisfied; the ordinary return request cannot proceed.",
+            "route": null
           }
         },
         "passed": {
@@ -295,7 +341,26 @@
           "outcome": {
             "allowed": true,
             "requires_human": false,
-            "reason": "Ordinary return-request checks passed; refund payment checks remain separate."
+            "reason": "Ordinary return-request checks passed; refund payment checks remain separate.",
+            "route": "auto"
+          }
+        },
+        "existing_return": {
+          "given": "An active return already covers these goods.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": false,
+            "reason": "Use the existing return instead of opening a duplicate.",
+            "route": null
+          }
+        },
+        "return_scope_unverified": {
+          "given": "An active return exists but its affected items have not been established.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "route": "human",
+            "reason": "Establish which goods the active return covers before authorizing another return."
           }
         }
       }
@@ -317,7 +382,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "Return approval and actual handover dates are required."
+            "reason": "Return approval and actual handover dates are required.",
+            "route": "human"
           }
         },
         "unapproved_extension": {
@@ -325,7 +391,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "The dispatch extension needs recorded human approval."
+            "reason": "The dispatch extension needs recorded human approval.",
+            "route": "human"
           }
         },
         "handover_unverified": {
@@ -333,7 +400,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "Carrier handover must be established; a label alone does not prove dispatch."
+            "reason": "Carrier handover must be established; a label alone does not prove dispatch.",
+            "route": "human"
           }
         },
         "dispatch_before_approval": {
@@ -341,7 +409,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "Handover predates return approval; review authorization and dates."
+            "reason": "Handover predates return approval; review authorization and dates.",
+            "route": "human"
           }
         },
         "deadline_exceeded": {
@@ -349,7 +418,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "Dispatch is outside its authorized deadline; review it rather than automatically cancelling the return."
+            "reason": "Dispatch is outside its authorized deadline; review it rather than automatically cancelling the return.",
+            "route": "human"
           }
         },
         "passed": {
@@ -357,7 +427,8 @@
           "outcome": {
             "allowed": true,
             "requires_human": false,
-            "reason": "Return dispatch was within the authorized deadline."
+            "reason": "Return dispatch was within the authorized deadline.",
+            "route": "auto"
           }
         }
       }
@@ -382,7 +453,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": false,
-            "reason": "The order is already cancelled; do not cancel it again."
+            "reason": "The order is already cancelled; do not cancel it again.",
+            "route": null
           }
         },
         "wrong_order_status": {
@@ -390,7 +462,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "Ordinary cancellation requires an unfulfilled processing order."
+            "reason": "Ordinary cancellation requires an unfulfilled processing order.",
+            "route": "human"
           }
         },
         "unverified_fulfillment": {
@@ -398,7 +471,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "The fulfillment status is incomplete or unverified."
+            "reason": "The fulfillment status is incomplete or unverified.",
+            "route": "human"
           }
         },
         "fulfillment_started": {
@@ -406,7 +480,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "Fulfillment has begun; cancellation or amendment requires human review."
+            "reason": "Fulfillment has begun; cancellation or amendment requires human review.",
+            "route": "human"
           }
         },
         "passed": {
@@ -414,7 +489,17 @@
           "outcome": {
             "allowed": true,
             "requires_human": false,
-            "reason": "Ordinary cancellation checks passed; confirmation and the actual update are still required."
+            "reason": "Ordinary cancellation checks passed; confirmation and the actual update are still required.",
+            "route": "auto"
+          }
+        },
+        "authority_unverified": {
+          "given": "The customer's authority to cancel this order has not been verified.",
+          "outcome": {
+            "allowed": false,
+            "requires_human": true,
+            "reason": "Customer authority must be verified before cancellation.",
+            "route": "human"
           }
         }
       }
@@ -442,7 +527,8 @@
         "SHP-DeliveryProblems-7.1",
         "SHP-DeliveryProblems-7.2",
         "SHP-DeliveryProblems-7.3",
-        "SHP-DeliveryProblems-7.4"
+        "SHP-DeliveryProblems-7.4",
+        "ODR-OrderStatusTracking-5.1"
       ],
       "checks": {
         "immediate_investigation": {
@@ -450,7 +536,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "The recorded delivery issue requires immediate human investigation."
+            "reason": "The recorded delivery issue requires immediate human investigation.",
+            "route": "human"
           }
         },
         "delivered": {
@@ -458,7 +545,8 @@
           "outcome": {
             "allowed": true,
             "requires_human": false,
-            "reason": "Recorded delivery; denied receipt must be flagged for investigation. This is not refund approval."
+            "reason": "Recorded delivery; denied receipt must be flagged for investigation. This is not refund approval.",
+            "route": "auto"
           }
         },
         "unknown_status": {
@@ -466,7 +554,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "The recorded shipment status must be established."
+            "reason": "The recorded shipment status must be established.",
+            "route": "human"
           }
         },
         "missing_dates": {
@@ -474,7 +563,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "The estimated delivery and assessment dates are required."
+            "reason": "The estimated delivery and assessment dates are required.",
+            "route": "human"
           }
         },
         "waiting_period_exceeded": {
@@ -482,7 +572,8 @@
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "The shipment is beyond the ordinary waiting period and requires human investigation."
+            "reason": "The shipment is beyond the ordinary waiting period and requires human investigation.",
+            "route": "human"
           }
         },
         "passed": {
@@ -490,10 +581,35 @@
           "outcome": {
             "allowed": true,
             "requires_human": false,
-            "reason": "Ordinary tracking follow-up can continue; this is not refund approval."
+            "reason": "Ordinary tracking follow-up can continue; this is not refund approval.",
+            "route": "auto"
+          }
+        },
+        "cancelled": {
+          "given": "The shipment was cancelled and no shared human-review trigger applies.",
+          "outcome": {
+            "allowed": true,
+            "requires_human": false,
+            "route": "auto",
+            "reason": "Report the recorded cancellation; this is not refund approval."
           }
         }
       }
+    }
+  },
+  "routing": {
+    "rule_id": "approval_routing_v2",
+    "awaiting_shop_return_statuses": [
+      "requested",
+      "received"
+    ],
+    "operations": {
+      "none": "auto",
+      "refund": "auto",
+      "return": "auto",
+      "exchange": "approver",
+      "order_change": "auto",
+      "account_change": "human"
     }
   }
 }
