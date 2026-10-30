@@ -122,6 +122,7 @@ class SkillsBase(Base):
     def setUp(self):
         super().setUp()
         self.cfg = load_config("configs/experiments/multi_agent_skills.yaml")
+        self.cfg["multi_agent"]["check_citations"] = False   # as in Base; turned on where a test reads first
 
     def run_flow(self, message="My mug arrived broken, refund please. ORD-2026-00001", strategy="react", **backend):
         self.workflow = MultiAgentWorkflow(self.llm, self.cfg, reader=reader(**backend),
@@ -135,6 +136,7 @@ class SkillsWorkflowTests(SkillsBase):
         return next(messages[0]["content"] for role, messages in self.llm.calls if role == "specialist")
 
     def test_refund_ticket_reads_skills_and_executes(self):
+        self.cfg["multi_agent"]["check_citations"] = True   # it reads refunds.md before citing it
         self.llm.push("supervisor", triage(), text("Your refund of 20 SGD is recorded.")).push(
             "specialist", tool_call("policy", action="list"),
             tool_call("policy", action="open", skill="returns-and-refunds"),
@@ -197,3 +199,58 @@ class ApiTests(unittest.TestCase):
                 TestClient(app) as client:
             info = client.get("/info").json()
         self.assertEqual((info["policy_mode"], info["corpus"]), ("skills", "policy/skills"))
+
+
+class CitationTests(SkillsBase):
+    """Comment 2 on PR #5: a proposal may only cite policy the specialist actually read in this case,
+    and a plan whose call failed is made again rather than turned into a proposal."""
+
+    def setUp(self):
+        super().setUp()
+        self.cfg["multi_agent"]["check_citations"] = True
+
+    @staticmethod
+    def draft(*cited):
+        return text(json.dumps({"action": "refund", "order_id": "ORD-2026-00001", "amount": 20,
+                                "items": [{"item_id": "ITM-0031-2", "quantity": 1}], "cited_clauses": list(cited),
+                                "route": "auto", "reason": "Damaged on arrival."}))
+
+    def test_a_refused_planned_read_makes_the_specialist_plan_again(self):
+        # Her reproduction: the refused read of tracking.md went straight on to an auto refund citing it.
+        other_area = {"calls": [{"name": "policy", "arguments": {
+            "action": "read", "skill": "orders-and-shipping", "file": "tracking.md"}}]}
+        own_area = {"calls": [{"name": "policy", "arguments": {
+            "action": "read", "skill": "returns-and-refunds", "file": "refunds.md"}}]}
+        self.llm.push("supervisor", triage(), text("Your refund of 20 SGD is recorded.")).push(
+            "specialist", text(json.dumps(other_area)), text(json.dumps(own_area)),
+            self.draft("returns-and-refunds/refunds.md")).push("approver", verdict())
+        result = self.run_flow(strategy="plan_and_execute")
+        rejected = result["trace"].of_kind("plan_rejected")
+        self.assertIn("planned call policy failed", rejected[0]["reason"])
+        self.assertEqual(result["ticket_status"], "resolved")
+        self.assertEqual(result["proposal"]["cited_clauses"], ["returns-and-refunds/refunds.md"])
+
+    def test_citing_a_file_that_was_not_read_is_rejected(self):
+        self.llm.push("supervisor", triage(), text("Your refund of 20 SGD is recorded.")).push(
+            "specialist", tool_call("policy", action="read", skill="returns-and-refunds", file="refunds.md"),
+            route(cited_clauses=["orders-and-shipping/tracking.md"]),   # never read
+            route(cited_clauses=["refunds.md"])).push("approver", verdict())
+        result = self.run_flow()
+        self.assertEqual(result["trace"].of_kind("citation_rejected")[0]["unread"], ["orders-and-shipping/tracking.md"])
+        self.assertIn("were not returned by your policy tool", result["evidence"][1]["result"]["error"])
+        self.assertEqual((result["ticket_status"], result["proposal"]["cited_clauses"]), ("resolved", ["refunds.md"]))
+
+    def test_rag_citations_are_the_clause_ids_a_search_returned(self):
+        self.llm.push("supervisor", triage(), text("Your refund of 20 SGD is recorded.")).push(
+            "specialist", tool_call("policy", action="search", query="damaged item refund"),
+            route(cited_clauses=["REF-9"]), route(cited_clauses=["REF-1"])).push("approver", verdict())
+        self.workflow = MultiAgentWorkflow(self.llm, load_config("configs/experiments/multi_agent_rag.yaml"),
+                                           reader=reader(), policy=rag_policy(), clock=Clock(NOW))
+        result = self.workflow.invoke("T1", "My mug arrived broken, refund please. ORD-2026-00001", "react")
+        self.assertEqual(result["trace"].of_kind("citation_rejected")[0]["unread"], ["REF-9"])
+        self.assertEqual(result["ticket_status"], "resolved")
+
+    def test_a_clause_id_heading_in_a_read_file_can_be_cited(self):
+        self.assertEqual(SkillsPolicy.citable({"skill": "returns-and-refunds", "file": "refunds.md",
+                                               "content": "# Refunds\n## RET-1 Return window\nWithin 30 days."}),
+                         {"refunds.md", "returns-and-refunds/refunds.md", "RET-1"})

@@ -12,6 +12,7 @@ from pydantic import model_validator
 from support_ops.helpers.arguments import NonEmpty, ToolArguments
 from support_ops.helpers.config import ROOT
 from support_ops.policy.provider import ScopedPolicyTool
+from support_ops.policy.rag.loader import MARKDOWN_CLAUSE
 from support_ops.policy.rules import Rules
 from support_ops.systems.tools import PolicyArguments
 
@@ -122,6 +123,14 @@ class SkillsPolicy:
             raise FileNotFoundError(f"policy file not found: {skill}/{filename}; available files: {available}")
         return {"skill": skill, "file": str(path.relative_to(base)), "content": path.read_text()}
 
+    @staticmethod
+    def citable(result: dict[str, Any]) -> set[str]:
+        """A file read can be cited by its name, skill/name, or a clause ID heading in it."""
+        if "file" not in result or "content" not in result:
+            return set()
+        ids = {match.group(1) for match in MARKDOWN_CLAUSE.finditer(result["content"])}
+        return {result["file"], f"{result['skill']}/{result['file']}", *ids}
+
     def scoped_tool(self, scope: Sequence[str] | None) -> ScopedPolicyTool:
         """list/open/read without `check`, limited by default to the specialist's `scope` skill folders."""
         def own(skills: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -155,4 +164,4 @@ class SkillsPolicy:
                     "others): " + json.dumps(own(self.catalog())))
 
         return ScopedPolicyTool(PolicySkillsArguments, PolicySkillsArguments.__doc__, run,
-                                self.prompt_hint, self.scope_hint, context)
+                                self.prompt_hint, self.scope_hint, context, self.citable)

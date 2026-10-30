@@ -21,6 +21,8 @@ class ScopedPolicyTool:
     prompt_hint: str        # how to use the tool, as in the single agent
     scope_hint: str         # the sentence about the specialist's scope and scope all
     context: Callable[[], str] = lambda: ""   # overview for the plan-and-execute planner, built when asked
+    # What a successful result lets the specialist cite: clause IDs, or the files it read.
+    citable: Callable[[dict[str, Any]], set[str]] = lambda result: set()
 
     def planner_context(self) -> str:
         return self.context()

@@ -85,6 +85,8 @@ def verdict(decision="approve", *issues):
 class Base(unittest.TestCase):
     def setUp(self):
         self.cfg = load_config("configs/experiments/multi_agent_rag.yaml")
+        # These tests script proposals without a policy search first; citation checks have their own tests.
+        self.cfg["multi_agent"]["check_citations"] = False
         self.llm = ScriptedLLM().push("guard", text("0.01")).on("orchestrator", one_part)
 
     def run_flow(self, message="My mug arrived broken, refund please. ORD-2026-00001", strategy="react", **backend):

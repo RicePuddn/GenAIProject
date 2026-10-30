@@ -100,7 +100,8 @@ class RagPolicy:
             return own_sections(result, scope)
 
         return ScopedPolicyTool(PolicySearchArguments, PolicySearchArguments.__doc__, run,
-                                self.prompt_hint, self.scope_hint, self.planner_context)
+                                self.prompt_hint, self.scope_hint, self.planner_context,
+                                lambda result: {clause["id"] for clause in result.get("clauses", [])})
 
     def check_scope(self, scope: Sequence[str] | None) -> list[str]:
         try:

@@ -41,6 +41,7 @@ class SpecialistResult:
     evidence: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
     orders_seen: list[str] = field(default_factory=list)   # order IDs the read tools were called with
+    citable: set[str] = field(default_factory=set)   # clause IDs and files the policy tool returned
 
 
 class Specialist:
@@ -113,6 +114,8 @@ class Specialist:
         attempts = self.ctx.retries.tool_errors + 1
         for attempt in range(1, attempts + 1):
             try:
+                if name == "route":
+                    self._check_citations(arguments, result)
                 value = self.toolbox.execute(ticket_id, name, arguments)
             except (ValueError, FileNotFoundError) as exc:
                 # The agent's own mistake: the same arguments would fail again, so it gets the error.
@@ -129,6 +132,8 @@ class Specialist:
         self.ctx.log("tool_end", call_id=call_id, tool=name, agent=self.name,
                      elapsed_s=round(time.perf_counter() - started, 6), output=value)
         result.evidence.append({"tool": name, "agent": self.name, "result": value})
+        if name == "policy" and "error" not in value:
+            result.citable |= getattr(self.toolbox.policy, "citable", lambda _: set())(value)
         if name != "route" and "error" not in value and isinstance(arguments, dict):
             order_id = arguments.get("order_id") or (
                 arguments.get("record_id") if arguments.get("kind") == "orders" else None)
@@ -138,6 +143,16 @@ class Specialist:
             result.proposal = Proposal.model_validate(value["proposal"])
             result.min_route = value["min_route"]
         return value
+
+    def _check_citations(self, arguments: Any, result: SpecialistResult) -> None:
+        """A proposal may cite only clauses or files its policy tool returned in this case."""
+        if not self.cfg.get("multi_agent", {}).get("check_citations", True) or not isinstance(arguments, dict):
+            return
+        cited = arguments.get("cited_clauses") or []
+        if unread := [str(clause) for clause in cited if str(clause).strip() not in result.citable]:
+            self.ctx.log("citation_rejected", agent=self.name, unread=unread)
+            raise ValueError(f"cited_clauses {unread} were not returned by your policy tool in this case; "
+                             "read them first, or cite only the clause IDs or files you read")
 
     def _user_message(self, brief: dict[str, Any]) -> dict[str, str]:
         return {"role": "user", "content": json.dumps(brief, default=str)}
@@ -209,10 +224,19 @@ class Specialist:
                 self.ctx.log("plan_rejected", reason=previous_error, replan=attempt + 1)
                 continue
             self.ctx.log("plan", specialist=self.name, calls=calls, attempt=attempt + 1)
+            failed = None
             for name, arguments in calls:
-                self._execute(ticket_id, self.ctx.next_call_id(), name, arguments, result)
+                value = self._execute(ticket_id, self.ctx.next_call_id(), name, arguments, result)
                 if result.error:
                     return
+                if "error" in value:
+                    # The rest of the plan, and a proposal, would rest on evidence that is missing.
+                    failed = f"planned call {name} failed: {value['error']}; plan again using the evidence"
+                    break
+            if failed:
+                previous_error = failed
+                self.ctx.log("plan_rejected", reason=previous_error, replan=attempt + 1)
+                continue
             # A malformed proposal is asked for again (retries.invalid_json) without rerunning the plan.
             try:
                 draft = chat_json(self.ctx, "specialist", [
