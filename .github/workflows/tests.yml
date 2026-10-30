@@ -1,0 +1,26 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:   # a new push to the same PR or branch cancels the run it replaces
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      # The rag extra (sentence-transformers, so PyTorch) is left out: its tests skip without it.
+      # The demo extra is small and lets the Streamlit page tests run.
+      - name: Install
+        run: uv sync --locked --python 3.12 --extra dev --extra demo
+      - name: Run pytest
+        run: uv run --no-sync pytest -q
