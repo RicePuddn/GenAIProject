@@ -106,3 +106,47 @@ def test_other_provider_errors_still_raise():
     llm = _llm_raising(_groq_error("tool_use_failed", '{"name": "route", "arguments": {}}'))
     with pytest.raises(BadRequestError):   # no tools were offered, so there is nothing to recover
         llm.chat("supervisor", [{"role": "user", "content": "hi"}])
+
+
+def test_recovered_ids_are_the_same_on_a_replay():
+    # Comment 5 on PR #5: random IDs changed later turns' messages, so a replay missed the cache.
+    from support_ops.helpers.llm import _recover_tool_calls
+
+    error = _groq_error("tool_use_failed", '[{"name": "route", "arguments": {}}, {"name": "policy", "arguments": {}}]')
+    first, again = _recover_tool_calls(error, "request-1"), _recover_tool_calls(error, "request-1")
+    assert [call.id for call in first] == [call.id for call in again]
+    assert first[0].id != first[1].id                                     # one per call
+    assert _recover_tool_calls(error, "request-2")[0].id != first[0].id   # and per request
+
+
+def test_odd_recovered_arguments_become_tool_errors_not_crashes():
+    # Comment 6 on PR #5.
+    from support_ops.helpers.llm import _recover_tool_calls
+
+    def arguments(generation):
+        return _recover_tool_calls(_groq_error("tool_use_failed", generation))[0].arguments
+
+    assert arguments('{"name": "route", "arguments": [1, 2]}') == {"_raw": "[1, 2]"}
+    assert arguments('{"name": "route", "arguments": 5}') == {"_raw": "5"}
+    assert arguments('{"name": "route", "arguments": "{\\"amount\\": 5}"}') == {"amount": 5}
+    assert arguments('{"name": "route", "parameters": {"amount": 5}}') == {"amount": 5}
+
+
+def test_customer_text_with_special_tokens_is_counted_not_rejected():
+    # Comment 7 on PR #5.
+    from support_ops.helpers.llm import count_tokens
+
+    assert count_tokens("refund please <|endoftext|>") > count_tokens("refund please")
+
+
+def test_recovered_turns_count_the_tool_schemas():
+    # Comment 8 on PR #5: the estimate left out the tools sent with the request.
+    attempt = {"name": "route", "arguments": {}}
+    messages = [{"role": "user", "content": "refund"}]
+
+    def input_tokens(description):
+        tools = [{"type": "function", "function": {"name": "route", "description": description}}]
+        return _llm_raising(_groq_error("tool_use_failed", json.dumps(attempt))).chat(
+            "specialist", messages, tools=tools).input_tokens
+
+    assert input_tokens("Record a proposal " * 50) > input_tokens("Record") + 100

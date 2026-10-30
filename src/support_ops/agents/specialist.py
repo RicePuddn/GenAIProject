@@ -32,12 +32,6 @@ SCOPES: dict[SpecialistName, str] = {
                        "items; and refunds (action refund, with amount, reason_code and the items it is "
                        "for; never more than was paid for them)",
 }
-# The one prompt sentence that depends on the policy tool; the rest of the prompt is shared by S3 and S4.
-POLICY_SCOPE = {
-    "rag": "Policy search covers your own policy sections; search with scope all when the case crosses "
-           "into another area.",
-    "skills": "Your policy skills cover your own area; use scope all when the case crosses into another area.",
-}
 
 
 @dataclass
@@ -63,7 +57,7 @@ class Specialist:
             f"You are the {self.name.replace('_', ' ')} specialist in a policy-bound support team. "
             f"Current workflow date: {self.ctx.clock.now().date()}. Your scope: {SCOPES[self.name]}. "
             f"Actions you may propose: {', '.join(sorted(SPECIALIST_ACTIONS[self.name]))}; for anything else, "
-            f"propose action none with route human. {POLICY_SCOPE[self.toolbox.policy_mode]} "
+            f"propose action none with route human. {getattr(self.toolbox.policy, 'scope_hint', '')} "
             "Use the read tools for account facts; read an order by its own ID and use the order lookup "
             "tools for its items, payments, returns and shipments. Before advising on a return or refund, "
             "check the order's items and any existing returns or refunds. "

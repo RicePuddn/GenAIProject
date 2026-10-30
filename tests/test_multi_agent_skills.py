@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from support_ops.api_multi import app
-from support_ops.agents.toolbox import Toolbox, policy_skills_tool
+from support_ops.agents.toolbox import Toolbox
 from support_ops.helpers.clock import Clock
 from support_ops.helpers.config import load_config
 from support_ops.helpers.llm import text, tool_call
@@ -40,8 +40,9 @@ def skills_dir() -> Path:
 class SkillsToolTests(unittest.TestCase):
     """The returns specialist's skills tool, limited to its own folder by default."""
     def setUp(self):
-        tools = SupportTools(Mock(), SkillsPolicy(skills_dir()), Mock())
-        self.box = Toolbox(tools, [], {"policy": policy_skills_tool(tools, ["returns-and-refunds"])})
+        self.policy = SkillsPolicy(skills_dir())
+        tools = SupportTools(Mock(), self.policy, Mock())
+        self.box = Toolbox(tools, [], {"policy": self.policy.scoped_tool(["returns-and-refunds"])})
 
     def call(self, **args):
         return self.box.execute("T1", "policy", args)
@@ -65,6 +66,22 @@ class SkillsToolTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "outside your policy skills"):   # a real skill of another area
             self.call(action="open", skill="orders-and-shipping")
 
+    def test_planner_sees_only_its_own_skills(self):
+        # Comment 2 on PR #5: listing every skill made plans read files the default scope refuses.
+        context = self.box.policy.planner_context()
+        self.assertIn("returns-and-refunds", context)
+        self.assertNotIn("orders-and-shipping", context)
+
+    def test_errors_only_offer_skills_that_exist(self):
+        # Comment 4 on PR #5: a mistyped scope was offered back to the model as a valid name.
+        tools = SupportTools(Mock(), self.policy, Mock())
+        box = Toolbox(tools, [], {"policy": self.policy.scoped_tool(["returns-and-refund"])})
+        listed = box.execute("T1", "policy", {"action": "list"})
+        self.assertEqual(listed["skills"], [])
+        self.assertIn("hand the case over", listed["note"])
+        with self.assertRaisesRegex(ValueError, "no policy skill named 'returns-and-refund'; no policy skills are available"):
+            box.execute("T1", "policy", {"action": "open", "skill": "returns-and-refund"})
+
     def test_no_path_escape_and_no_check(self):
         # Out of the skill folder through the file name, e.g. into the other specialist's skill.
         with self.assertRaisesRegex(ValueError, "invalid policy path"):
@@ -77,7 +94,31 @@ class SkillsToolTests(unittest.TestCase):
             self.call(action="read", skill="returns-and-refunds")
 
 
-class SkillsWorkflowTests(Base):
+class SkillsSetupTests(unittest.TestCase):
+    """Comments 3 and 4 on PR #5: problems in the skills folder show up at start-up, not mid-ticket."""
+
+    def broken(self) -> Path:
+        root = skills_dir()
+        (root / "orders-and-shipping" / "SKILL.md").write_text("---\ndescription: bad: yaml\n---\n# Orders\n")
+        return root
+
+    def test_one_bad_skill_md_does_not_break_the_others(self):
+        catalog = SkillsPolicy(self.broken()).catalog()
+        self.assertEqual([item["skill"] for item in catalog], ["orders-and-shipping", "returns-and-refunds"])
+        self.assertIn("could not be read", catalog[0]["error"])
+
+    def test_warm_up_fails_fast(self):
+        with self.assertRaisesRegex(ValueError, "unreadable SKILL.md front matter in \\['orders-and-shipping'\\]"):
+            SkillsPolicy(self.broken()).warm_up()
+        with self.assertRaisesRegex(ValueError, "policy skills folder not found"):
+            SkillsPolicy("/no/such/skills").warm_up()
+        with self.assertRaisesRegex(ValueError, "no policy skills"):
+            SkillsPolicy(tempfile.mkdtemp()).warm_up()
+        SkillsPolicy(skills_dir()).warm_up()   # a good folder passes
+
+
+class SkillsBase(Base):
+    """The S4 config, run against a temporary skills folder."""
     def setUp(self):
         super().setUp()
         self.cfg = load_config("configs/experiments/multi_agent_skills.yaml")
@@ -87,6 +128,9 @@ class SkillsWorkflowTests(Base):
                                            policy=SkillsPolicy(skills_dir()), clock=Clock(NOW))
         return self.workflow.invoke("T1", message, strategy)
 
+
+
+class SkillsWorkflowTests(SkillsBase):
     def specialist_prompt(self):
         return next(messages[0]["content"] for role, messages in self.llm.calls if role == "specialist")
 
@@ -108,12 +152,21 @@ class SkillsWorkflowTests(Base):
         self.assertIn("Your policy skills cover your own area", self.specialist_prompt())
         self.assertNotIn("Policy search", self.specialist_prompt())
 
-    def test_missing_skill_folder_is_logged(self):
+    def test_a_bad_skill_md_elsewhere_does_not_crash_the_ticket(self):
+        # Comment 3 on PR #5: the returns specialist's ticket used to raise ScannerError.
+        root = skills_dir()
+        (root / "orders-and-shipping" / "SKILL.md").write_text("---\ndescription: bad: yaml\n---\n# Orders\n")
+        self.llm.push("supervisor", triage(), text("Recorded.")).push(
+            "specialist", tool_call("policy", action="list"), route()).push("approver", verdict())
+        self.workflow = MultiAgentWorkflow(self.llm, self.cfg, reader=reader(), policy=SkillsPolicy(root), clock=Clock(NOW))
+        result = self.workflow.invoke("T1", "My mug arrived broken, refund please. ORD-2026-00001", "react")
+        self.assertEqual(result["ticket_status"], "resolved")
+
+    def test_a_mistyped_skill_folder_fails_at_start(self):
+        # Comment 4 on PR #5: it used to start fine and leave the specialist with empty lists.
         self.cfg["multi_agent"]["policy_skills"] = {"returns_refunds": ["returns-and-refund"]}
-        self.llm.push("supervisor", triage(), text("Recorded.")).push("specialist", route()).push("approver", verdict())
-        missing = self.run_flow()["trace"].of_kind("policy_skills_missing")
-        self.assertEqual(missing[0]["missing"], ["returns-and-refund"])
-        self.assertIn("returns-and-refunds", missing[0]["available"])
+        with self.assertRaisesRegex(ValueError, r"policy_skills for returns_refunds .*\['returns-and-refund'\]"):
+            self.run_flow()
 
 
 class RagUnchangedTests(Base):
