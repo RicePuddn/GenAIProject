@@ -22,6 +22,7 @@ import streamlit as st
 
 API = os.environ.get("SUPPORT_OPS_MULTI_API", "http://127.0.0.1:8001").rstrip("/")
 STRATEGIES = ["react", "plan_and_execute"]
+ORCHESTRATIONS = [*STRATEGIES, "supervisor"]   # supervisor: the pure-supervisor workflow chooses every step
 STATUS_LABELS = {
     "resolved": ("success", "Resolved"),
     "awaiting_customer": ("info", "Waiting for the customer"),
@@ -160,6 +161,15 @@ def show_event(event: dict[str, Any]) -> None:
         else:
             st.markdown("#### Supervisor · finish")
             st.caption(event["reason"])
+    elif kind == "supervisor_step":
+        arguments = ", ".join(f"{key}: {value}" for key, value in event["arguments"].items())
+        st.markdown(f"#### Supervisor · {event['tool'].replace('_', ' ')}")
+        if arguments:
+            st.caption(arguments)
+    elif kind == "supervisor_refused":
+        st.error(f"Refused {'`' + event['tool'] + '`' if event.get('tool') else 'the step'}: {event['reason']}")
+    elif kind == "supervisor_limit":
+        st.warning(f"The supervisor stopped after {event['steps']} steps")
     elif kind == "orchestrator_refused":
         st.warning(f"Delegation refused: {event['reason']}")
     elif kind == "orchestration_limit":
@@ -225,7 +235,9 @@ def show_outcome(response: dict[str, Any]) -> None:
 
 def summary(response: dict[str, Any]) -> str:
     trace = response["trace"]
-    return (f"What the agents did · supervisor {response.get('orchestration', response['strategy'])} · "
+    orchestration = response.get("orchestration", response["strategy"])
+    supervisor = "pure supervisor" if orchestration == "supervisor" else f"supervisor {orchestration}"
+    return (f"What the agents did · {supervisor} · "
             f"specialists {response['strategy']} · {trace['tool_call_count']} tools · "
             f"{trace['llm_calls']} LLM calls · ${trace['cost_usd']:.4f} · {trace['elapsed_s']:.1f}s")
 
@@ -277,10 +289,11 @@ with st.sidebar:
         st.error(str(exc))
     default = info.get("default_strategy", "react")
     default_orchestration = info.get("default_orchestration", default)
-    orchestration = st.radio("Supervisor (orchestration)", STRATEGIES,
-                             index=STRATEGIES.index(default_orchestration) if default_orchestration in STRATEGIES else 0,
+    orchestration = st.radio("Supervisor (orchestration)", ORCHESTRATIONS,
+                             index=ORCHESTRATIONS.index(default_orchestration) if default_orchestration in ORCHESTRATIONS else 0,
                              help="react: picks each part after seeing the last result. plan_and_execute: "
-                                  "plans every part at triage.")
+                                  "plans every part at triage. supervisor: no fixed steps; the supervisor "
+                                  "chooses every step and the gateway refuses unsafe ones.")
     strategy = st.radio("Specialists", STRATEGIES, index=STRATEGIES.index(default) if default in STRATEGIES else 0,
                         help="react: one tool call per turn. plan_and_execute: plan the calls, then run them.")
     st.button("New ticket", on_click=new_ticket, width="stretch")

@@ -35,6 +35,7 @@ from support_ops.helpers.workers import WorkflowWorkers
 from support_ops.policy.rules import Rules
 from support_ops.systems.multi_agent import MultiAgentWorkflow
 from support_ops.systems.single_agent import policy_from_config
+from support_ops.systems.supervisor_agent import SupervisorAgentWorkflow
 
 log = logging.getLogger("uvicorn.error")
 DEFAULT_CONFIG = "configs/experiments/multi_agent_rag.yaml"
@@ -46,7 +47,8 @@ class MultiChatRequest(BaseModel):
     customer_message: str = Field(min_length=1, max_length=20_000)
     ticket_id: str | None = Field(default=None, min_length=1, max_length=100)
     strategy: Literal["react", "plan_and_execute"] | None = None        # the specialists
-    orchestration: Literal["react", "plan_and_execute"] | None = None   # the supervisor; default: config, else strategy
+    # The supervisor; default: config, else strategy. supervisor: the pure-supervisor workflow.
+    orchestration: Literal["react", "plan_and_execute", "supervisor"] | None = None
     # Stateless: the client sends the earlier turns of the ticket; the server keeps nothing.
     history: list[Turn] = Field(default_factory=list, max_length=MAX_HISTORY_TURNS)
 
@@ -138,7 +140,9 @@ def _run_chat(request: MultiChatRequest, tracer: Tracer,
     cancellation.check()
     cfg, llm = _runtime()
     # A fresh workflow per request keeps ticket state, tokens and the tracer isolated.
-    workflow = MultiAgentWorkflow(llm, cfg, clock=Clock(datetime.now(timezone.utc)), cancellation=cancellation)
+    orchestration = request.orchestration or cfg.get("multi_agent", {}).get("orchestration")
+    system = SupervisorAgentWorkflow if orchestration == "supervisor" else MultiAgentWorkflow
+    workflow = system(llm, cfg, clock=Clock(datetime.now(timezone.utc)), cancellation=cancellation)
     history = [turn.model_dump() for turn in request.history]
     result = workflow.invoke(tracer.ticket_id, request.customer_message, strategy=request.strategy,
                              tracer=tracer, history=history, orchestration=request.orchestration)

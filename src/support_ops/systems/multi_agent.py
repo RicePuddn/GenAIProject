@@ -293,24 +293,7 @@ class MultiAgentWorkflow:
         if len(state["tasks"]) > 1:
             self._event("part_start", part=state["part"] + 1, of=len(state["tasks"]), specialist=name,
                         request=task.request)
-        returns_checked: set[str] = set()
-        orders_seen: list[str] = []
-        route = RouteTool(self.reader, self.routing, self.clock, name, returns_checked, orders_seen)
-        wrapped = {"policy", "get_returns_for_order"}
-        reads = [tool for tool in SPECIALIST_TOOLS[name] if tool not in wrapped]
-        if isinstance(self.tools.policy, SkillsPolicy):
-            skills = self.settings["policy_skills"].get(name)
-            self._check_skills(name, skills)
-            extra = {"policy": policy_skills_tool(self.tools, skills)}
-        else:
-            sections = self.settings["policy_sections"].get(name)
-            self._check_sections(name, sections)
-            extra = {"policy": policy_search_tool(self.tools, sections)}
-        if "get_returns_for_order" in SPECIALIST_TOOLS[name]:
-            extra["get_returns_for_order"] = returns_lookup_tool(self.tools, returns_checked)
-        toolbox = Toolbox(self.tools, reads, {**extra, "route": route.as_tool()})
-        result = Specialist(name, toolbox, self.ctx, self.cfg, orders_seen).run(
-            state["ticket_id"], self._brief(state, part=True), state["strategy"])
+        result = self._run_specialist(name, state["ticket_id"], self._brief(state, part=True), state["strategy"])
         update: dict[str, Any] = {
             "evidence": [*state["evidence"], *result.evidence],
             "proposal": result.proposal, "min_route": result.min_route,
@@ -328,6 +311,27 @@ class MultiAgentWorkflow:
             return self._end_part(state, update, "awaiting_customer", customer_question=proposal.customer_question)
         self.flow.transition(state["ticket_id"], "proposed", route=proposal.route, operation=proposal.action)
         return {**update, "next": "decide"}
+
+    def _run_specialist(self, name: str, ticket_id: str, brief: dict[str, Any], strategy: str):
+        """Build the specialist's toolbox (its reads, its policy scope and the route tool) and run it.
+        Shared with the pure-supervisor workflow so both arms' specialists are identical."""
+        returns_checked: set[str] = set()
+        orders_seen: list[str] = []
+        route = RouteTool(self.reader, self.routing, self.clock, name, returns_checked, orders_seen)
+        wrapped = {"policy", "get_returns_for_order"}
+        reads = [tool for tool in SPECIALIST_TOOLS[name] if tool not in wrapped]
+        if isinstance(self.tools.policy, SkillsPolicy):
+            skills = self.settings["policy_skills"].get(name)
+            self._check_skills(name, skills)
+            extra = {"policy": policy_skills_tool(self.tools, skills)}
+        else:
+            sections = self.settings["policy_sections"].get(name)
+            self._check_sections(name, sections)
+            extra = {"policy": policy_search_tool(self.tools, sections)}
+        if "get_returns_for_order" in SPECIALIST_TOOLS[name]:
+            extra["get_returns_for_order"] = returns_lookup_tool(self.tools, returns_checked)
+        toolbox = Toolbox(self.tools, reads, {**extra, "route": route.as_tool()})
+        return Specialist(name, toolbox, self.ctx, self.cfg, orders_seen).run(ticket_id, brief, strategy)
 
     def _missing_record_decision(self, state: MultiAgentState, result) -> dict[str, Any] | None:
         """A record the customer named was not found and the specialist has nothing else to do: ask the
