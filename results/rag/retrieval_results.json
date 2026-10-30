@@ -2,7 +2,7 @@
   "k": 4,
   "candidate_pool": 20,
   "rrf_k": 60,
-  "corpus_hash": "27e83bc5126c2c02756d4ec12235fe638edaea0c94e784620ae1fb696167ee38",
+  "corpus_hash": "c03b15ee13c5ceba0c70c61e4b8d9a7e509e6976fe2e994f81c2f45654f4146a",
   "rows": [
     {
       "case_id": "q01",
@@ -15,10 +15,14 @@
         "RET-ReturnEligibility-2.1",
         "RET-ReturnEligibility-2.6",
         "RET-ReturnEligibility-2.5",
-        "RET-ReturnProcedure-4.2"
+        "REF-Refunds-6.1"
       ],
       "reference_chunk_ids": [
-        "RET-ReturnProcedure-4.5"
+        "RET-ReturnParcelDisputes-7.1",
+        "RET-ReturnParcelDisputes-7.2",
+        "RET-ReturnParcelDisputes-7.3",
+        "RET-ReturnParcelDisputes-7.4",
+        "RET-ReturnParcelDisputes-7.5"
       ],
       "recall_at_k": 1.0,
       "mrr_at_k": 1.0,
@@ -37,8 +41,8 @@
       "retrieved_chunk_ids": [
         "RET-ReturnEligibility-2.1",
         "RET-ReturnEligibility-2.5",
-        "RET-Application-1",
-        "REF-Refunds-6.1"
+        "REF-Refunds-6.1",
+        "RET-Application-1"
       ],
       "reference_chunk_ids": [
         "RET-ReturnEligibility-2.6",
@@ -65,8 +69,8 @@
       "retrieved_chunk_ids": [
         "RET-ReturnEligibility-2.1",
         "RET-ReturnEligibility-2.6",
-        "RET-ReturnEligibility-2.5",
-        "REF-Refunds-6.1"
+        "REF-Refunds-6.1",
+        "RET-ReturnEligibility-2.5"
       ],
       "reference_chunk_ids": [
         "RET-ReturnParcelDisputes-7.1",
@@ -387,8 +391,8 @@
       "retrieved_chunk_ids": [
         "RET-ReturnProcedure-4.2",
         "RET-ReturnProcedure-4.3",
-        "RET-ReturnProcedure-4.1",
-        "SHP-DeliveryProblems-7.2"
+        "SHP-DeliveryProblems-7.2",
+        "RET-ReturnEligibility-2.6"
       ],
       "reference_chunk_ids": [
         "RET-ReturnProcedure-4.5",
@@ -414,8 +418,8 @@
       "retrieved_chunk_ids": [
         "RET-ReturnProcedure-4.2",
         "RET-ReturnProcedure-4.3",
-        "RET-ReturnProcedure-4.1",
-        "RET-ReturnEligibility-2.1"
+        "RET-ReturnEligibility-2.1",
+        "ODR-OrderChangeCancel-4.2"
       ],
       "reference_chunk_ids": [
         "RET-ReturnProcedure-4.5",
@@ -560,9 +564,9 @@
       ],
       "retrieved_chunk_ids": [
         "RET-ShippingFees-5.1",
-        "RET-ReturnProcedure-4.1",
         "RET-ReturnEligibility-2.2",
-        "SHP-ShippingFees-3.3"
+        "SHP-ShippingFees-3.3",
+        "RET-ReturnProcedure-4.1"
       ],
       "reference_chunk_ids": [
         "REF-Refunds-6.1",
@@ -570,7 +574,14 @@
         "REF-Refunds-6.3",
         "REF-Refunds-6.4",
         "REF-Refunds-6.5",
-        "REF-Refunds-6.6"
+        "REF-Refunds-6.6",
+        "RET-ReturnEligibility-2.1",
+        "RET-ReturnEligibility-2.3",
+        "RET-ReturnEligibility-2.4",
+        "RET-ReturnEligibility-2.5",
+        "RET-ReturnEligibility-2.6",
+        "RET-SupportingEvidence-3.1",
+        "RET-SupportingEvidence-3.2"
       ],
       "recall_at_k": 1.0,
       "mrr_at_k": 1.0,
@@ -709,10 +720,16 @@
         "REF-Refunds-6.2",
         "SHP-ShippingFees-3.3",
         "RET-ShippingFees-5.2",
-        "SHP-SeparateShipPartialDel-6.3"
+        "REF-Refunds-6.1"
       ],
       "reference_chunk_ids": [
-        "RET-ShippingFees-5.1"
+        "RET-ShippingFees-5.1",
+        "RET-ReturnEligibility-2.5",
+        "RET-ReturnParcelDisputes-7.1",
+        "RET-ReturnParcelDisputes-7.2",
+        "RET-ReturnParcelDisputes-7.3",
+        "RET-ReturnParcelDisputes-7.4",
+        "RET-ReturnParcelDisputes-7.5"
       ],
       "recall_at_k": 1.0,
       "mrr_at_k": 1.0,
@@ -754,10 +771,12 @@
       "retrieved_chunk_ids": [
         "REF-Refunds-6.3",
         "REF-Refunds-6.5",
-        "RET-ReturnProcedure-4.1",
-        "RET-ShippingFees-5.2"
+        "RET-ShippingFees-5.2",
+        "RET-ReturnParcelDisputes-7.5"
       ],
-      "reference_chunk_ids": [],
+      "reference_chunk_ids": [
+        "RET-SupportingEvidence-3.2"
+      ],
       "recall_at_k": 1.0,
       "mrr_at_k": 1.0,
       "ndcg_at_k": 1.0,
@@ -774,13 +793,19 @@
       ],
       "retrieved_chunk_ids": [
         "REF-Refunds-6.3",
-        "RET-ReturnProcedure-4.1",
         "RET-ReturnEligibility-2.3",
-        "RET-ReturnParcelDisputes-7.2"
+        "RET-ReturnParcelDisputes-7.2",
+        "RET-ReturnProcedure-4.1"
       ],
       "reference_chunk_ids": [
         "RET-ReturnParcelDisputes-7.3",
-        "RET-ReturnEligibility-2.5"
+        "RET-ReturnEligibility-2.5",
+        "RET-ReturnEligibility-2.1",
+        "RET-ReturnEligibility-2.2",
+        "RET-ReturnEligibility-2.4",
+        "RET-ReturnEligibility-2.6",
+        "RET-SupportingEvidence-3.1",
+        "RET-SupportingEvidence-3.2"
       ],
       "recall_at_k": 1.0,
       "mrr_at_k": 1.0,
@@ -798,8 +823,8 @@
       ],
       "retrieved_chunk_ids": [
         "REF-Refunds-6.3",
-        "REF-Refunds-6.6",
         "RET-ReturnParcelDisputes-7.1",
+        "REF-Refunds-6.6",
         "RET-ReturnParcelDisputes-7.2"
       ],
       "reference_chunk_ids": [
@@ -936,19 +961,19 @@
       ],
       "retrieved_chunk_ids": [
         "RET-ReturnParcelDisputes-7.2",
-        "RET-ReturnEligibility-2.2",
         "RET-ReturnEligibility-2.3",
+        "RET-ReturnEligibility-2.2",
         "RET-ReturnEligibility-2.1"
       ],
       "reference_chunk_ids": [
         "RET-ReturnEligibility-2.5",
+        "RET-ReturnParcelDisputes-7.3",
         "REF-Refunds-6.1",
         "REF-Refunds-6.2",
         "REF-Refunds-6.3",
         "REF-Refunds-6.4",
         "REF-Refunds-6.5",
         "REF-Refunds-6.6",
-        "RET-ReturnParcelDisputes-7.3",
         "RET-ReturnEligibility-2.6"
       ],
       "recall_at_k": 1.0,
@@ -1015,8 +1040,8 @@
       "retrieved_chunk_ids": [
         "RET-ReturnParcelDisputes-7.3",
         "RET-ReturnEligibility-2.3",
-        "RET-ReturnParcelDisputes-7.2",
-        "RET-ReturnEligibility-2.5"
+        "RET-ReturnEligibility-2.5",
+        "RET-ReturnParcelDisputes-7.2"
       ],
       "reference_chunk_ids": [
         "RET-ReturnEligibility-2.1"
@@ -1088,17 +1113,20 @@
         "RET-ReturnParcelDisputes-7.4",
         "RET-ReturnEligibility-2.5",
         "RET-ReturnEligibility-2.2",
-        "RET-ReturnParcelDisputes-7.2"
+        "REF-Refunds-6.1"
       ],
       "reference_chunk_ids": [
         "RET-ReturnEligibility-2.4",
         "RET-ReturnEligibility-2.1",
-        "REF-Refunds-6.1",
         "REF-Refunds-6.2",
         "REF-Refunds-6.3",
         "REF-Refunds-6.4",
         "REF-Refunds-6.5",
-        "REF-Refunds-6.6"
+        "REF-Refunds-6.6",
+        "RET-ReturnParcelDisputes-7.1",
+        "RET-ReturnParcelDisputes-7.2",
+        "RET-ReturnParcelDisputes-7.3",
+        "RET-ReturnParcelDisputes-7.5"
       ],
       "recall_at_k": 1.0,
       "mrr_at_k": 1.0,
@@ -1222,6 +1250,7 @@
       "reference_chunk_ids": [
         "SHP-DeliveryProblems-7.3",
         "SHP-DeliveryProblems-7.4",
+        "ODR-OrderChangeCancel-4.2",
         "RET-ShippingFees-5.1"
       ],
       "recall_at_k": 1.0,
@@ -1245,12 +1274,13 @@
         "ODR-OrderChangeCancel-4.1",
         "ODR-OrderChangeCancel-4.4",
         "RET-ReturnProcedure-4.3",
-        "SHP-ShippingOptions-2.3"
+        "SHP-DeliveryProblems-7.4"
       ],
       "reference_chunk_ids": [
+        "ODR-OrderChangeCancel-4.2",
         "SHP-DeliveryProblems-7.3",
-        "SHP-DeliveryProblems-7.4",
-        "RET-ShippingFees-5.1"
+        "RET-ShippingFees-5.1",
+        "SHP-DeliveryProblems-7.1"
       ],
       "recall_at_k": 1.0,
       "mrr_at_k": 0.5,
@@ -1276,6 +1306,7 @@
         "SHP-ShippingOptions-2.3"
       ],
       "reference_chunk_ids": [
+        "ODR-OrderChangeCancel-4.2",
         "SHP-DeliveryProblems-7.3",
         "SHP-DeliveryProblems-7.4",
         "RET-ShippingFees-5.1"
@@ -1301,8 +1332,8 @@
       "retrieved_chunk_ids": [
         "ODR-OrderChangeCancel-4.1",
         "ODR-OrderChangeCancel-4.3",
-        "ODR-OrderStatusTracking-5.1",
-        "ODR-OrderChangeCancel-4.2"
+        "ODR-OrderChangeCancel-4.2",
+        "ODR-OrderStatusTracking-5.1"
       ],
       "reference_chunk_ids": [],
       "recall_at_k": 1.0,
@@ -1348,7 +1379,9 @@
         "ODR-OrderChangeCancel-4.3",
         "ODR-OrderChangeCancel-4.5"
       ],
-      "reference_chunk_ids": [],
+      "reference_chunk_ids": [
+        "ODR-OrderChangeCancel-4.2"
+      ],
       "recall_at_k": 1.0,
       "mrr_at_k": 1.0,
       "ndcg_at_k": 0.9197207891481876,
@@ -1766,10 +1799,14 @@
         "RET-ReturnParcelDisputes-7.4",
         "RET-ReturnEligibility-2.4",
         "RET-ReturnEligibility-2.5",
-        "RET-ReturnProcedure-4.4"
+        "REF-Refunds-6.1"
       ],
       "reference_chunk_ids": [
-        "RET-ReturnEligibility-2.1"
+        "RET-ReturnEligibility-2.1",
+        "RET-ReturnParcelDisputes-7.1",
+        "RET-ReturnParcelDisputes-7.2",
+        "RET-ReturnParcelDisputes-7.3",
+        "RET-ReturnParcelDisputes-7.5"
       ],
       "recall_at_k": 0.5,
       "mrr_at_k": 0.5,
@@ -1830,26 +1867,30 @@
     },
     {
       "case_id": "q25",
-      "question": "My $120 refund is on hold for review. Why can't you just process it?",
+      "question": "My $60 refund has been accepted, but you say another check is needed. Does a person need to approve it?",
       "approach": "vector",
       "expected_chunk_ids": [
         "REF-Refunds-6.6"
       ],
       "retrieved_chunk_ids": [
+        "REF-Refunds-6.6",
         "RET-ReturnEligibility-2.6",
         "ODR-OrderChangeCancel-4.2",
-        "REF-Refunds-6.6",
-        "RET-ReturnParcelDisputes-7.5"
+        "REF-Refunds-6.1"
       ],
       "reference_chunk_ids": [
-        "REF-Refunds-6.1",
         "REF-Refunds-6.2",
         "REF-Refunds-6.3",
-        "RET-SupportingEvidence-3.2"
+        "RET-ReturnEligibility-2.5",
+        "RET-ReturnParcelDisputes-7.1",
+        "RET-ReturnParcelDisputes-7.2",
+        "RET-ReturnParcelDisputes-7.3",
+        "RET-ReturnParcelDisputes-7.4",
+        "RET-ReturnParcelDisputes-7.5"
       ],
       "recall_at_k": 1.0,
-      "mrr_at_k": 0.3333333333333333,
-      "ndcg_at_k": 0.5,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0,
       "expected_reference_chunk_ids": [
         "REF-Refunds-6.1",
         "REF-Refunds-6.2",
@@ -1860,18 +1901,20 @@
     },
     {
       "case_id": "q25",
-      "question": "My $120 refund is on hold for review. Why can't you just process it?",
+      "question": "My $60 refund has been accepted, but you say another check is needed. Does a person need to approve it?",
       "approach": "hybrid",
       "expected_chunk_ids": [
         "REF-Refunds-6.6"
       ],
       "retrieved_chunk_ids": [
-        "RET-ReturnEligibility-2.6",
         "ODR-OrderChangeCancel-4.2",
-        "RET-ReturnEligibility-2.1",
-        "REF-Refunds-6.1"
+        "REF-Refunds-6.6",
+        "REF-Refunds-6.1",
+        "RET-ReturnEligibility-2.6"
       ],
       "reference_chunk_ids": [
+        "REF-Refunds-6.2",
+        "REF-Refunds-6.3",
         "RET-ReturnEligibility-2.5",
         "RET-ReturnParcelDisputes-7.1",
         "RET-ReturnParcelDisputes-7.2",
@@ -1879,42 +1922,43 @@
         "RET-ReturnParcelDisputes-7.4",
         "RET-ReturnParcelDisputes-7.5"
       ],
-      "recall_at_k": 0.0,
-      "mrr_at_k": 0.0,
-      "ndcg_at_k": 0.0,
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.5,
+      "ndcg_at_k": 0.6309297535714575,
       "expected_reference_chunk_ids": [
         "REF-Refunds-6.1",
         "REF-Refunds-6.2",
         "REF-Refunds-6.3"
       ],
-      "missing_reference_chunk_ids": [
-        "REF-Refunds-6.2",
-        "REF-Refunds-6.3"
-      ],
-      "references_returned": false
+      "missing_reference_chunk_ids": [],
+      "references_returned": true
     },
     {
       "case_id": "q25",
-      "question": "My $120 refund is on hold for review. Why can't you just process it?",
+      "question": "My $60 refund has been accepted, but you say another check is needed. Does a person need to approve it?",
       "approach": "hybrid_rerank",
       "expected_chunk_ids": [
         "REF-Refunds-6.6"
       ],
       "retrieved_chunk_ids": [
+        "ODR-OrderChangeCancel-4.2",
         "REF-Refunds-6.6",
-        "RET-SupportingEvidence-3.2",
-        "REF-Refunds-6.5",
-        "RET-ReturnEligibility-2.6"
+        "RET-ReturnEligibility-2.6",
+        "REF-Refunds-6.1"
       ],
       "reference_chunk_ids": [
-        "REF-Refunds-6.1",
         "REF-Refunds-6.2",
         "REF-Refunds-6.3",
-        "RET-SupportingEvidence-3.1"
+        "RET-ReturnEligibility-2.5",
+        "RET-ReturnParcelDisputes-7.1",
+        "RET-ReturnParcelDisputes-7.2",
+        "RET-ReturnParcelDisputes-7.3",
+        "RET-ReturnParcelDisputes-7.4",
+        "RET-ReturnParcelDisputes-7.5"
       ],
       "recall_at_k": 1.0,
-      "mrr_at_k": 1.0,
-      "ndcg_at_k": 1.0,
+      "mrr_at_k": 0.5,
+      "ndcg_at_k": 0.6309297535714575,
       "expected_reference_chunk_ids": [
         "REF-Refunds-6.1",
         "REF-Refunds-6.2",
@@ -1958,7 +2002,7 @@
         "SHP-ShippingOptions-2.2",
         "SHP-DeliveryProblems-7.4",
         "SHP-ShippingOptions-2.1",
-        "ODR-OrderChangeCancel-4.1"
+        "ODR-OrderStatusTracking-5.1"
       ],
       "reference_chunk_ids": [
         "SHP-DeliveryProblems-7.1"
@@ -1985,7 +2029,8 @@
       ],
       "reference_chunk_ids": [
         "SHP-ShippingOptions-2.1",
-        "RET-ReturnProcedure-4.5"
+        "RET-ReturnProcedure-4.5",
+        "ODR-OrderChangeCancel-4.2"
       ],
       "recall_at_k": 1.0,
       "mrr_at_k": 1.0,
@@ -2007,7 +2052,9 @@
         "ODR-OrderChangeCancel-4.5",
         "ODR-OrderChangeCancel-4.1"
       ],
-      "reference_chunk_ids": [],
+      "reference_chunk_ids": [
+        "ODR-OrderChangeCancel-4.2"
+      ],
       "recall_at_k": 1.0,
       "mrr_at_k": 1.0,
       "ndcg_at_k": 1.0,
@@ -2025,17 +2072,18 @@
         "SHP-ShippingOptions-2.3"
       ],
       "retrieved_chunk_ids": [
-        "SHP-ShippingOptions-2.3",
         "SHP-ShippingOptions-2.1",
+        "SHP-ShippingOptions-2.3",
         "ODR-OrderChangeCancel-4.1",
         "SHP-SeparateShipPartialDel-6.1"
       ],
       "reference_chunk_ids": [
+        "ODR-OrderChangeCancel-4.2",
         "SHP-ShippingFees-3.2"
       ],
       "recall_at_k": 1.0,
-      "mrr_at_k": 1.0,
-      "ndcg_at_k": 1.0,
+      "mrr_at_k": 0.5,
+      "ndcg_at_k": 0.6309297535714575,
       "expected_reference_chunk_ids": [
         "ODR-OrderChangeCancel-4.1"
       ],
@@ -2055,7 +2103,9 @@
         "ODR-OrderChangeCancel-4.1",
         "ODR-Application-1"
       ],
-      "reference_chunk_ids": [],
+      "reference_chunk_ids": [
+        "ODR-OrderChangeCancel-4.2"
+      ],
       "recall_at_k": 1.0,
       "mrr_at_k": 1.0,
       "ndcg_at_k": 1.0,
@@ -2123,7 +2173,7 @@
         "SHP-ShippingFees-3.1",
         "SHP-ShippingFees-3.2",
         "SHP-SeparateShipPartialDel-6.3",
-        "SHP-DeliveryProblems-7.5"
+        "ODR-OrderChangeCancel-4.2"
       ],
       "reference_chunk_ids": [],
       "recall_at_k": 1.0,
@@ -2531,8 +2581,8 @@
       ],
       "retrieved_chunk_ids": [
         "RET-ReturnEligibility-2.3",
-        "RET-ReturnProcedure-4.4",
         "RET-ReturnProcedure-4.6",
+        "RET-ReturnProcedure-4.4",
         "RET-ReturnEligibility-2.6"
       ],
       "reference_chunk_ids": [
@@ -2586,12 +2636,15 @@
       "retrieved_chunk_ids": [
         "RET-ReturnEligibility-2.3",
         "RET-ReturnEligibility-2.5",
-        "RET-ReturnParcelDisputes-7.4",
-        "RET-ReturnEligibility-2.6"
+        "REF-Refunds-6.1",
+        "RET-ReturnParcelDisputes-7.4"
       ],
       "reference_chunk_ids": [
         "RET-ReturnParcelDisputes-7.3",
         "RET-ReturnEligibility-2.1",
+        "RET-ReturnParcelDisputes-7.1",
+        "RET-ReturnParcelDisputes-7.2",
+        "RET-ReturnParcelDisputes-7.5",
         "RET-ReturnEligibility-2.4"
       ],
       "recall_at_k": 1.0,
@@ -2611,12 +2664,15 @@
       "retrieved_chunk_ids": [
         "RET-ReturnEligibility-2.6",
         "RET-ReturnEligibility-2.1",
-        "RET-ReturnParcelDisputes-7.2",
-        "RET-ReturnEligibility-2.3"
+        "REF-Refunds-6.1",
+        "RET-ReturnParcelDisputes-7.2"
       ],
       "reference_chunk_ids": [
         "RET-ReturnEligibility-2.5",
-        "RET-ReturnParcelDisputes-7.3"
+        "RET-ReturnParcelDisputes-7.1",
+        "RET-ReturnParcelDisputes-7.3",
+        "RET-ReturnParcelDisputes-7.4",
+        "RET-ReturnParcelDisputes-7.5"
       ],
       "recall_at_k": 1.0,
       "mrr_at_k": 1.0,
@@ -2634,8 +2690,8 @@
       ],
       "retrieved_chunk_ids": [
         "RET-ReturnEligibility-2.1",
-        "RET-ReturnEligibility-2.5",
         "REF-Refunds-6.1",
+        "RET-ReturnEligibility-2.5",
         "RET-ReturnParcelDisputes-7.2"
       ],
       "reference_chunk_ids": [
@@ -2660,15 +2716,21 @@
         "RET-ReturnEligibility-2.6"
       ],
       "retrieved_chunk_ids": [
+        "REF-Refunds-6.1",
         "RET-ReturnEligibility-2.1",
         "RET-ReturnEligibility-2.6",
-        "RET-ReturnParcelDisputes-7.2",
-        "RET-ReturnEligibility-2.5"
+        "RET-ReturnParcelDisputes-7.2"
       ],
-      "reference_chunk_ids": [],
+      "reference_chunk_ids": [
+        "RET-ReturnEligibility-2.5",
+        "RET-ReturnParcelDisputes-7.1",
+        "RET-ReturnParcelDisputes-7.3",
+        "RET-ReturnParcelDisputes-7.4",
+        "RET-ReturnParcelDisputes-7.5"
+      ],
       "recall_at_k": 1.0,
-      "mrr_at_k": 0.5,
-      "ndcg_at_k": 0.6309297535714575,
+      "mrr_at_k": 0.3333333333333333,
+      "ndcg_at_k": 0.5,
       "expected_reference_chunk_ids": [],
       "missing_reference_chunk_ids": [],
       "references_returned": null
@@ -2712,11 +2774,12 @@
         "RET-ReturnParcelDisputes-7.5",
         "RET-SupportingEvidence-3.1",
         "RET-ReturnParcelDisputes-7.2",
-        "RET-ReturnEligibility-2.5"
+        "RET-ReturnEligibility-2.3"
       ],
       "reference_chunk_ids": [
         "RET-SupportingEvidence-3.2",
-        "RET-ReturnEligibility-2.1"
+        "RET-ReturnEligibility-2.5",
+        "RET-ReturnParcelDisputes-7.3"
       ],
       "recall_at_k": 1.0,
       "mrr_at_k": 0.5,
@@ -2762,18 +2825,23 @@
         "RET-ReturnProcedure-4.1"
       ],
       "retrieved_chunk_ids": [
-        "RET-ReturnProcedure-4.1",
         "RET-ReturnEligibility-2.1",
         "RET-ReturnEligibility-2.3",
+        "RET-ReturnProcedure-4.1",
         "ODR-OrderChangeCancel-4.3"
       ],
       "reference_chunk_ids": [
         "RET-ReturnEligibility-2.6",
-        "RET-ReturnParcelDisputes-7.3"
+        "RET-ReturnParcelDisputes-7.3",
+        "RET-ReturnEligibility-2.2",
+        "RET-ReturnEligibility-2.4",
+        "RET-ReturnEligibility-2.5",
+        "RET-SupportingEvidence-3.1",
+        "RET-SupportingEvidence-3.2"
       ],
       "recall_at_k": 1.0,
-      "mrr_at_k": 1.0,
-      "ndcg_at_k": 1.0,
+      "mrr_at_k": 0.3333333333333333,
+      "ndcg_at_k": 0.5,
       "expected_reference_chunk_ids": [],
       "missing_reference_chunk_ids": [],
       "references_returned": null
@@ -2786,18 +2854,23 @@
         "RET-ReturnProcedure-4.1"
       ],
       "retrieved_chunk_ids": [
-        "RET-ReturnProcedure-4.1",
         "ODR-OrderChangeCancel-4.3",
+        "RET-ReturnProcedure-4.1",
         "RET-ReturnEligibility-2.1",
         "RET-ReturnEligibility-2.3"
       ],
       "reference_chunk_ids": [
+        "RET-ReturnEligibility-2.2",
+        "RET-ReturnEligibility-2.4",
+        "RET-ReturnEligibility-2.5",
         "RET-ReturnEligibility-2.6",
+        "RET-SupportingEvidence-3.1",
+        "RET-SupportingEvidence-3.2",
         "RET-ReturnParcelDisputes-7.3"
       ],
       "recall_at_k": 1.0,
-      "mrr_at_k": 1.0,
-      "ndcg_at_k": 1.0,
+      "mrr_at_k": 0.5,
+      "ndcg_at_k": 0.6309297535714575,
       "expected_reference_chunk_ids": [],
       "missing_reference_chunk_ids": [],
       "references_returned": null
@@ -2813,12 +2886,20 @@
         "RET-ReturnProcedure-4.1",
         "RET-ReturnEligibility-2.3",
         "RET-ReturnEligibility-2.1",
-        "RET-ReturnProcedure-4.3"
+        "REF-Refunds-6.1"
       ],
       "reference_chunk_ids": [
-        "RET-ReturnParcelDisputes-7.3",
+        "RET-ReturnEligibility-2.2",
+        "RET-ReturnEligibility-2.4",
+        "RET-ReturnEligibility-2.5",
         "RET-ReturnEligibility-2.6",
-        "RET-ShippingFees-5.1"
+        "RET-SupportingEvidence-3.1",
+        "RET-SupportingEvidence-3.2",
+        "RET-ReturnParcelDisputes-7.3",
+        "RET-ReturnParcelDisputes-7.1",
+        "RET-ReturnParcelDisputes-7.2",
+        "RET-ReturnParcelDisputes-7.4",
+        "RET-ReturnParcelDisputes-7.5"
       ],
       "recall_at_k": 1.0,
       "mrr_at_k": 1.0,
@@ -2837,13 +2918,13 @@
       "retrieved_chunk_ids": [
         "RET-ReturnProcedure-4.3",
         "RET-ReturnParcelDisputes-7.4",
-        "RET-ReturnProcedure-4.1",
-        "RET-ReturnProcedure-4.5"
+        "RET-ReturnProcedure-4.5",
+        "RET-ReturnEligibility-2.4"
       ],
       "reference_chunk_ids": [
         "RET-ShippingFees-5.1",
-        "RET-ReturnEligibility-2.4",
-        "RET-ReturnEligibility-2.5"
+        "RET-ReturnEligibility-2.5",
+        "RET-ReturnEligibility-2.1"
       ],
       "recall_at_k": 1.0,
       "mrr_at_k": 1.0,
@@ -2865,12 +2946,13 @@
         "RET-ReturnProcedure-4.3",
         "RET-ReturnProcedure-4.5",
         "RET-ReturnEligibility-2.4",
-        "RET-ReturnProcedure-4.1"
+        "RET-ReturnEligibility-2.3"
       ],
       "reference_chunk_ids": [
         "RET-ShippingFees-5.1",
         "RET-ReturnEligibility-2.1",
-        "RET-ReturnEligibility-2.5"
+        "RET-ReturnEligibility-2.5",
+        "RET-ReturnParcelDisputes-7.3"
       ],
       "recall_at_k": 1.0,
       "mrr_at_k": 1.0,
@@ -2895,7 +2977,8 @@
         "SHP-ShippingOptions-2.1"
       ],
       "reference_chunk_ids": [
-        "RET-ShippingFees-5.1"
+        "RET-ShippingFees-5.1",
+        "ODR-OrderChangeCancel-4.2"
       ],
       "recall_at_k": 1.0,
       "mrr_at_k": 1.0,
@@ -2915,8 +2998,8 @@
       ],
       "retrieved_chunk_ids": [
         "REF-Refunds-6.1",
-        "RET-ReturnProcedure-4.1",
         "RET-ReturnProcedure-4.2",
+        "RET-ReturnProcedure-4.1",
         "RET-ReturnEligibility-2.1"
       ],
       "reference_chunk_ids": [
@@ -2927,7 +3010,12 @@
         "RET-ReturnParcelDisputes-7.4",
         "RET-ReturnParcelDisputes-7.5",
         "RET-ReturnProcedure-4.5",
-        "RET-ReturnEligibility-2.6"
+        "RET-ReturnEligibility-2.2",
+        "RET-ReturnEligibility-2.3",
+        "RET-ReturnEligibility-2.4",
+        "RET-ReturnEligibility-2.6",
+        "RET-SupportingEvidence-3.1",
+        "RET-SupportingEvidence-3.2"
       ],
       "recall_at_k": 1.0,
       "mrr_at_k": 1.0,
@@ -2957,6 +3045,12 @@
         "RET-ReturnParcelDisputes-7.4",
         "RET-ReturnParcelDisputes-7.5",
         "RET-ReturnProcedure-4.5",
+        "RET-ReturnEligibility-2.1",
+        "RET-ReturnEligibility-2.3",
+        "RET-ReturnEligibility-2.4",
+        "RET-ReturnEligibility-2.6",
+        "RET-SupportingEvidence-3.1",
+        "RET-SupportingEvidence-3.2",
         "REF-Refunds-6.2",
         "REF-Refunds-6.3",
         "REF-Refunds-6.4",
@@ -2980,8 +3074,8 @@
       "retrieved_chunk_ids": [
         "REF-Refunds-6.1",
         "RET-ReturnProcedure-4.2",
-        "RET-Application-1",
-        "RET-ReturnProcedure-4.1"
+        "RET-ReturnProcedure-4.1",
+        "RET-Application-1"
       ],
       "reference_chunk_ids": [
         "RET-ReturnEligibility-2.5",
@@ -2990,7 +3084,14 @@
         "RET-ReturnParcelDisputes-7.3",
         "RET-ReturnParcelDisputes-7.4",
         "RET-ReturnParcelDisputes-7.5",
-        "RET-ReturnProcedure-4.5"
+        "RET-ReturnProcedure-4.5",
+        "RET-ReturnEligibility-2.1",
+        "RET-ReturnEligibility-2.2",
+        "RET-ReturnEligibility-2.3",
+        "RET-ReturnEligibility-2.4",
+        "RET-ReturnEligibility-2.6",
+        "RET-SupportingEvidence-3.1",
+        "RET-SupportingEvidence-3.2"
       ],
       "recall_at_k": 1.0,
       "mrr_at_k": 1.0,
@@ -3069,6 +3170,224 @@
       "expected_reference_chunk_ids": [],
       "missing_reference_chunk_ids": [],
       "references_returned": null
+    },
+    {
+      "case_id": "q41",
+      "question": "My $20 refund has been accepted and the item inspection is complete. Can it be processed automatically?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "REF-Refunds-6.6"
+      ],
+      "retrieved_chunk_ids": [
+        "REF-Refunds-6.1",
+        "REF-Refunds-6.6",
+        "RET-ReturnEligibility-2.6",
+        "RET-ReturnProcedure-4.5"
+      ],
+      "reference_chunk_ids": [
+        "RET-ReturnEligibility-2.5",
+        "RET-ReturnParcelDisputes-7.1",
+        "RET-ReturnParcelDisputes-7.2",
+        "RET-ReturnParcelDisputes-7.3",
+        "RET-ReturnParcelDisputes-7.4",
+        "RET-ReturnParcelDisputes-7.5",
+        "REF-Refunds-6.2",
+        "REF-Refunds-6.3"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.5,
+      "ndcg_at_k": 0.6309297535714575,
+      "expected_reference_chunk_ids": [
+        "REF-Refunds-6.1",
+        "REF-Refunds-6.2",
+        "REF-Refunds-6.3"
+      ],
+      "missing_reference_chunk_ids": [],
+      "references_returned": true
+    },
+    {
+      "case_id": "q41",
+      "question": "My $20 refund has been accepted and the item inspection is complete. Can it be processed automatically?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "REF-Refunds-6.6"
+      ],
+      "retrieved_chunk_ids": [
+        "REF-Refunds-6.1",
+        "REF-Refunds-6.6",
+        "RET-ReturnEligibility-2.6",
+        "RET-ReturnProcedure-4.1"
+      ],
+      "reference_chunk_ids": [
+        "RET-ReturnEligibility-2.5",
+        "RET-ReturnParcelDisputes-7.1",
+        "RET-ReturnParcelDisputes-7.2",
+        "RET-ReturnParcelDisputes-7.3",
+        "RET-ReturnParcelDisputes-7.4",
+        "RET-ReturnParcelDisputes-7.5",
+        "REF-Refunds-6.2",
+        "REF-Refunds-6.3",
+        "RET-ReturnEligibility-2.1",
+        "RET-ReturnEligibility-2.2",
+        "RET-ReturnEligibility-2.3",
+        "RET-ReturnEligibility-2.4",
+        "RET-SupportingEvidence-3.1",
+        "RET-SupportingEvidence-3.2"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.5,
+      "ndcg_at_k": 0.6309297535714575,
+      "expected_reference_chunk_ids": [
+        "REF-Refunds-6.1",
+        "REF-Refunds-6.2",
+        "REF-Refunds-6.3"
+      ],
+      "missing_reference_chunk_ids": [],
+      "references_returned": true
+    },
+    {
+      "case_id": "q41",
+      "question": "My $20 refund has been accepted and the item inspection is complete. Can it be processed automatically?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "REF-Refunds-6.6"
+      ],
+      "retrieved_chunk_ids": [
+        "REF-Refunds-6.6",
+        "RET-ReturnProcedure-4.1",
+        "REF-Refunds-6.1",
+        "RET-ReturnParcelDisputes-7.2"
+      ],
+      "reference_chunk_ids": [
+        "REF-Refunds-6.2",
+        "REF-Refunds-6.3",
+        "RET-ReturnEligibility-2.1",
+        "RET-ReturnEligibility-2.2",
+        "RET-ReturnEligibility-2.3",
+        "RET-ReturnEligibility-2.4",
+        "RET-ReturnEligibility-2.5",
+        "RET-ReturnEligibility-2.6",
+        "RET-SupportingEvidence-3.1",
+        "RET-SupportingEvidence-3.2",
+        "RET-ReturnParcelDisputes-7.1",
+        "RET-ReturnParcelDisputes-7.3",
+        "RET-ReturnParcelDisputes-7.4",
+        "RET-ReturnParcelDisputes-7.5"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "expected_reference_chunk_ids": [
+        "REF-Refunds-6.1",
+        "REF-Refunds-6.2",
+        "REF-Refunds-6.3"
+      ],
+      "missing_reference_chunk_ids": [],
+      "references_returned": true
+    },
+    {
+      "case_id": "q42",
+      "question": "My $120 refund is on hold for review. Why can't you just process it?",
+      "approach": "vector",
+      "expected_chunk_ids": [
+        "REF-Refunds-6.6"
+      ],
+      "retrieved_chunk_ids": [
+        "RET-ReturnEligibility-2.6",
+        "ODR-OrderChangeCancel-4.2",
+        "REF-Refunds-6.1",
+        "RET-ReturnParcelDisputes-7.5"
+      ],
+      "reference_chunk_ids": [
+        "RET-ReturnEligibility-2.5",
+        "RET-ReturnParcelDisputes-7.1",
+        "RET-ReturnParcelDisputes-7.2",
+        "RET-ReturnParcelDisputes-7.3",
+        "RET-ReturnParcelDisputes-7.4",
+        "RET-SupportingEvidence-3.2"
+      ],
+      "recall_at_k": 0.0,
+      "mrr_at_k": 0.0,
+      "ndcg_at_k": 0.0,
+      "expected_reference_chunk_ids": [
+        "REF-Refunds-6.1",
+        "REF-Refunds-6.2",
+        "REF-Refunds-6.3"
+      ],
+      "missing_reference_chunk_ids": [
+        "REF-Refunds-6.2",
+        "REF-Refunds-6.3"
+      ],
+      "references_returned": false
+    },
+    {
+      "case_id": "q42",
+      "question": "My $120 refund is on hold for review. Why can't you just process it?",
+      "approach": "hybrid",
+      "expected_chunk_ids": [
+        "REF-Refunds-6.6"
+      ],
+      "retrieved_chunk_ids": [
+        "RET-ReturnEligibility-2.6",
+        "REF-Refunds-6.1",
+        "ODR-OrderChangeCancel-4.2",
+        "REF-Refunds-6.6"
+      ],
+      "reference_chunk_ids": [
+        "RET-ReturnEligibility-2.5",
+        "RET-ReturnParcelDisputes-7.1",
+        "RET-ReturnParcelDisputes-7.2",
+        "RET-ReturnParcelDisputes-7.3",
+        "RET-ReturnParcelDisputes-7.4",
+        "RET-ReturnParcelDisputes-7.5",
+        "REF-Refunds-6.2",
+        "REF-Refunds-6.3"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.25,
+      "ndcg_at_k": 0.43067655807339306,
+      "expected_reference_chunk_ids": [
+        "REF-Refunds-6.1",
+        "REF-Refunds-6.2",
+        "REF-Refunds-6.3"
+      ],
+      "missing_reference_chunk_ids": [],
+      "references_returned": true
+    },
+    {
+      "case_id": "q42",
+      "question": "My $120 refund is on hold for review. Why can't you just process it?",
+      "approach": "hybrid_rerank",
+      "expected_chunk_ids": [
+        "REF-Refunds-6.6"
+      ],
+      "retrieved_chunk_ids": [
+        "REF-Refunds-6.6",
+        "REF-Refunds-6.1",
+        "ODR-OrderChangeCancel-4.2",
+        "RET-SupportingEvidence-3.2"
+      ],
+      "reference_chunk_ids": [
+        "REF-Refunds-6.2",
+        "REF-Refunds-6.3",
+        "RET-ReturnEligibility-2.5",
+        "RET-ReturnParcelDisputes-7.1",
+        "RET-ReturnParcelDisputes-7.2",
+        "RET-ReturnParcelDisputes-7.3",
+        "RET-ReturnParcelDisputes-7.4",
+        "RET-ReturnParcelDisputes-7.5",
+        "RET-SupportingEvidence-3.1"
+      ],
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "expected_reference_chunk_ids": [
+        "REF-Refunds-6.1",
+        "REF-Refunds-6.2",
+        "REF-Refunds-6.3"
+      ],
+      "missing_reference_chunk_ids": [],
+      "references_returned": true
     }
   ]
 }
