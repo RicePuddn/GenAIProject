@@ -184,6 +184,7 @@ class EndToEndTests(SupervisorBase):
             "supervisor", text("I can help with orders, returns and refunds.")).push("approver", verdict())
         result = self.run_flow("What's the weather tomorrow?")
         self.assertEqual(result["ticket_status"], "awaiting_customer")
+        self.assertTrue(result["triage"]["off_topic"])   # the API and demo show it as off topic
         self.assertNotIn("specialist", self.roles())
 
     def test_ask_customer_finishes_the_turn(self):
@@ -215,6 +216,76 @@ class EndToEndTests(SupervisorBase):
         self.assertEqual([part["status"] for part in result["parts"]], ["executed"])
         self.assertEqual(result["ticket_status"], "awaiting_human")
         self.assertEqual(len(self.workflow.writes.executed), 1)
+
+    def test_reproposals_after_approver_rejections_are_limited(self):
+        self.llm.push("orchestrator",
+                      choose("ask_specialist", specialist="returns_refunds", request="Refund the mug"),
+                      choose("ask_approver"),
+                      choose("ask_specialist", specialist="returns_refunds", request="Refund the mug, fixed"),
+                      choose("ask_approver"),
+                      choose("ask_specialist", specialist="returns_refunds", request="Refund the mug, fixed again"),
+                      choose("hand_off", reason="The approver keeps rejecting the refund")).push(
+            "specialist", route(50, "approver"), route(50, "approver")).push(
+            "approver", verdict("reject", "Amount is wrong"), verdict("reject", "Still wrong"), verdict()).push(
+            "supervisor", text("A specialist will review it."))
+        result = self.run_flow()
+        self.assertIn("after 1 reproposal(s)", result["trace"].of_kind("supervisor_refused")[0]["reason"])
+        self.assertEqual(len([role for role in self.roles() if role == "specialist"]), 2)
+        self.assertEqual(result["ticket_status"], "awaiting_human")
+
+    def test_approver_feedback_goes_only_to_the_rejected_specialist(self):
+        info = tool_call("route", action="none", order_id="ORD-2026-00001", route="auto", reason="Delivered.")
+        self.llm.push("orchestrator",
+                      choose("ask_specialist", specialist="returns_refunds", request="Refund the mug"),
+                      choose("ask_approver"),
+                      choose("ask_specialist", specialist="orders_shipping", request="Where is ORD-2026-00001?"),
+                      choose("hand_off", reason="The refund was rejected")).push(
+            "specialist", route(50, "approver"), info).push(
+            "approver", verdict("reject", "Amount is wrong"), verdict()).push(
+            "supervisor", text("A specialist will review it."))
+        self.run_flow("Refund the broken mug and tell me where ORD-2026-00001 is")
+        briefs = [messages[1]["content"] for role, messages in self.llm.calls if role == "specialist"]
+        self.assertNotIn("approver_feedback", briefs[-1])
+
+    def test_an_information_part_asked_first_stays_in_the_reply(self):
+        # The information part is replied to, not executed, so moving on used to replace it.
+        info = tool_call("route", action="none", order_id="ORD-2026-00001", route="auto", reason="Delivered.")
+        self.llm.push("orchestrator",
+                      choose("ask_specialist", specialist="orders_shipping", request="Where is ORD-2026-00001?"),
+                      choose("ask_specialist", specialist="returns_refunds", request="Refund the mug"),
+                      choose("execute"), choose("reply")).push(
+            "specialist", info, route(20)).push("supervisor", text("Delivered; refund recorded.")).push(
+            "approver", verdict())
+        result = self.run_flow("Where is ORD-2026-00001, and refund the broken mug")
+        self.assertEqual([(part["specialist"], part["status"]) for part in result["parts"]],
+                         [("orders_shipping", "approved"), ("returns_refunds", "executed")])
+        self.assertEqual(result["ticket_status"], "resolved")
+
+    def test_reply_after_a_specialist_without_a_proposal_is_not_off_topic(self):
+        self.llm.push("orchestrator",
+                      choose("ask_specialist", specialist="returns_refunds", request="Refund the mug"),
+                      choose("reply"), choose("hand_off", reason="The specialist could not propose anything")).push(
+            "specialist", text("Thinking."), text("Still thinking.")).push(
+            "supervisor", text("A specialist will review it.")).push("approver", verdict())
+        result = self.run_flow()
+        self.assertIn("has no proposal to reply with", result["trace"].of_kind("supervisor_refused")[0]["reason"])
+        self.assertEqual(result["ticket_status"], "awaiting_human")
+        replies = json.dumps([messages for role, messages in self.llm.calls if role == "supervisor"])
+        self.assertNotIn("replied without asking a specialist", replies)   # the off-topic triage
+
+    def test_an_approved_write_that_did_not_execute_is_handed_off_not_approved(self):
+        self.llm.push("orchestrator",
+                      choose("ask_specialist", specialist="returns_refunds", request="Refund the mug"),
+                      choose("execute"), choose("hand_off", reason="The refund could not be written")).push(
+            "specialist", route(20)).push("supervisor", text("A specialist will review it.")).push(
+            "approver", verdict())
+        self.workflow = SupervisorAgentWorkflow(self.llm, self.cfg, reader=reader(),
+                                                policy=SkillsPolicy(skills_dir()), clock=Clock(NOW))
+        self.workflow.writes.execute = lambda *args, **kwargs: {"status": "refused", "reason": "duplicate"}
+        result = self.workflow.invoke("T1", "My mug arrived broken, refund please. ORD-2026-00001", "react")
+        self.assertEqual([(part["status"], part["handoff_reason"]) for part in result["parts"]],
+                         [("awaiting_human", "supervisor: The refund could not be written")])
+        self.assertEqual(result["ticket_status"], "awaiting_human")
 
 
 class ApiTests(SupervisorBase):

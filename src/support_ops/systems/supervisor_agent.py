@@ -180,7 +180,8 @@ class SupervisorAgentWorkflow(MultiAgentWorkflow):
         return {
             "ticket_id": ticket_id, "strategy": selected, "orchestration": orchestration, "design": "supervisor",
             "reply": state.get("reply", ""), "ticket_status": status, "handoff_packet": state.get("handoff_packet"),
-            "triage": None, "proposal": dump(state.get("proposal")), "min_route": state.get("min_route"),
+            "triage": dump(state.get("triage")), "proposal": dump(state.get("proposal")),
+            "min_route": state.get("min_route"),
             "approval": dump(state.get("approval")), "reply_review": dump(state.get("reply_review")),
             "execution": state.get("execution"), "evidence": state.get("evidence", []),
             "parts": [self._part_summary(part) for part in state.get("parts", [])],
@@ -211,7 +212,7 @@ class SupervisorAgentWorkflow(MultiAgentWorkflow):
 
     def _supervise(self, state: SupervisorAgentState) -> dict[str, Any]:
         """One ReAct step: the supervisor sees everything so far and calls exactly one tool."""
-        steps, limit = state["supervisor_steps"], self.settings.get("max_supervisor_steps", 8)
+        steps, limit = state["supervisor_steps"], self.settings.get("max_supervisor_steps", 12)
         if steps >= limit:
             self._event("supervisor_limit", steps=steps)
             return self._finish(state, {}, "awaiting_human", f"budget: the supervisor made {steps} steps without finishing")
@@ -312,6 +313,11 @@ class SupervisorAgentWorkflow(MultiAgentWorkflow):
         ticket_id, proposal = state["ticket_id"], state.get("proposal")
         status = self.flow.status(ticket_id)
         if proposal is None and not state["parts"]:
+            if any(message["role"] == "tool" and message["name"] == "ask_specialist"
+                   for message in state["supervisor_messages"]):
+                # A specialist was asked but proposed nothing: the message is on topic, so it is not redirected.
+                return self._refused(state, "the specialist has no proposal to reply with: ask it again, ask the "
+                                            "customer or hand off")
             # Nothing support-related was looked up: the reply redirects, as for an off-topic message.
             self.flow.transition(ticket_id, "awaiting_customer", reason="off topic")
             return {"triage": OFF_TOPIC, "next": "reply"}
@@ -335,10 +341,10 @@ class SupervisorAgentWorkflow(MultiAgentWorkflow):
 
     def _finish(self, state: SupervisorAgentState, update: dict[str, Any], status: str,
                 handoff_reason: str | None = None, customer_question: str | None = None) -> dict[str, Any]:
-        """Record the part in progress, then go to the reply (or to the handoff first). A part already
-        executed or approved keeps that status, e.g. a refund done before another request is handed off."""
-        done = self.flow.status(state["ticket_id"]) if state.get("proposal") is not None else None
-        if done in {"executed", "approved"}:
+        """Record the part in progress, then go to the reply (or to the handoff first). A finished part keeps
+        its status, e.g. a refund done before another request is handed off."""
+        done = self.flow.status(state["ticket_id"])
+        if self._finished(state.get("proposal"), done):
             update = {**update, **self._close_part(state, done)}
         else:
             update = {**update, **self._close_part(state, status, handoff_reason, customer_question)}
@@ -358,23 +364,47 @@ class SupervisorAgentWorkflow(MultiAgentWorkflow):
                 "evidence": state["evidence"][state["part_start"]:]}
         return {"parts": [*state["parts"], part], "part_start": len(state["evidence"])}
 
+    @staticmethod
+    def _finished(proposal: Any, status: str) -> bool:
+        """Whether a proposal's part is done: a write once executed (approved alone means its write was
+        refused or never ran), information once approved."""
+        if proposal is None:
+            return False
+        return status == "executed" or (status == "approved" and proposal.action == "none")
+
     def _specialist(self, state: SupervisorAgentState) -> dict[str, Any]:
         """ask_specialist: run the named specialist on the part the supervisor describes, and report its
         proposal and the rule engine's minimum route back to the supervisor."""
         args, ticket_id = state["pending_tool"]["arguments"], state["ticket_id"]
         name = args["specialist"]
-        status = self.flow.status(ticket_id)
-        # A finished proposal (executed, or information approved) becomes a part of its own; an
-        # unfinished one is replaced, e.g. after the approver rejected it.
-        update: dict[str, Any] = self._close_part(state, status) if status in {"executed", "approved"} else {}
+        status, proposal = self.flow.status(ticket_id), state.get("proposal")
+        # Approver feedback belongs to the rejected proposal: asking its specialist again is a reproposal,
+        # limited as in the fixed workflow; another specialist gets a brief without it.
+        reask = bool(state.get("feedback")) and proposal is not None and proposal.specialist == name
+        if reask and state["reproposals"] >= self.settings["max_reproposals"]:
+            return self._refused(state, f"the approver rejected the proposal after {state['reproposals']} "
+                                        "reproposal(s): hand off")
+        if (status == "proposed" and proposal is not None and proposal.action == "none"
+                and not proposal.customer_question and not state.get("feedback")):
+            # Information only: the prompt says to reply rather than execute, so moving on to the next request
+            # leaves it proposed. The gateway approves it here so the reply still answers it; a rejected one
+            # (feedback) is being asked again, and one the gateway refuses is replaced as before.
+            try:
+                self.flow.approve(ticket_id, proposal, state["min_route"] or {}, state.get("approval"))
+                status = "approved"
+            except ValueError:
+                pass
+        # A finished proposal becomes a part of its own; an unfinished one is replaced, e.g. after the
+        # approver rejected it.
+        update: dict[str, Any] = self._close_part(state, status) if self._finished(proposal, status) else {}
         state = {**state, **update}
         if status != "triaged":
             self.flow.transition(ticket_id, "triaged", specialist=name, reason="supervisor asked a specialist")
-        brief = {**self._brief(state), "your_task": args["request"]}
+        brief = {**self._brief(state if reask else {**state, "feedback": []}), "your_task": args["request"]}
         result = self._run_specialist(name, ticket_id, brief, state["strategy"])
         update = {**update, "evidence": [*state["evidence"], *result.evidence], "proposal": result.proposal,
                   "min_route": result.min_route, "approval": None, "execution": None, "feedback": [],
-                  "part_request": args["request"]}
+                  "part_request": args["request"], "reproposals": state["reproposals"] + 1 if reask else 0}
         if result.error or result.proposal is None:
             return {**update, **self._tool_result(state, {"specialist": name, "error": result.error or "no proposal"})}
         self.flow.transition(ticket_id, "proposed", route=result.proposal.route, operation=result.proposal.action)

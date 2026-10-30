@@ -20,7 +20,7 @@ multi_agent:
   check_citations: true        # a proposal may cite only clauses or files its policy tool returned
   max_reply_drafts: 2          # reply drafts the approver reviews before the hold reply
   max_orchestration_steps: 4   # react: orchestrator decisions per ticket (delegations + finish)
-  max_supervisor_steps: 8      # design supervisor: tool calls per ticket before it is handed off
+  max_supervisor_steps: 12     # design supervisor: tool calls per ticket (refused ones too) before it is handed off
   policy_skills:                # each specialist's policy scope: skill folders under policy.skills_dir
     orders_shipping: [orders-and-shipping]
     returns_refunds: [returns-and-refunds]
