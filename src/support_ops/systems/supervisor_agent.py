@@ -96,7 +96,7 @@ PLAN_PROMPT = (
     "them runs. " + SUPERVISOR_RULES + " The steps run in order without you. You plan again, seeing what "
     "was done, when a step is refused or fails, the approver does not approve, or a specialist's proposal "
     "needs a person or the customer. You cannot know a proposal's route in advance, so plan ask_approver "
-    "before execute for any write. End the plan with exactly one of reply, ask_customer or hand_off. "
+    "before execute for any write; it is skipped when the proposal turns out to be route auto. End the plan with exactly one of reply, ask_customer or hand_off. "
     'Return JSON only: {"steps": [{"tool": "TOOL_NAME", "arguments": {}}]}. Tools: '
 )
 FINISHING = ("reply", "ask_customer", "hand_off")
@@ -272,8 +272,20 @@ class SupervisorAgentWorkflow(MultiAgentWorkflow):
                 return self._finish(state, {}, "awaiting_human", f"supervisor: no valid plan ({exc})")
             update["replans"] = replans
         step, *rest = plan
+        while step.tool == "ask_approver" and rest and self._auto_route(state):
+            # Planned blind (a plan cannot know the route), but an auto route needs no approver, and the
+            # react supervisor would not ask one: skipping it keeps the two strategies' costs comparable.
+            self._event("supervisor_step_skipped", tool=step.tool, reason="route auto needs no approver")
+            step, *rest = rest
         update["plan"] = rest
         return self._dispatch(state, update, f"plan_{state['supervisor_steps'] + 1}", step.tool, step.arguments)
+
+    @staticmethod
+    def _auto_route(state: SupervisorAgentState) -> bool:
+        """Whether the latest proposal and the rules' minimum both allow route auto."""
+        proposal = state.get("proposal")
+        return (proposal is not None and proposal.route == "auto"
+                and (state.get("min_route") or {}).get("route") == "auto")
 
     def _make_plan(self, state: SupervisorAgentState, reason: str | None) -> list[PlannedStep]:
         brief: dict[str, Any] = self._brief(state)

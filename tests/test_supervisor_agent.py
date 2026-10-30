@@ -416,6 +416,25 @@ class PlanAndExecuteTests(SupervisorBase):
         self.assertEqual(result["trace"].of_kind("supervisor_replan"), [])
         self.assertEqual(len(self.workflow.writes.executed), 1)
 
+    def test_a_planned_approver_is_skipped_on_an_auto_route(self):
+        # The same plan, but the refund comes back route auto: no approver call before the write, as in react.
+        self.llm.push("orchestrator", REFUND_PLAN).push("specialist", route(20)).push(
+            "approver", verdict()).push("supervisor", text("Your refund of 20 SGD is recorded."))
+        result = self.run_planned()
+        self.assertEqual(result["ticket_status"], "resolved")
+        self.assertEqual([event["tool"] for event in result["trace"].of_kind("supervisor_step_skipped")],
+                         ["ask_approver"])
+        self.assertEqual(self.roles().count("approver"), 1)   # only the reply review
+        self.assertEqual(result["trace"].of_kind("supervisor_replan"), [])
+        self.assertEqual(len(self.workflow.writes.executed), 1)
+
+    def test_a_planned_approver_still_runs_on_the_approver_route(self):
+        self.llm.push("orchestrator", REFUND_PLAN).push("specialist", route(50, "approver")).push(
+            "approver", verdict(), verdict()).push("supervisor", text("Your refund of 50 SGD is recorded."))
+        result = self.run_planned()
+        self.assertEqual(result["trace"].of_kind("supervisor_step_skipped"), [])
+        self.assertEqual(self.roles().count("approver"), 2)   # the pre-execution check and the reply review
+
     def test_a_human_route_makes_it_plan_again_and_hand_off(self):
         self.llm.push("orchestrator", REFUND_PLAN, plan(("hand_off", {"reason": "The rules require a person"}))).push(
             "specialist", route(70, "human")).push("supervisor", text("A specialist will review it.")).push(

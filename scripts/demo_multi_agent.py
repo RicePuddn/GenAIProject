@@ -169,6 +169,8 @@ def show_event(event: dict[str, Any]) -> None:
     elif kind == "supervisor_plan":
         st.markdown("#### Supervisor · " + ("plan again" if event.get("again") else "plan"))
         st.caption(" → ".join(step["tool"].replace("_", " ") for step in event["steps"]))
+    elif kind == "supervisor_step_skipped":
+        st.caption(f"Skipped {event['tool'].replace('_', ' ')}: {event['reason']}")
     elif kind == "supervisor_replan":
         st.warning(f"Planning again ({event['replans']}): {event['reason']}")
     elif kind == "supervisor_refused":
