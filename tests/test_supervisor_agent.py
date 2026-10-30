@@ -289,7 +289,9 @@ class DemoPageTests(unittest.TestCase):
                         [choose("ask_specialist", specialist="returns_refunds", request="Refund the mug"),
                          choose("execute"), choose("ask_approver"), choose("execute"), choose("reply")]
                     self.llm.push("guard", text("0.01")).push("orchestrator", *steps).push(
-                        "specialist", tool_call("route", action="refund", order_id=ORDER, amount=32, reason_code="damaged_item",
+                        # Search first: the real config checks that REF-1 was returned before it is cited.
+                        "specialist", tool_call("policy", query="damaged item refund"),
+                        tool_call("route", action="refund", order_id=ORDER, amount=32, reason_code="damaged_item",
                                                 items=[{"item_id": "ITM-2", "quantity": 1}], cited_clauses=["REF-1"],
                                                 route="approver", reason="One bottle arrived dented.")).push(
                         "approver", verdict(), verdict()).push("supervisor", text("Your refund of 32 SGD is recorded."))
