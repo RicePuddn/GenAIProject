@@ -82,6 +82,8 @@ SUPERVISOR_PROMPT = (
     "route auto: execute. Route approver: ask_approver; if it approves, execute; if it rejects, ask the "
     "specialist again once with the issues, otherwise hand_off. Route human: hand_off. Action none with a "
     "customer_question: ask_customer. Action none without one (information only): reply. "
+    "Before asking the customer anything, use ask_specialist to check the records; only ask the customer "
+    "for facts the records cannot provide (never for IDs, SKUs or prices the order already shows). "
     "If the customer asks for a person, hand_off. If the message has nothing to do with the store's "
     "orders, shipments, items, payments, returns, refunds or support policies, reply without asking a "
     "specialist; for a mixed message, handle only its support part. Finish with reply once every request "

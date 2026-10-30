@@ -47,6 +47,13 @@ class PromptTests(SupervisorBase):
         self.assertIn(wording, " ".join(ORCHESTRATE_PROMPT.split()))
         self.assertIn(wording, " ".join(SUPERVISOR_PROMPT.split()))
 
+    def test_prompt_says_to_check_the_records_before_asking_the_customer(self):
+        # A real run asked the customer for a SKU the order already showed, without asking a specialist.
+        from support_ops.systems.supervisor_agent import SUPERVISOR_PROMPT
+        prompt = " ".join(SUPERVISOR_PROMPT.split())
+        self.assertIn("Before asking the customer anything, use ask_specialist to check the records", prompt)
+        self.assertIn("never for IDs, SKUs or prices the order already shows", prompt)
+
     def test_supervisor_sees_the_prompt_and_its_tools(self):
         self.llm.push("orchestrator", choose("ask_customer", question="Which order?")).push(
             "supervisor", text("Which order?")).push("approver", verdict())
