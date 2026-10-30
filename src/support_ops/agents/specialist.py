@@ -34,6 +34,20 @@ SCOPES: dict[SpecialistName, str] = {
 }
 
 
+def citation_forms(clause: str) -> set[str]:
+    """The ways a citation may name what was read, casefolded: as written, each side of a `#` anchor, a
+    path cut to its last two parts (skill/file, so another skill's file of the same name does not match),
+    and the leading clause ID of "RET-1 Return window"."""
+    forms = set()
+    for part in clause.strip().casefold().split("#"):
+        part = part.strip().strip("/")
+        if not part:
+            continue
+        pieces = part.split("/")
+        forms |= {part, "/".join(pieces[-2:]), part.split()[0]}
+    return forms
+
+
 @dataclass
 class SpecialistResult:
     proposal: Proposal | None = None
@@ -41,6 +55,7 @@ class SpecialistResult:
     evidence: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
     orders_seen: list[str] = field(default_factory=list)   # order IDs the read tools were called with
+    citable: set[str] = field(default_factory=set)   # clause IDs and files the policy tool returned
 
 
 class Specialist:
@@ -57,8 +72,7 @@ class Specialist:
             f"You are the {self.name.replace('_', ' ')} specialist in a policy-bound support team. "
             f"Current workflow date: {self.ctx.clock.now().date()}. Your scope: {SCOPES[self.name]}. "
             f"Actions you may propose: {', '.join(sorted(SPECIALIST_ACTIONS[self.name]))}; for anything else, "
-            "propose action none with route human. Policy search covers your own policy sections; search "
-            "with scope all when the case crosses into another area. "
+            f"propose action none with route human. {getattr(self.toolbox.policy, 'scope_hint', '')} "
             "Use the read tools for account facts; read an order by its own ID and use the order lookup "
             "tools for its items, payments, returns and shipments. Before advising on a return or refund, "
             "check the order's items and any existing returns or refunds. "
@@ -114,6 +128,8 @@ class Specialist:
         attempts = self.ctx.retries.tool_errors + 1
         for attempt in range(1, attempts + 1):
             try:
+                if name == "route":
+                    self._check_citations(arguments, result)
                 value = self.toolbox.execute(ticket_id, name, arguments)
             except (ValueError, FileNotFoundError) as exc:
                 # The agent's own mistake: the same arguments would fail again, so it gets the error.
@@ -130,6 +146,8 @@ class Specialist:
         self.ctx.log("tool_end", call_id=call_id, tool=name, agent=self.name,
                      elapsed_s=round(time.perf_counter() - started, 6), output=value)
         result.evidence.append({"tool": name, "agent": self.name, "result": value})
+        if name == "policy" and "error" not in value:
+            result.citable |= getattr(self.toolbox.policy, "citable", lambda _: set())(value)
         if name != "route" and "error" not in value and isinstance(arguments, dict):
             order_id = arguments.get("order_id") or (
                 arguments.get("record_id") if arguments.get("kind") == "orders" else None)
@@ -139,6 +157,17 @@ class Specialist:
             result.proposal = Proposal.model_validate(value["proposal"])
             result.min_route = value["min_route"]
         return value
+
+    def _check_citations(self, arguments: Any, result: SpecialistResult) -> None:
+        """A proposal may cite only clauses or files its policy tool returned in this case."""
+        if not self.cfg.get("multi_agent", {}).get("check_citations", True) or not isinstance(arguments, dict):
+            return
+        cited = arguments.get("cited_clauses") or []
+        citable = {item.casefold() for item in result.citable}
+        if unread := [str(clause) for clause in cited if not citation_forms(str(clause)) & citable]:
+            self.ctx.log("citation_rejected", agent=self.name, unread=unread)
+            raise ValueError(f"cited_clauses {unread} were not returned by your policy tool in this case; "
+                             "read them first, or cite only the clause IDs or files you read")
 
     def _user_message(self, brief: dict[str, Any]) -> dict[str, str]:
         return {"role": "user", "content": json.dumps(brief, default=str)}
@@ -210,10 +239,20 @@ class Specialist:
                 self.ctx.log("plan_rejected", reason=previous_error, replan=attempt + 1)
                 continue
             self.ctx.log("plan", specialist=self.name, calls=calls, attempt=attempt + 1)
+            failed = None
             for name, arguments in calls:
-                self._execute(ticket_id, self.ctx.next_call_id(), name, arguments, result)
+                value = self._execute(ticket_id, self.ctx.next_call_id(), name, arguments, result)
                 if result.error:
                     return
+                if "error" in value:
+                    # The rest of the plan, and a proposal, would rest on evidence that is missing.
+                    failed = (f"planned call {name} failed: {value['error']}; plan again using the evidence, "
+                              "without repeating calls whose results are already in it")
+                    break
+            if failed:
+                previous_error = failed
+                self.ctx.log("plan_rejected", reason=previous_error, replan=attempt + 1)
+                continue
             # A malformed proposal is asked for again (retries.invalid_json) without rerunning the plan.
             try:
                 draft = chat_json(self.ctx, "specialist", [

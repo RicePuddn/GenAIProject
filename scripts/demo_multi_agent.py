@@ -1,4 +1,4 @@
-"""Demo page for the multi-agent arm (S3): chat as the customer and watch each agent work.
+"""Demo page for the multi-agent arms (S3 rag, S4 skills): chat as the customer and watch each agent work.
 
 A client of the stateless multi-agent API (`support_ops.api_multi`): it keeps the conversation and
 sends earlier turns as `history`, and reads /chat/stream so triage, specialist tool calls,
@@ -264,9 +264,10 @@ if "history" not in st.session_state:
 
 with st.sidebar:
     st.header("E-Commerce Support")
-    st.caption("Multi-agent (S3): supervisor, specialists, approver and gateway, with RAG policy")
     try:
         info = call_api("/info", timeout=10)
+        arm = "S4, with skills policy" if info["policy_mode"] == "skills" else "S3, with RAG policy"
+        st.caption(f"Multi-agent ({arm}): supervisor, specialists, approver and gateway")
         models = info["models"]
         st.markdown(f"**Policy:** {info['policy_mode']} ({info['corpus']})  \n"
                     f"**Supervisor:** {models['supervisor']}  \n**Specialist:** {models['specialist']}  \n"

@@ -14,6 +14,7 @@ from support_ops.helpers.clock import Clock
 from support_ops.helpers.config import load_config
 from support_ops.helpers.llm import ScriptedLLM, text, tool_call
 from support_ops.policy.rag import RagPolicy
+from support_ops.policy.skills import SkillsPolicy
 from support_ops.systems.multi_agent import HOLD_REPLY, MultiAgentWorkflow
 
 NOW = datetime(2026, 10, 1, 9, tzinfo=timezone.utc)
@@ -84,6 +85,8 @@ def verdict(decision="approve", *issues):
 class Base(unittest.TestCase):
     def setUp(self):
         self.cfg = load_config("configs/experiments/multi_agent_rag.yaml")
+        # These tests script proposals without a policy search first; citation checks have their own tests.
+        self.cfg["multi_agent"]["check_citations"] = False
         self.llm = ScriptedLLM().push("guard", text("0.01")).on("orchestrator", one_part)
 
     def run_flow(self, message="My mug arrived broken, refund please. ORD-2026-00001", strategy="react", **backend):
@@ -814,10 +817,14 @@ class StrategyTests(Base):
         self.assertEqual(result["ticket_status"], "awaiting_human")
         self.assertIn("no valid proposal", result["handoff_packet"]["reason"])
 
-    def test_only_the_rag_arm_is_supported(self):
+    def test_policy_mode_picks_the_provider(self):
+        # S3 runs with rag, S4 with skills; anything else is refused.
         self.cfg["policy"]["mode"] = "skills"
-        with self.assertRaisesRegex(ValueError, "S3 only"):
-            self.run_flow()
+        workflow = MultiAgentWorkflow(self.llm, self.cfg, reader=reader(), clock=Clock(NOW))
+        self.assertIsInstance(workflow.tools.policy, SkillsPolicy)
+        self.cfg["policy"]["mode"] = "vector"
+        with self.assertRaisesRegex(ValueError, "unsupported policy.mode"):
+            MultiAgentWorkflow(self.llm, self.cfg, reader=reader(), clock=Clock(NOW))
 
     def test_unknown_strategy_is_rejected(self):
         for strategy in ("vibes", "reflexion"):   # reflexion was removed

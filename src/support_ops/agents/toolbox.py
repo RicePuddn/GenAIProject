@@ -1,14 +1,15 @@
 """A specialist's view of the shared tools: a named subset of `SupportTools` plus tools
-only the multi-agent arm has (`route`, and a search-only `policy`). `SupportTools` itself is unchanged."""
+only the multi-agent arm has (`route`, and the policy provider's `policy` tool scoped to the specialist).
+`SupportTools` itself is unchanged."""
 from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, Literal
+from typing import Any, Callable
 
 from pydantic import BaseModel
 
-from support_ops.helpers.arguments import NonEmpty, ToolArguments
+from support_ops.policy.provider import ScopedPolicyTool
 from support_ops.systems.tools import SupportTools, validate_arguments
 
 ORDERS_SHIPPING_TOOLS = (
@@ -29,45 +30,6 @@ class ExtraTool:
     run: Callable[[str, dict[str, Any]], dict[str, Any]]   # (ticket_id, validated arguments)
 
 
-class PolicySearchArguments(ToolArguments):
-    """Retrieve the policy clauses most relevant to a query, with their exceptions. scope own (the
-    default) keeps clauses from your policy sections; use all when the case crosses sections."""
-    action: Literal["search"] = "search"
-    query: NonEmpty
-    scope: Literal["own", "all"] = "own"
-
-
-def own_sections(result: dict[str, Any], sections: Sequence[str]) -> dict[str, Any]:
-    """Keep the clauses from `sections`, plus the exceptions of the clauses kept, whatever their section."""
-    wanted = {section.casefold() for section in sections}
-    clauses = result.get("clauses", [])
-    kept_ids = {clause["id"] for clause in clauses
-                if clause["via"] == "search" and clause["section"].casefold() in wanted}
-    kept = [clause for clause in clauses if clause["id"] in kept_ids
-            or (clause["via"].startswith("exception_of:") and clause["via"].split(":", 1)[1] in kept_ids)]
-    filtered = {**result, "clauses": kept, "scope": "own", "sections": list(sections)}
-    if dropped := len(clauses) - len(kept):
-        filtered["filtered_out"] = dropped
-    if not kept:
-        filtered["note"] = ("No clause from your sections matched. If the case crosses into another area, "
-                            "search again with scope all.")
-    return filtered
-
-
-def policy_search_tool(tools: SupportTools, sections: Sequence[str] | None = None) -> ExtraTool:
-    """The `policy` tool without its `check` action (in the multi-agent arm the `route` tool applies the
-    hard rules), limited by default to the specialist's `sections`. Same policy provider as the shared tool.
-    The retriever's top-k is filtered afterwards; a native section filter in the retriever would return
-    k clauses from the section instead (see docs/multi-agent.md, vector DB notes)."""
-    def run(ticket_id: str, args: dict[str, Any]) -> dict[str, Any]:
-        result = tools.policy.run({"action": "search", "query": args["query"]})
-        if args.get("scope", "own") == "all" or not sections:
-            return {**result, "scope": "all"}
-        return own_sections(result, sections)
-
-    return ExtraTool(PolicySearchArguments, PolicySearchArguments.__doc__, run)
-
-
 def returns_lookup_tool(tools: SupportTools, checked: set[str]) -> ExtraTool:
     """`get_returns_for_order`, recording which orders' returns the specialist has seen, so the
     `route` tool only shows them again for orders it has not looked at."""
@@ -82,13 +44,16 @@ def returns_lookup_tool(tools: SupportTools, checked: set[str]) -> ExtraTool:
 
 
 class Toolbox:
-    def __init__(self, tools: SupportTools, names: Sequence[str], extra: dict[str, ExtraTool] | None = None):
+    def __init__(self, tools: SupportTools, names: Sequence[str],
+                 extra: dict[str, ExtraTool | ScopedPolicyTool] | None = None):
         extra = dict(extra or {})
         if unknown := sorted(set(names) - set(tools.argument_models)):
             raise ValueError(f"unknown shared tools: {unknown}")
         if clash := sorted(set(names) & set(extra)):
             raise ValueError(f"extra tools shadow shared tools: {clash}")
-        self.tools, self.extra, self.policy = tools, extra, tools.policy
+        self.tools, self.extra = tools, extra
+        # The provider's scoped tool carries its own prompt text and planner overview.
+        self.policy = extra["policy"] if isinstance(extra.get("policy"), ScopedPolicyTool) else tools.policy
         self.argument_models: dict[str, type[BaseModel]] = {
             **{name: tools.argument_models[name] for name in names},
             **{name: tool.arguments for name, tool in extra.items()},

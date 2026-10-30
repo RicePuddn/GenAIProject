@@ -1,4 +1,4 @@
-"""LangGraph multi-agent workflow (S3: supervisor, specialists, approver and gateway, with RAG policy).
+"""LangGraph multi-agent workflow (supervisor, specialists, approver and gateway; S3 with RAG policy, S4 with skills).
 
 Two independent settings, each react or plan_and_execute:
 
@@ -33,7 +33,7 @@ from support_ops.agents.guard import screen
 from support_ops.agents.models import ApprovalResult, Proposal, SupervisorStep, Task, Triage
 from support_ops.agents.runtime import AgentContext, Budget, BudgetExceeded, Retries, llm_from_config
 from support_ops.agents.specialist import STRATEGIES, Specialist
-from support_ops.agents.toolbox import (ORDERS_SHIPPING_TOOLS, RETURNS_REFUNDS_TOOLS, Toolbox, policy_search_tool,
+from support_ops.agents.toolbox import (ORDERS_SHIPPING_TOOLS, RETURNS_REFUNDS_TOOLS, Toolbox,
                                         returns_lookup_tool)
 from support_ops.backend.postgres import PostgresReader
 from support_ops.gateway.approvals import TicketFlow
@@ -47,12 +47,12 @@ from support_ops.helpers.tracing import Tracer
 from support_ops.policy.provider import PolicyProvider
 from support_ops.policy.routing import RoutingRules
 from support_ops.policy.rules import Rules
-from support_ops.policy.rag import RagPolicy
 from support_ops.supervisor.escalation import (FIXED_REPLY_TRIGGERS, HOLD_REPLY, confirm_question, customer_insists,
                                               handoff_packet, missing_records, plain_dashes,
                                               triage_escalation)
 from support_ops.supervisor.outcome import combined_outcome, customer_outcome
 from support_ops.supervisor.supervisor import Supervisor
+from support_ops.systems.single_agent import policy_from_config
 from support_ops.systems.tools import SupportTools
 
 SPECIALIST_TOOLS = {"orders_shipping": ORDERS_SHIPPING_TOOLS, "returns_refunds": RETURNS_REFUNDS_TOOLS}
@@ -63,6 +63,8 @@ DEFAULTS = {
     "max_reply_drafts": 2,          # drafts the approver may review before falling back
     "max_orchestration_steps": 4,   # react: orchestrator decisions per ticket (delegations + finish)
     "policy_sections": {"orders_shipping": ["Orders and shipping"], "returns_refunds": ["Returns and refunds"]},
+    # skills mode: each specialist's skill folders under policy.skills_dir
+    "policy_skills": {"orders_shipping": ["orders-and-shipping"], "returns_refunds": ["returns-and-refunds"]},
 }
 # Earlier turns arrive with each request (the API is stateless).
 HISTORY_ROLES = {"customer", "agent"}
@@ -101,10 +103,12 @@ class MultiAgentWorkflow:
     def __init__(self, llm: LLM, cfg: dict[str, Any], *, reader: PostgresReader | None = None,
                  policy: PolicyProvider | None = None, clock: Clock | None = None, tracer: Tracer | None = None,
                  cancellation: CancellationToken | None = None):
-        if cfg["policy"].get("mode") != "rag":
-            raise ValueError("the multi-agent arm is S3 only: set policy.mode to rag")
         self.llm, self.cfg = llm, cfg
         self.settings = {**DEFAULTS, **cfg.get("multi_agent", {})}
+        for key in ("policy_sections", "policy_skills"):
+            # Per specialist, so a config naming one specialist's scope keeps the other's default scope
+            # instead of leaving it unscoped (None, the whole policy, stays available when set explicitly).
+            self.settings[key] = {**DEFAULTS[key], **(cfg.get("multi_agent", {}).get(key) or {})}
         self.retries = Retries.from_config(cfg)
         self.clock = clock or Clock(datetime.fromisoformat(cfg["run"]["clock_start"]))
         self._provided_tracer = tracer
@@ -114,7 +118,13 @@ class MultiAgentWorkflow:
         self.routing = RoutingRules.load(cfg["policy"]["rules_file"])
         self.reader = reader or PostgresReader()
         self.ticket_state = TicketState(self.clock, rules=rules)
-        self.tools = SupportTools(self.reader, policy or RagPolicy.from_config(cfg, rules), self.ticket_state)
+        self.tools = SupportTools(self.reader, policy or policy_from_config(cfg, rules), self.ticket_state)
+        policy = self.tools.policy
+        if policy.strict_scope:   # e.g. a mistyped skill folder: fail now, not as empty lists mid-ticket
+            for specialist, scope in self.settings[policy.scope_setting].items():
+                if missing := policy.check_scope(scope):
+                    raise ValueError(f"multi_agent.{policy.scope_setting} for {specialist} names parts the "
+                                     f"policy does not have: {missing}")
         self.flow = TicketFlow(self.ticket_state, self.clock)
         self.writes = MockWrites(self.flow, self.routing.currency)
         self._tokens: dict[str, str | None] = {}   # kept out of graph state, so never returned
@@ -297,9 +307,13 @@ class MultiAgentWorkflow:
         route = RouteTool(self.reader, self.routing, self.clock, name, returns_checked, orders_seen)
         wrapped = {"policy", "get_returns_for_order"}
         reads = [tool for tool in SPECIALIST_TOOLS[name] if tool not in wrapped]
-        sections = self.settings["policy_sections"].get(name)
-        self._check_sections(name, sections)
-        extra = {"policy": policy_search_tool(self.tools, sections)}
+        policy = self.tools.policy
+        scope = self.settings[policy.scope_setting].get(name)
+        # A strict provider already refused a missing part at start-up; otherwise an empty search is never
+        # a silent mystery.
+        if not policy.strict_scope and (missing := policy.check_scope(scope)):
+            self._event(f"{policy.scope_setting}_missing", specialist=name, missing=missing)
+        extra: dict[str, Any] = {"policy": policy.scoped_tool(scope)}
         if "get_returns_for_order" in SPECIALIST_TOOLS[name]:
             extra["get_returns_for_order"] = returns_lookup_tool(self.tools, returns_checked)
         toolbox = Toolbox(self.tools, reads, {**extra, "route": route.as_tool()})
@@ -392,16 +406,6 @@ class MultiAgentWorkflow:
         """A finished part for the response and the handoff packet (its evidence is in the ticket's)."""
         dump = lambda value: value.model_dump(mode="json") if hasattr(value, "model_dump") else value
         return {key: dump(value) for key, value in part.items() if key != "evidence"}
-
-    def _check_sections(self, name: str, sections: list[str] | None) -> None:
-        """Flag configured sections the corpus does not have, so an empty search is never a silent mystery."""
-        retriever = getattr(self.tools.policy, "retriever", None)
-        try:
-            known = {section.casefold() for section in retriever.sections()} if retriever else None
-        except Exception:
-            known = None
-        if known and (missing := [section for section in sections or [] if section.casefold() not in known]):
-            self._event("policy_sections_missing", specialist=name, missing=missing, corpus_sections=sorted(known))
 
     def _decide(self, state: MultiAgentState) -> dict[str, Any]:
         self._event("node_start", node="decide", route=state["proposal"].route)
