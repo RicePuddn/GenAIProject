@@ -40,7 +40,8 @@ class RetrievalEntryTests(unittest.TestCase):
             self.assertEqual(result[0]["id"], "RET-SupportingEvidence-3.2")
 
     def test_invalid_settings_fail(self):
-        for values in ({"dense": False, "bm25": False}, {"k": 30}, {"typo": 1}):
+        for values in ({"dense": False, "bm25": False}, {"k": 30}, {"typo": 1},
+                       {"k": 1.5}, {"k": True}, {"rrf_k": -1}, {"rrf_k": 1.5}, {"dense": 1}):
             with self.subTest(values=values), self.assertRaises(ValueError):
                 RagSettings.from_config(values)
 
@@ -207,7 +208,7 @@ class PineconeRetrievalTests(unittest.TestCase):
         docs.search.assert_not_called()
 
     def test_reference_expansion_does_not_inflate_top_k_metrics(self):
-        notebook = nbformat.read(Path(__file__).resolve().parents[1] / "src/support_ops/eval/evaluation.ipynb", as_version=4)
+        notebook = nbformat.read(Path(__file__).resolve().parents[1] / "src/support_ops/eval/rag_evaluation.ipynb", as_version=4)
         cell = next(cell for cell in notebook.cells if "metrics" in cell.metadata.get("tags", []))
         namespace = {}
         exec(cell.source, namespace)
@@ -217,7 +218,7 @@ class PineconeRetrievalTests(unittest.TestCase):
         self.assertEqual(score(["c"], ["a", "c"], 2)["mrr_at_k"], 0.5)
 
     def test_reference_checks_accept_existing_search_hits_and_report_missing_links(self):
-        notebook = nbformat.read(Path(__file__).resolve().parents[1] / "src/support_ops/eval/evaluation.ipynb", as_version=4)
+        notebook = nbformat.read(Path(__file__).resolve().parents[1] / "src/support_ops/eval/rag_evaluation.ipynb", as_version=4)
         cell = next(cell for cell in notebook.cells if "reference_checks" in cell.metadata.get("tags", []))
         namespace = {}
         exec(cell.source, namespace)

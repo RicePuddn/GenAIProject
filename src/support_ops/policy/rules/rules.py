@@ -162,14 +162,8 @@ class Rules:
     # Return the matching JSON outcome; no trigger means continue to the operation.
     def _human_review(self, facts: dict) -> dict | None:
         group, config = "human_review", self.data["human_review"]
-        if any(name in facts and type(facts[name]) is not bool for name in ("disputed", "unsafe_item", "human_requested")):
-            return self._result(group, "invalid_risk_flags")
         if facts.get("disputed") is True:
             return self._result(group, "disputed_facts")
-        if facts.get("unsafe_item") is True:
-            return self._result(group, "unsafe_goods")
-        if facts.get("human_requested") is True:
-            return self._result(group, "human_requested")
         if facts.get("evidence_status") in config["evidence_statuses"]:
             return self._result(group, "evidence_unavailable")
         if facts.get("reason") in config["return_reasons"]:
@@ -186,7 +180,8 @@ class Rules:
         value = _money(amount)
         if value <= 0:
             raise ValueError("refund amount must be positive")
-        details = {"limit": float(self.refund_limit), "currency": self.currency}
+        details = {"limit": float(self.refund_limit), "currency": self.currency,
+                   "return_id": facts.get("return_id"), "payment_id": facts.get("payment_id")}
         if facts.get("currency") is not None and facts["currency"] != self.currency:
             return self._result(group, "currency_mismatch", **details)
         missing = sorted(key for key in config["required_facts"] if facts.get(key) is None)
@@ -194,8 +189,6 @@ class Rules:
             return self._result(group, "missing_facts", missing_facts=missing, **details)
         if facts["payment_status"] != config["required_payment_status"]:
             return self._result(group, "payment_not_captured", **details)
-        if facts["original_payment_method"] is not True:
-            return self._result(group, "different_payment_method", **details)
         if facts["request_accepted"] is not True:
             return self._result(group, "request_not_accepted", **details)
         if facts["inspection_or_waiver"] is not True:
@@ -250,18 +243,18 @@ class Rules:
     # Check authorization, actual carrier handover and a recorded approved extension.
     def _return_dispatch(self, facts: dict) -> dict:
         group, config = "return_dispatch", self.data["return_dispatch"]
-        if not facts.get("approved_at") or not facts.get("handed_over_at"):
+        if not facts.get("authorized_at") or not facts.get("handed_over_at"):
             return self._result(group, "missing_dates")
-        approved = _date(facts["approved_at"], self.timezone)
+        authorized = _date(facts["authorized_at"], self.timezone)
         sent = _date(facts["handed_over_at"], self.timezone)
-        deadline = approved + timedelta(days=config["window_calendar_days"])
+        deadline = authorized + timedelta(days=config["window_calendar_days"])
         if facts.get("extension_until"):
             if facts.get("extension_approved") is not True:
                 return self._result(group, "unapproved_extension")
             deadline = _date(facts["extension_until"], self.timezone)
         if facts.get("carrier_accepted") is not True:
             return self._result(group, "handover_unverified")
-        if sent < approved:
+        if sent < authorized:
             return self._result(group, "dispatch_before_approval")
         if sent > deadline or (sent == deadline and not config["deadline_inclusive"]):
             return self._result(group, "deadline_exceeded", deadline=deadline.isoformat())
@@ -274,8 +267,6 @@ class Rules:
         group, config = "cancel", self.data["cancel"]
         if facts.get("order_status") == "cancelled":
             return self._result(group, "already_cancelled")
-        if facts.get("authority_verified") is not True:
-            return self._result(group, "authority_unverified")
         if facts.get("order_status") != config["allowed_order_status"]:
             return self._result(group, "wrong_order_status")
         if any(type(facts.get(name)) is not bool for name in config["blockers"]):

@@ -6,45 +6,18 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from support_ops.policy.facts import BackendFacts
 
 from support_ops.policy.routing import RoutingRules, at_least, strictest
 
 NOW = datetime(2026, 10, 1, 9, tzinfo=timezone.utc)
 DEFAULT_RULES = Path(__file__).resolve().parents[1] / "src/support_ops/policy/rules/rules.json"
 REFUND = {
-    "payment_status": "captured", "currency": "SGD", "captured_amount": 200,
+    "payment_id": "PAY-1", "payment_status": "captured", "currency": "SGD", "captured_amount": 200,
     "refunded_amount": 0, "pending_refund_amount": 0, "approved_refund_amount": 200,
-    "original_payment_method": True, "request_accepted": True, "inspection_or_waiver": True,
+    "request_accepted": True, "inspection_or_waiver": True,
 }
 RETURN = {"delivered_at": NOW - timedelta(days=5), "requested_at": NOW,
           "reason": "faulty", "evidence_status": "verified"}
-
-
-# Workflow tests supply verified inputs to exercise routing independently of missing DB fields.
-# Production backend mapping (including unknown inspection/evidence facts) is tested separately.
-def verified_rule_inputs():
-    read = BackendFacts.read
-
-    def collect(source, operation, order_id, item_ids=None, *, history=None):
-        facts = read(source, operation, order_id, item_ids, history=history)
-        if not facts:
-            return facts
-        if operation == "refund":
-            verified = {"request_accepted": True, "original_payment_method": True,
-                        "approved_refund_amount": facts["captured_amount"],
-                        "inspection_or_waiver": bool(facts.get("delivered_at"))}
-        elif operation in {"return_request", "exchange"}:
-            verified = {"reason": "faulty", "evidence_status": "verified",
-                        "alternative_resolution_agreed": True}
-        elif operation == "cancel":
-            verified = {"authority_verified": True, "label_created": False, "packing_started": False,
-                        "any_quantity_fulfilled": False, "carrier_collected": False}
-        else:
-            verified = {}
-        return {**verified, **facts}
-
-    return patch.object(BackendFacts, "read", autospec=True, side_effect=collect)
 
 
 class RouteOrderTests(unittest.TestCase):
@@ -78,8 +51,8 @@ class MinRouteTests(unittest.TestCase):
         self.assertEqual(missing["route"], "human")
 
     def test_human_conditions_override_a_small_refund(self):
-        for facts in ({"disputed": True}, {"unsafe_item": True}, {"evidence_status": "unavailable"},
-                      {"human_requested": True}):
+        for facts in ({"disputed": True}, {"reason": "counterfeit"}, {"evidence_status": "unavailable"},
+                      {"item_type": "digital"}):
             with self.subTest(facts=facts):
                 result = self.rules.min_route("refund", 5, business_facts={**REFUND, **facts})
                 self.assertEqual((result["allowed"], result["requires_human"], result["route"]),
@@ -118,8 +91,8 @@ class MinRouteTests(unittest.TestCase):
         lost = self.rules.min_route("none", delivery_facts=[{"delivery_status": "lost"}])
         self.assertEqual(lost["route"], "human")
 
-    def test_cancellation_uses_verified_fulfillment_and_authority(self):
-        facts = {"order_status": "processing", "authority_verified": True, "label_created": False,
+    def test_cancellation_uses_recorded_fulfillment(self):
+        facts = {"order_status": "processing", "label_created": False,
                  "packing_started": False, "any_quantity_fulfilled": False, "carrier_collected": False}
         self.assertEqual(self.rules.min_route("order_change", change_type="cancel", business_facts=facts)["route"], "auto")
         self.assertEqual(self.rules.min_route("order_change", change_type="cancel", business_facts={**facts, "packing_started": True})["route"], "human")

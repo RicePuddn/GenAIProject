@@ -16,7 +16,7 @@ from support_ops.agents.toolbox import ExtraTool
 from support_ops.backend.postgres import PostgresReader
 from support_ops.helpers.clock import Clock
 from support_ops.policy.routing import ROUTES, RoutingRules, at_least
-from support_ops.policy.facts import BackendFacts
+from support_ops.policy.facts import BackendFacts, goods_value
 
 # Refunds in these states never paid out, so they do not count against the order total.
 VOID_REFUND_STATUSES = {"failed", "cancelled", "rejected"}
@@ -90,7 +90,7 @@ class RouteTool:
                                  f"its items are {sorted(lines)}")
             if line.quantity > item["quantity"]:
                 raise ValueError(f"item {line.item_id} has quantity {item['quantity']}, not {line.quantity}")
-            value += Decimal(str(item["unit_price"])) * line.quantity
+            value += goods_value(item, line.quantity)
         return value
 
     def check(self, proposal: Proposal) -> dict[str, Any]:
@@ -142,7 +142,9 @@ class RouteTool:
                 raise ValueError(f"refund {proposal.amount:.2f} exceeds the {paid:.2f} paid for the listed items; "
                                  "refund at most what was paid for them")
         minimum = self.check(proposal)
-        if (existing := minimum.get("existing_requests")) and proposal.order_id \
+        existing = minimum.get("existing_requests", [])
+        unseen = [row for row in existing if not (row["kind"] == "return" and row["status"] == "approved")]
+        if unseen and proposal.order_id \
                 and proposal.order_id not in self.returns_checked:
             # Deciding without knowing about a pending return or an earlier refund gets eligibility
             # wrong, so the specialist sees them once before its proposal is recorded.

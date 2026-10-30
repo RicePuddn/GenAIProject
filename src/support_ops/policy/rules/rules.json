@@ -15,7 +15,7 @@
   "groups": {
     "human_review": {
       "rule_id": "mandatory_human_review",
-      "description": "Run these shared checks first. If none matches, continue to the selected operation.",
+      "description": "Check recorded return disputes, evidence limitations and unsupported goods before the selected operation.",
       "evidence_statuses": [
         "unavailable",
         "inaccessible",
@@ -38,39 +38,12 @@
         "RET-ReturnParcelDisputes-7.4"
       ],
       "checks": {
-        "invalid_risk_flags": {
-          "given": "A supplied disputed, unsafe_item or human_requested flag is not a boolean.",
-          "outcome": {
-            "allowed": false,
-            "requires_human": true,
-            "reason": "Risk flags must be verified booleans.",
-            "route": "human"
-          }
-        },
         "disputed_facts": {
           "given": "The facts or findings are disputed.",
           "outcome": {
             "allowed": false,
             "requires_human": true,
             "reason": "Conflicting facts require human review.",
-            "route": "human"
-          }
-        },
-        "unsafe_goods": {
-          "given": "The goods are unsafe to handle or demonstrate.",
-          "outcome": {
-            "allowed": false,
-            "requires_human": true,
-            "reason": "Unsafe goods require human review and specific handling instructions.",
-            "route": "human"
-          }
-        },
-        "human_requested": {
-          "given": "The customer requests human assistance.",
-          "outcome": {
-            "allowed": false,
-            "requires_human": true,
-            "reason": "The customer requested human review.",
             "route": "human"
           }
         },
@@ -110,13 +83,13 @@
       "max_reviewed_amount": "100.00",
       "required_payment_status": "captured",
       "required_facts": [
+        "payment_id",
         "payment_status",
         "currency",
         "captured_amount",
         "refunded_amount",
         "pending_refund_amount",
         "approved_refund_amount",
-        "original_payment_method",
         "request_accepted",
         "inspection_or_waiver"
       ],
@@ -155,15 +128,6 @@
             "route": "human"
           }
         },
-        "different_payment_method": {
-          "given": "Refund to the original payment method is not confirmed.",
-          "outcome": {
-            "allowed": false,
-            "requires_human": true,
-            "reason": "Do not redirect the refund to a different payment method.",
-            "route": "human"
-          }
-        },
         "request_not_accepted": {
           "given": "Acceptance of the request is not confirmed.",
           "outcome": {
@@ -192,11 +156,11 @@
           }
         },
         "approved_amount_exceeded": {
-          "given": "The refund exceeds the recorded approved_refund_amount.",
+          "given": "The refund exceeds the remaining approved amount after completed and pending refunds for that return.",
           "outcome": {
             "allowed": false,
             "requires_human": false,
-            "reason": "The requested amount exceeds the recorded approved resolution; correct the amount before processing.",
+            "reason": "The requested amount exceeds the remaining approved resolution; correct the amount before processing.",
             "route": null
           }
         },
@@ -378,11 +342,11 @@
       ],
       "checks": {
         "missing_dates": {
-          "given": "The approval date or actual carrier handover date is missing.",
+          "given": "The return authorization date or actual carrier handover date is missing.",
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "Return approval and actual handover dates are required.",
+            "reason": "Return authorization and actual handover dates are required.",
             "route": "human"
           }
         },
@@ -405,11 +369,11 @@
           }
         },
         "dispatch_before_approval": {
-          "given": "Handover is recorded before return approval.",
+          "given": "Handover is recorded before return authorization.",
           "outcome": {
             "allowed": false,
             "requires_human": true,
-            "reason": "Handover predates return approval; review authorization and dates.",
+            "reason": "Handover predates return authorization; review the dates.",
             "route": "human"
           }
         },
@@ -435,7 +399,7 @@
     },
     "cancel": {
       "rule_id": "cancellation_before_fulfillment",
-      "description": "Check the order is processing and every fulfillment blocker is confirmed absent.",
+      "description": "Check operational order-item and shipment states before cancellation.",
       "allowed_order_status": "processing",
       "blockers": [
         "label_created",
@@ -492,15 +456,6 @@
             "reason": "Ordinary cancellation checks passed; confirmation and the actual update are still required.",
             "route": "auto"
           }
-        },
-        "authority_unverified": {
-          "given": "The customer's authority to cancel this order has not been verified.",
-          "outcome": {
-            "allowed": false,
-            "requires_human": true,
-            "reason": "Customer authority must be verified before cancellation.",
-            "route": "human"
-          }
         }
       }
     },
@@ -514,7 +469,8 @@
         "delivered_but_not_received",
         "returning_to_sender",
         "delivery_failed",
-        "failed_delivery"
+        "failed_delivery",
+        "delivery_attempted"
       ],
       "ordinary_statuses": [
         "processing",

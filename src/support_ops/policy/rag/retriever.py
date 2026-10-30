@@ -45,11 +45,17 @@ class RagSettings:
     rerank_model: str = RERANK_MODEL
 
     def __post_init__(self) -> None:
+        if any(type(value) is not bool for value in (
+            self.dense, self.bm25, self.rerank, self.contextual, self.expand_references,
+        )):
+            raise ValueError("policy.rag flags must be booleans")
         flags = {"dense": self.dense, "bm25": self.bm25, "rerank": self.rerank}
         if flags not in APPROACHES.values():
             raise ValueError("policy.rag must select vector, hybrid, or hybrid_rerank settings")
-        if not 1 <= self.k <= self.n_prime:
+        if any(type(value) is not int for value in (self.k, self.n_prime)) or not 1 <= self.k <= self.n_prime:
             raise ValueError("policy.rag needs 1 <= k <= n_prime")
+        if type(self.rrf_k) is not int or self.rrf_k < 0:
+            raise ValueError("policy.rag.rrf_k must be a non-negative integer")
 
     @classmethod
     def from_config(cls, rag: dict[str, Any]) -> RagSettings:

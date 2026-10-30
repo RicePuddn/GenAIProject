@@ -36,13 +36,15 @@ class BackendFactTests(unittest.TestCase):
         facts = BackendFacts(backend, Clock(NOW)).read("refund", ORDER, ["ITM-1"])
         self.assertEqual((facts["captured_amount"], facts["refunded_amount"], facts["pending_refund_amount"]), (80, 10, 5))
         self.assertEqual(facts["goods_value"], 189)
-        for name in ("inspection_or_waiver", "request_accepted", "approved_refund_amount", "original_payment_method"):
+        for name in ("inspection_or_waiver", "request_accepted", "approved_refund_amount"):
             self.assertNotIn(name, facts)
 
     def test_both_providers_require_human_review_for_unrecorded_prerequisites(self):
         for provider in ("rag", "skills"):
             with self.subTest(provider=provider):
-                tools = self.tools(provider)
+                backend = reader()
+                backend.returns_for_order.return_value = {"returns": [], "refunds": []}
+                tools = self.tools(provider, backend)
                 result = tools.execute("T1", "policy", {
                     "action": "check", "operation": "refund", "order_id": ORDER, "amount": 20,
                 })
@@ -58,17 +60,55 @@ class BackendFactTests(unittest.TestCase):
         result = self.write(tools, item_ids=["OTHER-ITEM"])
         self.assertEqual(result["status"], "awaiting_human")
 
-    def test_processing_and_open_items_do_not_prove_authority_or_packing_status(self):
+    def test_refund_cannot_reuse_an_approval_already_paid_or_pending(self):
+        for status in ("processed", "pending"):
+            for provider in ("rag", "skills"):
+                with self.subTest(status=status, provider=provider):
+                    backend = reader(total=100, refunds=[{
+                        "return_id": "RET-APPROVED", "status": status, "amount": "20.00",
+                    }])
+                    request = backend.returns_for_order.return_value["returns"][0]
+                    request["items"] = [{**request["items"][0], "approved_refund_amount": "20.00"}]
+                    tools = self.tools(provider, backend)
+                    result = self.write(tools)
+                    self.assertEqual(result["status"], "blocked")
+                    self.assertEqual(result["policy_check"]["check"], "refund.approved_amount_exceeded")
+                    self.assertFalse(tools.ticket_state.writes)
+
+    def test_remaining_approval_excludes_failed_and_other_return_refunds(self):
+        backend = reader(total=100, refunds=[
+            {"return_id": "RET-APPROVED", "status": "processed", "amount": "10.00"},
+            {"return_id": "RET-APPROVED", "status": "failed", "amount": "20.00"},
+            {"return_id": "RET-OTHER", "status": "processed", "amount": "5.00"},
+        ])
+        request = backend.returns_for_order.return_value["returns"][0]
+        request["items"] = [{**request["items"][0], "approved_refund_amount": "30.00"}]
+        tools = self.tools(backend=backend)
+        facts = tools.backend_facts.read("refund", ORDER, ["ITM-1"])
+        self.assertEqual(facts["approved_refund_amount"], 20)
+        self.assertEqual(self.write(tools)["status"], "approved_mock_write")
+
+    def test_partial_refund_allocation_stays_unknown_for_a_multi_item_return(self):
+        backend = reader(total=100, refunds=[{
+            "return_id": "RET-APPROVED", "status": "processed", "amount": "20.00",
+        }])
+        tools = self.tools(backend=backend)
+        result = self.write(tools)
+        self.assertEqual(result["status"], "awaiting_human")
+        self.assertFalse(tools.ticket_state.writes)
+
+    def test_open_item_states_and_no_shipments_allow_pre_fulfillment_cancellation(self):
         backend = reader()
         backend.shipments_for_order.return_value = []
         for item in backend.items_for_order.return_value:
             item["item_status"] = "open"
         facts = BackendFacts(backend, Clock(NOW)).read("cancel", ORDER)
-        self.assertEqual(facts, {"order_status": "processing", "any_quantity_fulfilled": False})
+        self.assertEqual(facts, {"order_status": "processing", "any_quantity_fulfilled": False,
+                                 "packing_started": False, "label_created": False, "carrier_collected": False})
         result = self.tools(backend=backend).execute("T1", "policy", {
             "action": "check", "operation": "cancel", "order_id": ORDER,
         })
-        self.assertTrue(result["requires_human"])
+        self.assertTrue(result["allowed"])
 
     def test_fulfillment_events_are_mapped_when_the_records_establish_them(self):
         backend = reader()
@@ -79,15 +119,15 @@ class BackendFactTests(unittest.TestCase):
         facts = BackendFacts(backend, Clock(NOW)).read("cancel", ORDER)
         self.assertTrue(facts["label_created"])
         self.assertTrue(facts["any_quantity_fulfilled"])
-        self.assertNotIn("carrier_collected", facts)
+        self.assertFalse(facts["carrier_collected"])
 
     def test_split_shipments_do_not_supply_an_arbitrary_return_delivery_date(self):
         backend = reader()
         backend.shipments_for_order.return_value.append({"status": "in_transit"})
         facts = BackendFacts(backend, Clock(NOW)).read("return_request", ORDER)
         self.assertNotIn("delivered_at", facts)
-        self.assertNotIn("evidence_status", facts)
-        self.assertNotIn("reason", facts)
+        self.assertEqual(facts["evidence_status"], "verified")
+        self.assertEqual(facts["reason"], "faulty")
 
     def test_delivery_check_considers_every_parcel(self):
         backend = reader()

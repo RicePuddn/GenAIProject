@@ -1,7 +1,8 @@
 # Scripts
 
-`seed_backend.py` creates missing PostgreSQL tables and inserts deterministic
-fictional ecommerce fixtures. Run it from the repository root after configuring
+`seed_backend.py` contains all hardcoded seed rows, grouped by table, and inserts them
+after creating tables from `data/backend_seed/schema.sql`. Existing rows are preserved.
+Run it after configuring
 `.env` and starting the database:
 
 ```bash

@@ -17,9 +17,9 @@ from support_ops.helpers.config import ROOT
 from support_ops.systems.single_agent import SingleAgentWorkflow
 
 REFUND_FACTS = {
-    "payment_status": "captured", "currency": "SGD", "captured_amount": "150.00",
+    "payment_id": "PAY-1", "payment_status": "captured", "currency": "SGD", "captured_amount": "150.00",
     "refunded_amount": "0.00", "pending_refund_amount": "0.00", "approved_refund_amount": "100.00",
-    "original_payment_method": True, "request_accepted": True, "inspection_or_waiver": True,
+    "request_accepted": True, "inspection_or_waiver": True,
 }
 
 
@@ -64,7 +64,7 @@ class RulesTests(unittest.TestCase):
     def test_refund_requires_verified_financial_and_approval_facts(self):
         rules = Rules.load()
         self.assertTrue(rules.check("refund", 50)["requires_human"])
-        for change in ({"payment_status": "failed"}, {"original_payment_method": False},
+        for change in ({"payment_status": "failed"},
                        {"request_accepted": False}, {"inspection_or_waiver": False},
                        {"pending_refund_amount": 110}, {"approved_refund_amount": 40}):
             with self.subTest(change=change):
@@ -103,7 +103,7 @@ class RulesTests(unittest.TestCase):
 
     def test_return_dispatch_requires_handover_and_an_approved_extension(self):
         rules = Rules.load()
-        facts = {"approved_at": "2026-10-01", "handed_over_at": "2026-10-08", "carrier_accepted": True}
+        facts = {"authorized_at": "2026-10-01", "handed_over_at": "2026-10-08", "carrier_accepted": True}
         self.assertTrue(rules.check("return_dispatch", facts=facts)["allowed"])
         late = {**facts, "handed_over_at": "2026-10-09"}
         self.assertTrue(rules.check("return_dispatch", facts=late)["requires_human"])
@@ -114,7 +114,7 @@ class RulesTests(unittest.TestCase):
 
     def test_cancellation_checks_label_packing_fulfillment_and_pickup(self):
         rules = Rules.load()
-        facts = {"order_status": "processing", "authority_verified": True,
+        facts = {"order_status": "processing",
                  **{name: False for name in rules.data["cancel"]["blockers"]}}
         self.assertTrue(rules.check("cancel", facts=facts)["allowed"])
         for name in rules.data["cancel"]["blockers"]:

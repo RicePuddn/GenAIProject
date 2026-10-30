@@ -50,8 +50,8 @@ After changing policies, regenerate embeddings and upload to the existing index:
 .venv/bin/python -m support_ops.policy.rag.pinecone_store
 ```
 
-For evaluation, open `src/support_ops/eval/evaluation.ipynb`, select the `.venv`
-kernel and run all cells. Detailed and summary JSON results go to `results/rag/`.
+`src/support_ops/eval/` is the shared folder for the team's evaluations.
+The RAG notebook is `rag_evaluation.ipynb`; its results go to `results/rag/`.
 
 ## Start the database and application
 
@@ -65,6 +65,8 @@ Seeding creates any missing tables and inserts fictional ecommerce records with
 product names, customers, payments, tracking events, returns, refunds, and support tickets.
 It preserves existing rows. See [database details](data/backend_seed/README.md) for
 sample IDs and how to reset the local fixtures.
+Schema changes require a fresh database; seeding does not alter existing tables.
+The [10 gold cases](data/cases/agents/README.md) reference the seeded evaluation orders.
 
 For subsequent runs, start PostgreSQL and Uvicorn again; reseeding is optional.
 Use `Ctrl+C` to stop the API and `docker compose stop postgres` to stop the database.
@@ -241,14 +243,15 @@ The current tools are `read_record`, the order lookups `get_shipments_for_order`
 and `ticket_state`.
 A dedicated final response node generates the customer reply through the shared LLM wrapper after operational tool work completes.
 
-Policy retrieval follows `list` → `open` a skill's `SKILL.md` → `read` a relevant
-clause. Available skills are `orders-and-shipping` and `returns-and-refunds`.
+RAG searches return ranked clauses and their direct references. Skills retrieval
+uses `open` on a skill's `SKILL.md`, then `read` on a relevant clause file;
+`list` discovers skills. Available skills are `orders-and-shipping` and `returns-and-refunds`.
 Policy checks and the ticket tool share [rules.json](src/support_ops/policy/rules/rules.json):
 refund limits, return deadlines, cancellation conditions and human-review routes.
 Eligible refunds ≤ SGD 30 can proceed automatically; > SGD 30–100 need automated
 review; > SGD 100 need a human. Business checks run first in every design.
 Checks use existing backend records; unavailable facts require human review
-(see [backend facts](data/backend_seed/README.md#policy-check-facts)). PDF fingerprints
+(see [backend data](data/backend_seed/README.md)). PDF fingerprints
 flag policy changes that require a rules review. `policy.mode` in `configs/base.yaml` selects the
 policy provider plugged into the `policy` tool.
 
@@ -296,7 +299,7 @@ src/support_ops/
   gateway/ticket_state.py     request-local approvals, audit and handoff
   systems/tools.py            shared tool schemas, validation and dispatcher
   systems/single_agent.py     LangGraph nodes and strategy routing
-  eval/evaluation.ipynb       retrieval evaluation
+  eval/                       shared evaluation notebooks
   agents/, supervisor/        multi-agent roles and coordination
 results/                      local traces and response cache
 tests/                       helper and workflow regression tests

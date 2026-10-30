@@ -16,7 +16,6 @@ from support_ops.helpers.llm import ScriptedLLM, text, tool_call
 from support_ops.policy.rag import RagPolicy
 from support_ops.policy.skills import SkillsPolicy
 from support_ops.systems.multi_agent import HOLD_REPLY, MultiAgentWorkflow
-from tests.test_routing import verified_rule_inputs
 
 NOW = datetime(2026, 10, 1, 9, tzinfo=timezone.utc)
 ORDER = "ORD-2026-00001"
@@ -40,7 +39,7 @@ def rag_policy():
     return RagPolicy(FakeRetriever())
 
 
-def reader(total=80, delivered_days_ago=5):
+def reader(total=80, delivered_days_ago=5, return_status="approved"):
     mock = Mock(spec=PostgresReader)
     mock.read.side_effect = lambda kind, record_id: (
         {"id": record_id, "total": total, "currency": "SGD", "status": "processing"} if record_id == ORDER else {"not_found": True, "kind": kind, "id": record_id})
@@ -49,6 +48,19 @@ def reader(total=80, delivered_days_ago=5):
     mock.shipments_for_order.return_value = [{"id": "SHP-1", "status": "delivered" if delivered_days_ago is not None else "in_transit", "delivered_at": None if delivered_days_ago is None else NOW - timedelta(days=delivered_days_ago)}]
     mock.items_for_order.return_value = [{"id": "ITM-0031-2", "name": "Terra Insulated Bottle 750 ml",
                                           "quantity": 2, "unit_price": "100.00"}]
+    for item in mock.items_for_order.return_value:
+        item.update(final_sale=False, paid_amount=str(float(item["unit_price"])*item["quantity"]),
+                    product_type="physical", item_status="fulfilled")
+    approved = {"id": "RET-APPROVED", "status": return_status, "reason": "faulty",
+                "requested_at": NOW - timedelta(days=4), "received_at": NOW - timedelta(days=3),
+                "approved_at": NOW - timedelta(days=2), "reviewed_at": NOW - timedelta(days=2),
+                "evidence_status": "verified", "inspection_status": "passed", "dispute_status": "none",
+                "items": [{"order_item_id": item["id"], "quantity": item["quantity"], "unused": True,
+                           "original_packaging": True, "tags_complete": True, "accessories_complete": True,
+                           "approved_refund_amount": min(total, float(item["paid_amount"]))}
+                          for item in mock.items_for_order.return_value]}
+    if delivered_days_ago is not None:
+        mock.returns_for_order.return_value["returns"] = [approved]
     return mock
 
 
@@ -85,9 +97,6 @@ def verdict(decision="approve", *issues):
 
 class Base(unittest.TestCase):
     def setUp(self):
-        verified = verified_rule_inputs()
-        verified.start()
-        self.addCleanup(verified.stop)
         self.cfg = load_config("configs/experiments/multi_agent_rag.yaml")
         # These tests script proposals without a policy search first; citation checks have their own tests.
         self.cfg["multi_agent"]["check_citations"] = False
@@ -169,10 +178,11 @@ class RouteTests(Base):
     def test_reply_writer_gets_customer_terms_not_routing_internals(self):
         self.llm.push("supervisor", triage(), text("Your return of one bottle is recorded.")).push(
             "specialist", tool_call("get_items_for_order", order_id=ORDER),
+            tool_call("get_returns_for_order", order_id=ORDER),
             tool_call("route", action="return", order_id=ORDER, items=[{"item_id": "ITM-0031-2", "quantity": 1}],
                       reason_code="damaged_item", cited_clauses=["RET-1"], route="approver", reason="Dented.")).push(
             "approver", verdict(), verdict())
-        result = self.run_flow("One of my two bottles arrived dented.", total=275.77)
+        result = self.run_flow("One of my two bottles arrived dented.", total=275.77, return_status="requested")
         self.assertEqual((result["ticket_status"], result["execution"]["status"]), ("resolved", "executed"))
         outcome = json.loads(self.llm.calls[-2][1][1]["content"])["outcome"]
         self.assertEqual(outcome["request"]["items"], [{"product": "Terra Insulated Bottle 750 ml", "quantity": 1}])
@@ -517,7 +527,7 @@ class RetryTests(Base):
     def test_a_tool_failing_for_an_infrastructure_reason_is_run_again(self):
         self.llm.push("supervisor", triage(), text("Recorded.")).push(
             "specialist", tool_call("get_returns_for_order", order_id=ORDER), route()).push("approver", verdict())
-        ok = {"returns": [], "refunds": []}
+        ok = reader().returns_for_order.return_value
         result = self.flow_with_failing_lookup(RuntimeError("connection timeout"), ok, ok)
         self.assertEqual(result["ticket_status"], "resolved")
         self.assertEqual(result["evidence"][0]["result"], ok)

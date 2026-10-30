@@ -17,7 +17,7 @@ from support_ops.policy.rag import RagPolicy
 from support_ops.policy.rag.policy import PolicySearchArguments
 from support_ops.policy.routing import RoutingRules
 from support_ops.systems.tools import SupportTools
-from tests.test_routing import REFUND, verified_rule_inputs
+from tests.test_routing import REFUND
 
 NOW = datetime(2026, 10, 1, 9, tzinfo=timezone.utc)
 ORDER = "ORD-2026-00001"
@@ -35,6 +35,19 @@ def reader(total=80, refunds=(), delivered_days_ago=5):
         {"id": "ITM-2", "name": "Bottle", "quantity": 2, "unit_price": "32.00"},
     ]
     mock.payments_for_order.return_value = [{"id": "PAY-1", "amount": total, "status": "captured"}]
+    for item in mock.items_for_order.return_value:
+        item.update(final_sale=False, paid_amount=str(float(item["unit_price"])*item["quantity"]),
+                    product_type="physical", item_status="fulfilled")
+    approved = {"id": "RET-APPROVED", "status": "approved", "reason": "faulty",
+                "requested_at": NOW - timedelta(days=4), "received_at": NOW - timedelta(days=3),
+                "approved_at": NOW - timedelta(days=2), "reviewed_at": NOW - timedelta(days=2),
+                "evidence_status": "verified", "inspection_status": "passed", "dispute_status": "none",
+                "items": [{"order_item_id": item["id"], "quantity": item["quantity"], "unused": True,
+                           "original_packaging": True, "tags_complete": True, "accessories_complete": True,
+                           "approved_refund_amount": min(total, float(item["paid_amount"]))}
+                          for item in mock.items_for_order.return_value]}
+    if delivered_days_ago is not None:
+        mock.returns_for_order.return_value["returns"] = [approved]
     return mock
 
 
@@ -133,11 +146,6 @@ class PolicySearchTests(unittest.TestCase):
 
 
 class RouteToolTests(unittest.TestCase):
-    def setUp(self):
-        verified = verified_rule_inputs()
-        verified.start()
-        self.addCleanup(verified.stop)
-
     def tool(self, **backend):
         return RouteTool(reader(**backend), RoutingRules.load(), Clock(NOW), "returns_refunds")
 
@@ -162,7 +170,10 @@ class RouteToolTests(unittest.TestCase):
             tool.run("T1", draft(amount=20, route="approver"))
         self.assertFalse(tool.check(Proposal(specialist="returns_refunds", **draft(amount=20)))["allowed"])
         with self.assertRaisesRegex(ValueError, "outside the ordinary return window"):
-            self.tool(delivered_days_ago=45).run("T1", draft(action="return", amount=None, items=[{"item_id": "ITM-2"}]))
+            late = self.tool(delivered_days_ago=45)
+            late.reader.returns_for_order.return_value["returns"][0]["status"] = "requested"
+            late.returns_checked.add(ORDER)
+            late.run("T1", draft(action="return", amount=None, items=[{"item_id": "ITM-2"}]))
         with self.assertRaisesRegex(ValueError, "not found"):
             self.tool().run("T1", draft(order_id="ORD-NOPE"))
         # Information only (e.g. asking the customer to confirm the number) is fine without the order.
@@ -172,6 +183,7 @@ class RouteToolTests(unittest.TestCase):
 
     def test_returns_are_priced_from_the_order_lines_not_the_order_total(self):
         tool = self.tool(total=275.77)
+        tool.reader.returns_for_order.return_value["returns"][0]["status"] = "requested"
         def minimum(*items):
             return tool.check(Proposal(specialist="returns_refunds", **draft(
                 action="return", amount=None, items=[{"item_id": i, "quantity": q} for i, q in items])))
@@ -206,6 +218,8 @@ class RouteToolTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "outside the orders_shipping specialist's domain.*none, order_change"):
             orders.run("T1", draft())
         orders.reader.shipments_for_order.return_value = []
+        for item in orders.reader.items_for_order.return_value:
+            item["item_status"] = "open"
         self.assertEqual(orders.run("T1", {"action": "order_change", "order_id": ORDER, "cited_clauses": ["ORD-1"],
                                            "route": "approver", "reason_code": "cancel", "reason": "Cancel."})["route"], "approver")
         with self.assertRaisesRegex(ValueError, "outside the returns_refunds specialist's domain"):

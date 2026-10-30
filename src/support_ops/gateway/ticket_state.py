@@ -63,6 +63,7 @@ class TicketState:
             "approval_token": secrets.token_urlsafe(18), "operation": operation,
             "record_id": record_id, "amount": args.get("amount"), "currency": self.rules.currency,
             "policy_check": decision, "review_reason": args.get("review_reason"),
+            "payment_id": decision.get("payment_id"),
             "issued_at": issued_at.isoformat(),
             "expires_at": (issued_at + timedelta(seconds=self.token_ttl_seconds)).isoformat(),
         }
