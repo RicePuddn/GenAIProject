@@ -4,8 +4,28 @@
 
 # Bump `version` on every change.
 
-version: "2026-10-28"
+version: "2026-10-30"
 currency: SGD
 refund:
   rule_id: mock_refund_limit_100
   max_auto_amount: "100.00"   # refunds above this need a human
+
+# Minimum route per proposal for the multi-agent arm: auto < approver < human.
+# Read by policy/routing.py; Rules.load ignores this section. Refunds above
+# refund.max_auto_amount always go to a human, as in the single-agent arm.
+routing:
+  rule_id: mock_route_tiers_v1
+  refund_auto_max_amount: "30.00"   # at or below: auto; up to refund.max_auto_amount: approver.
+                                    # Returns and exchanges use the same tiers on the order total.
+  return_window_days: 30            # days after delivery
+  overdue_shipment_route: human     # "it's late" with no remedy proposed needs a person; a proposed
+                                    # refund or cancellation keeps its own tiers
+  pending_return_route: human       # a return the customer raised that the store has not processed
+  awaiting_shop_return_statuses: [requested, received]   # return states where the store must act next
+  operations:                       # starting minimum, raised by amount and fact checks
+    none: auto                      # information only, no write
+    refund: auto
+    return: auto
+    exchange: approver
+    order_change: approver
+    account_change: human
