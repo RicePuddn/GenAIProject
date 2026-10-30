@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any, Callable, Protocol
+from uuid import uuid4
 
 import tiktoken
 
@@ -103,19 +104,30 @@ class OpenAICompatLLM:
         cached = self._cache_get(key) if cache_enabled else None
         t0 = time.perf_counter()
         if cached is None:
-            resp = self.client.chat.completions.create(**req)
-            msg = resp.choices[0].message
-            calls = [
-                ToolCall(tc.id, tc.function.name, _parse_args(tc.function.arguments))
-                for tc in (msg.tool_calls or [])
-            ]
-            usage = resp.usage
-            tin = usage.prompt_tokens if usage else count_tokens(json.dumps(messages))
-            tout = usage.completion_tokens if usage else count_tokens(msg.content or "")
-            # gpt-oss on Groq returns its thinking in a provider-specific `reasoning` field.
-            result = ChatResult(msg.content, calls, tin, tout, getattr(msg, "reasoning", None) or None)
-            if cache_enabled:
-                self._cache_put(key, result)
+            try:
+                resp = self.client.chat.completions.create(**req)
+            except Exception as exc:
+                recovered = _recover_tool_calls(exc) if tools else None
+                if recovered is None:
+                    raise
+                # Not cached: the provider rejected it, so the same request may succeed next time.
+                result = ChatResult(None, recovered, count_tokens(json.dumps(messages, default=str)),
+                                    count_tokens(json.dumps([call.arguments for call in recovered], default=str)))
+                if tracer is not None:
+                    tracer.log("tool_call_recovered", role=role, tools=[call.name for call in recovered])
+            else:
+                msg = resp.choices[0].message
+                calls = [
+                    ToolCall(tc.id, tc.function.name, _parse_args(tc.function.arguments))
+                    for tc in (msg.tool_calls or [])
+                ]
+                usage = resp.usage
+                tin = usage.prompt_tokens if usage else count_tokens(json.dumps(messages))
+                tout = usage.completion_tokens if usage else count_tokens(msg.content or "")
+                # gpt-oss on Groq returns its thinking in a provider-specific `reasoning` field.
+                result = ChatResult(msg.content, calls, tin, tout, getattr(msg, "reasoning", None) or None)
+                if cache_enabled:
+                    self._cache_put(key, result)
         else:
             result = cached
         if tracer is not None:
@@ -165,6 +177,30 @@ def _parse_args(raw: str | None) -> dict[str, Any]:
         return val if isinstance(val, dict) else {"_raw": raw}
     except json.JSONDecodeError:
         return {"_raw": raw}  # surfaced to the agent as a tool error, not a crash
+
+
+def _recover_tool_calls(exc: Exception) -> list[ToolCall] | None:
+    """Groq checks tool arguments against the schema and rejects the whole response (400 tool_use_failed)
+    on a mismatch, e.g. an alias such as order_item_id. The error carries the attempted call, so it comes
+    back as an ordinary tool call: the tool's own validation then accepts it or returns an error the agent
+    can fix. None for any other error."""
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict) and isinstance(body.get("error"), dict):
+        body = body["error"]
+    if not isinstance(body, dict) or body.get("code") != "tool_use_failed":
+        return None
+    try:
+        generated = json.loads(body.get("failed_generation") or "")
+    except (TypeError, json.JSONDecodeError):
+        return None
+    calls = []
+    for attempt in generated if isinstance(generated, list) else [generated]:
+        if not isinstance(attempt, dict) or not isinstance(attempt.get("name"), str):
+            return None
+        arguments = attempt.get("arguments", {})
+        calls.append(ToolCall(f"recovered_{uuid4().hex[:12]}", attempt["name"],
+                              arguments if isinstance(arguments, dict) else _parse_args(arguments)))
+    return calls or None
 
 
 Responder = Callable[[list[dict[str, Any]], list[dict] | None], ChatResult]

@@ -1,12 +1,12 @@
 """A specialist's view of the shared tools: a named subset of `SupportTools` plus tools
-only the multi-agent arm has (`route`, and a search-only `policy`). `SupportTools` itself is unchanged."""
+only the multi-agent arm has (`route`, and a `policy` scoped to the specialist, without `check`). `SupportTools` itself is unchanged."""
 from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, Self
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from support_ops.helpers.arguments import NonEmpty, ToolArguments
 from support_ops.systems.tools import SupportTools, validate_arguments
@@ -68,6 +68,45 @@ def policy_search_tool(tools: SupportTools, sections: Sequence[str] | None = Non
     return ExtraTool(PolicySearchArguments, PolicySearchArguments.__doc__, run)
 
 
+class PolicySkillsArguments(ToolArguments):
+    """list: your policy skills; open: read a skill's SKILL.md; read: read one file of that skill. scope own
+    (the default) keeps to your skills; use all when the case crosses into another area."""
+    action: Literal["list", "open", "read"]
+    skill: NonEmpty | None = None
+    file: NonEmpty | None = None
+    scope: Literal["own", "all"] = "own"
+
+    @model_validator(mode="after")
+    def required_for_action(self) -> Self:
+        if self.action in {"open", "read"} and not self.skill:
+            raise ValueError(f"{self.action} requires skill")
+        if self.action == "read" and not self.file:
+            raise ValueError("read requires file")
+        return self
+
+
+def policy_skills_tool(tools: SupportTools, skills: Sequence[str] | None = None) -> ExtraTool:
+    """The skills `policy` tool without `check` (the `route` tool applies the hard rules), limited by default
+    to the specialist's `skills` folders: the skills counterpart of `policy_search_tool`."""
+    def run(ticket_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        everything = args.get("scope", "own") == "all" or not skills
+        if args["action"] == "list":
+            result = tools.policy.run({"action": "list"})
+            if everything:
+                return {**result, "scope": "all"}
+            catalog = [item for item in result["catalog"] if item["skill"] in skills]
+            return {"skills": [item["skill"] for item in catalog], "catalog": catalog, "scope": "own"}
+        if not everything and args["skill"] not in skills:
+            raise ValueError(f"{args['skill']} is outside your policy skills {list(skills)}; "
+                             "use scope all if the case crosses into another area")
+        request = {"action": args["action"], "skill": args["skill"]}
+        if args.get("file"):
+            request["file"] = args["file"]
+        return tools.policy.run(request)
+
+    return ExtraTool(PolicySkillsArguments, PolicySkillsArguments.__doc__, run)
+
+
 def returns_lookup_tool(tools: SupportTools, checked: set[str]) -> ExtraTool:
     """`get_returns_for_order`, recording which orders' returns the specialist has seen, so the
     `route` tool only shows them again for orders it has not looked at."""
@@ -104,6 +143,11 @@ class Toolbox:
     @property
     def names(self) -> list[str]:
         return list(self.argument_models)
+
+    @property
+    def policy_mode(self) -> Literal["rag", "skills"]:
+        """Which policy tool the specialist has, for the one prompt sentence that differs."""
+        return "skills" if self.argument_models.get("policy") is PolicySkillsArguments else "rag"
 
     def validate(self, name: str, arguments: Any) -> dict[str, Any]:
         return validate_arguments(self.argument_models, name, arguments)

@@ -2,8 +2,8 @@
 
     uvicorn support_ops.api_multi:app --reload --host 127.0.0.1 --port 8001
 
-This is S3 (multi-agent with RAG policy). The config comes from SUPPORT_OPS_MULTI_CONFIG
-(default configs/experiments/multi_agent_rag.yaml). Same endpoints and streaming as `api.py`:
+The config comes from SUPPORT_OPS_MULTI_CONFIG: configs/experiments/multi_agent_rag.yaml (S3, the
+default) or configs/experiments/multi_agent_skills.yaml (S4). Same endpoints and streaming as `api.py`:
 streams run on a bounded worker pool, and a client that disconnects cancels its ticket at the
 next workflow step.
 """
@@ -32,9 +32,9 @@ from support_ops.helpers.config import load_config
 from support_ops.helpers.llm import LLM
 from support_ops.helpers.tracing import Tracer
 from support_ops.helpers.workers import WorkflowWorkers
-from support_ops.policy.rag import RagPolicy
 from support_ops.policy.rules import Rules
 from support_ops.systems.multi_agent import MultiAgentWorkflow
+from support_ops.systems.single_agent import policy_from_config
 
 log = logging.getLogger("uvicorn.error")
 DEFAULT_CONFIG = "configs/experiments/multi_agent_rag.yaml"
@@ -95,7 +95,7 @@ def _stream_workers() -> WorkflowWorkers:
 async def lifespan(_: FastAPI):
     cfg = load_config(config_path())
     started = time.perf_counter()
-    RagPolicy.from_config(cfg, Rules.load(cfg["policy"]["rules_file"])).warm_up()
+    policy_from_config(cfg, Rules.load(cfg["policy"]["rules_file"])).warm_up()
     log.info("multi-agent %s, policy mode %r ready in %.1fs", config_path(), cfg["policy"]["mode"],
              time.perf_counter() - started)
     workers = _stream_workers()
@@ -120,7 +120,7 @@ def info() -> dict[str, Any]:
     policy = cfg["policy"]
     return {
         "system": "multi_agent", "config": config_path(), "policy_mode": policy["mode"],
-        "corpus": policy["corpus_size"],
+        "corpus": policy["skills_dir"] if policy["mode"] == "skills" else policy["corpus_size"],
         "default_strategy": cfg.get("agent", {}).get("strategy", "react"),
         "default_orchestration": cfg.get("multi_agent", {}).get("orchestration")
         or cfg.get("agent", {}).get("strategy", "react"),

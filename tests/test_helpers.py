@@ -1,5 +1,6 @@
 """Tests for the shared helpers: clock, config, tracer and the scripted LLM."""
 
+import json
 import os
 from datetime import datetime, timezone
 
@@ -58,3 +59,50 @@ def test_tracer_dump(tmp_path):
     tracer.dump(tmp_path / "t.json")
     assert '"RET-1"' in (tmp_path / "t.json").read_text()
     assert tracer.of_kind("policy_read")[0]["clause_ids"] == ["RET-1"]
+
+
+def _groq_error(code: str, failed_generation: str):
+    """A 400 shaped like Groq's: the openai client puts the inner `error` object in `body`."""
+    import httpx
+    from openai import BadRequestError
+
+    request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+    body = {"message": "Tool call validation failed", "type": "invalid_request_error",
+            "code": code, "failed_generation": failed_generation}
+    return BadRequestError("Error code: 400", response=httpx.Response(400, request=request), body=body)
+
+
+def _llm_raising(error):
+    from unittest.mock import Mock, patch
+
+    from support_ops.helpers.llm import OpenAICompatLLM
+
+    with patch.dict(os.environ, {"GROQ_API_KEY": "test-key"}):
+        llm = OpenAICompatLLM(load_config(overrides={"llm.cache_dir": None}))
+    llm.client = Mock()
+    llm.client.chat.completions.create.side_effect = error
+    return llm
+
+
+def test_a_tool_call_groq_rejects_is_recovered_for_our_own_validation():
+    # The call from a real S4 run: order_item_id is an alias our models accept, but not in the schema.
+    attempt = {"name": "route", "arguments": {"action": "return", "order_id": "ORD-2026-00031",
+                                              "items": [{"order_item_id": "ITM-0031-2", "quantity": 1}]}}
+    llm = _llm_raising(_groq_error("tool_use_failed", json.dumps(attempt)))
+    tracer = Tracer("T1")
+    result = llm.chat("specialist", [{"role": "user", "content": "refund"}], tools=[{"type": "function"}], tracer=tracer)
+    assert [(call.name, call.arguments) for call in result.tool_calls] == [("route", attempt["arguments"])]
+    assert result.tool_calls[0].id.startswith("recovered_")
+    assert tracer.of_kind("tool_call_recovered")[0]["tools"] == ["route"]
+
+
+def test_other_provider_errors_still_raise():
+    from openai import BadRequestError
+
+    for error in (_groq_error("context_length_exceeded", ""), _groq_error("tool_use_failed", "not json")):
+        llm = _llm_raising(error)
+        with pytest.raises(BadRequestError):
+            llm.chat("specialist", [{"role": "user", "content": "hi"}], tools=[{"type": "function"}])
+    llm = _llm_raising(_groq_error("tool_use_failed", '{"name": "route", "arguments": {}}'))
+    with pytest.raises(BadRequestError):   # no tools were offered, so there is nothing to recover
+        llm.chat("supervisor", [{"role": "user", "content": "hi"}])
