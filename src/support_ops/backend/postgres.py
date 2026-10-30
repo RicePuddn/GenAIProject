@@ -38,17 +38,23 @@ class PostgresReader:
         return rows[0] if rows else {"not_found": True, "kind": kind, "id": record_id}
 
     def shipments_for_order(self, order_id: str) -> list[dict[str, Any]]:
-        return self._select(
+        shipments = self._select(
             "SELECT * FROM shipments WHERE lower(order_id) = lower(%s) "
             "ORDER BY shipped_at NULLS LAST, id",
             order_id,
         )
+        items = self._select(
+            "SELECT si.* FROM shipment_items si JOIN shipments s ON s.id = si.shipment_id "
+            "WHERE lower(s.order_id) = lower(%s) ORDER BY si.shipment_id, si.order_item_id", order_id)
+        for shipment in shipments:
+            shipment["items"] = [item for item in items if item["shipment_id"] == shipment["id"]]
+        return shipments
 
     def items_for_order(self, order_id: str) -> list[dict[str, Any]]:
         """Order lines with the product each one is for."""
         return self._select(
             """SELECT i.id, i.product_id, p.sku, p.name, p.category, i.quantity, i.unit_price,
-                      i.item_status
+                      i.item_status, i.final_sale, i.paid_amount, p.product_type
                FROM order_items i JOIN products p ON p.id = i.product_id
                WHERE lower(i.order_id) = lower(%s) ORDER BY i.id""",
             order_id,
@@ -60,14 +66,15 @@ class PostgresReader:
 
     def returns_for_order(self, order_id: str) -> dict[str, list[dict[str, Any]]]:
         """Returns and refunds together, since a refund usually follows a return."""
-        return {
-            "returns": self._select(
-                "SELECT * FROM returns WHERE lower(order_id) = lower(%s) ORDER BY requested_at, id",
-                order_id),
-            "refunds": self._select(
-                "SELECT * FROM refunds WHERE lower(order_id) = lower(%s) ORDER BY requested_at, id",
-                order_id),
-        }
+        returns = self._select(
+            "SELECT * FROM returns WHERE lower(order_id) = lower(%s) ORDER BY requested_at, id", order_id)
+        items = self._select(
+            "SELECT ri.* FROM return_items ri JOIN returns r ON r.id = ri.return_id "
+            "WHERE lower(r.order_id) = lower(%s) ORDER BY ri.return_id, ri.order_item_id", order_id)
+        for request in returns:
+            request["items"] = [item for item in items if item["return_id"] == request["id"]]
+        return {"returns": returns, "refunds": self._select(
+            "SELECT * FROM refunds WHERE lower(order_id) = lower(%s) ORDER BY requested_at, id", order_id)}
 
     def shipment_events_for_order(self, order_id: str) -> list[dict[str, Any]]:
         return self._select(

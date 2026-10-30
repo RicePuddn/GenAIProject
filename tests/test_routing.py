@@ -1,183 +1,130 @@
-"""Minimum-route rules for the multi-agent arm (policy/routing.py)."""
+"""Shared eligibility checks run before the architecture's approval routing."""
+import json
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
+
 
 from support_ops.policy.routing import RoutingRules, at_least, strictest
 
 NOW = datetime(2026, 10, 1, 9, tzinfo=timezone.utc)
-
-RULES_YAML = """
-version: "test"
-currency: SGD
-refund:
-  rule_id: test_limit
-  max_auto_amount: "100.00"
-routing:
-  rule_id: test_routes
-  refund_auto_max_amount: "{auto_max}"
-  return_window_days: {window}
-  operations:
-    none: auto
-    refund: auto
-    return: auto
-    {extra}
-"""
-
-
-def write_rules(directory: str, auto_max="30.00", window="30", extra="") -> Path:
-    path = Path(directory) / "rules.yaml"
-    path.write_text(RULES_YAML.format(auto_max=auto_max, window=window, extra=extra))
-    return path
+DEFAULT_RULES = Path(__file__).resolve().parents[1] / "src/support_ops/policy/rules/rules.json"
+REFUND = {
+    "payment_id": "PAY-1", "payment_status": "captured", "currency": "SGD", "captured_amount": 200,
+    "refunded_amount": 0, "pending_refund_amount": 0, "approved_refund_amount": 200,
+    "request_accepted": True, "inspection_or_waiver": True,
+}
+RETURN = {"delivered_at": NOW - timedelta(days=5), "requested_at": NOW,
+          "reason": "faulty", "evidence_status": "verified"}
 
 
 class RouteOrderTests(unittest.TestCase):
     def test_routes_order_from_auto_to_human(self):
         self.assertTrue(at_least("human", "approver"))
-        self.assertTrue(at_least("approver", "approver"))
         self.assertFalse(at_least("auto", "approver"))
         self.assertEqual(strictest("auto", "human", "approver"), "human")
         with self.assertRaises(ValueError):
-            at_least("whenever", "auto")
+            at_least("unknown", "auto")
 
 
 class MinRouteTests(unittest.TestCase):
     def setUp(self):
         self.rules = RoutingRules.load()
 
-    def route(self, *args, **kwargs):
-        if args and args[0] == "refund":
-            kwargs.setdefault("goods_value", 10_000)   # a refund for items worth more than it, unless a test says otherwise
-        return self.rules.min_route(*args, **kwargs)["route"]
-
-    def test_repository_rules_share_the_single_agent_human_limit(self):
-        self.assertEqual(self.rules.refund_approver_max, 100)
-        self.assertEqual(self.rules.refund_auto_max, 30)
-        self.assertEqual(self.rules.version, "2026-10-30")
-
-    def test_refund_amount_tiers_include_their_upper_bounds(self):
-        for amount, expected in ((30, "auto"), (30.01, "approver"), (100, "approver"), (100.01, "human")):
+    def test_refund_tiers_apply_only_after_verified_eligibility(self):
+        for amount, route, check in ((30, "auto", "auto_approval"),
+                                     (30.01, "approver", "automated_review"),
+                                     (100, "approver", "automated_review"),
+                                     (100.01, "human", "limit_exceeded")):
             with self.subTest(amount=amount):
-                self.assertEqual(self.route("refund", amount), expected)
+                result = self.rules.min_route("refund", amount, business_facts=REFUND)
+                self.assertEqual(result["route"], route)
+                self.assertEqual(result["requires_human"], route == "human")
+                self.assertEqual(result["policy_check"]["check"], f"refund.{check}")
+                expected = self.rules.rules.data["refund"]["checks"][check]["outcome"]
+                for field in ("allowed", "requires_human", "route", "reason"):
+                    self.assertEqual(result["policy_check"][field], expected[field])
+        missing = self.rules.min_route("refund", 5)
+        self.assertFalse(missing["allowed"])
+        self.assertEqual(missing["route"], "human")
 
-    def test_refund_above_what_is_left_of_the_order_is_refused(self):
-        result = self.rules.min_route("refund", 20, order_total=50, refunded_to_date=40)
-        self.assertEqual((result["route"], result["allowed"]), ("human", False))
-        self.assertIn("exceeds the order total", result["reasons"][0])
-        self.assertTrue(self.rules.min_route("refund", 10, order_total=50, refunded_to_date=40)["allowed"])
+    def test_human_conditions_override_a_small_refund(self):
+        for facts in ({"disputed": True}, {"reason": "counterfeit"}, {"evidence_status": "unavailable"},
+                      {"item_type": "digital"}):
+            with self.subTest(facts=facts):
+                result = self.rules.min_route("refund", 5, business_facts={**REFUND, **facts})
+                self.assertEqual((result["allowed"], result["requires_human"], result["route"]),
+                                 (False, True, "human"))
 
-    def test_return_window_counts_whole_days_after_delivery(self):
-        self.assertEqual(self.route("return", delivered_at=NOW - timedelta(days=30), now=NOW), "auto")
-        self.assertEqual(self.route("return", delivered_at=NOW - timedelta(days=31), now=NOW), "human")
-        self.assertEqual(self.route("refund", 10, delivered_at=NOW - timedelta(days=31), now=NOW), "human")
+    def test_an_excessive_amount_is_blocked_instead_of_approved_by_qa(self):
+        result = self.rules.min_route("refund", 20, business_facts={**REFUND, "refunded_amount": 190})
+        self.assertEqual((result["allowed"], result["requires_human"], result["route"]), (False, False, None))
+        result = self.rules.min_route("refund", 20, business_facts=REFUND, goods_value=5)
+        self.assertFalse(result["allowed"])
 
-    def test_returns_and_exchanges_use_the_refund_value_tiers_on_the_order_total(self):
-        delivered = {"delivered_at": NOW - timedelta(days=3), "now": NOW}
-        for operation in ("return", "exchange"):
-            with self.subTest(operation):
-                self.assertEqual(self.route(operation, order_total=189, **delivered), "human")
-                self.assertEqual(self.route(operation, order_total=60, **delivered), "approver")
-        self.assertEqual(self.route("return", order_total=25, **delivered), "auto")
+    def test_return_authorization_does_not_use_the_refund_amount_tiers(self):
+        result = self.rules.min_route("return", business_facts=RETURN)
+        self.assertEqual((result["allowed"], result["route"]), (True, "auto"))
+        late = self.rules.min_route("return", business_facts={**RETURN, "delivered_at": NOW - timedelta(days=31)})
+        self.assertEqual(late["route"], "human")
+        existing = self.rules.min_route("return", business_facts={**RETURN, "existing_return": True})
+        self.assertEqual((existing["allowed"], existing["route"]), (False, None))
 
-    def test_return_without_a_delivery_date_needs_a_human_but_a_refund_does_not(self):
-        self.assertEqual(self.route("return"), "human")
-        self.assertEqual(self.route("refund", 10), "auto")
+    def test_known_final_sale_change_of_mind_is_blocked(self):
+        facts = {**RETURN, "reason": "change_of_mind", "final_sale": True, "unused": True,
+                 "original_packaging": True, "tags_complete": True, "accessories_complete": True}
+        result = self.rules.min_route("return", business_facts=facts)
+        self.assertEqual((result["allowed"], result["requires_human"]), (False, False))
 
-    def test_overdue_shipment_needs_a_human_and_is_flagged(self):
-        result = self.rules.min_route("none", overdue_shipment=True)
-        self.assertEqual((result["route"], result["overdue_shipment"]), ("human", True))
-        self.assertIn("past its estimated delivery date", result["reasons"][0])
-        self.assertFalse(self.rules.min_route("none")["overdue_shipment"])
+    def test_pending_status_alone_does_not_require_a_human(self):
+        result = self.rules.min_route("none", pending_return=True)
+        self.assertEqual((result["route"], result["pending_return"]), ("auto", True))
 
-    def test_a_remedy_for_a_late_shipment_keeps_its_own_tiers(self):
-        refund = self.rules.min_route("refund", 76.30, order_total=76.30, goods_value=76.30, overdue_shipment=True)
-        self.assertEqual((refund["route"], refund["overdue_shipment"]), ("approver", True))
-        self.assertEqual(self.route("refund", 20, overdue_shipment=True), "auto")
-        self.assertEqual(self.route("refund", 209.28, overdue_shipment=True), "human")
-        self.assertEqual(self.route("order_change", overdue_shipment=True), "approver")
+    def test_delays_use_the_policy_calendar_day_threshold(self):
+        for days, route in ((1, "auto"), (3, "auto"), (4, "human")):
+            with self.subTest(days=days):
+                parcel = {"delivery_status": "in_transit", "estimated_delivery": NOW - timedelta(days=days), "as_of": NOW}
+                result = self.rules.min_route("none", delivery_facts=[parcel], overdue_shipment=True)
+                self.assertEqual(result["route"], route)
+        lost = self.rules.min_route("none", delivery_facts=[{"delivery_status": "lost"}])
+        self.assertEqual(lost["route"], "human")
 
-    def test_a_refund_without_items_needs_the_approver(self):
-        result = self.rules.min_route("refund", 10)
-        self.assertEqual(result["route"], "approver")
-        self.assertIn("names no order items", result["reasons"][0])
+    def test_cancellation_uses_recorded_fulfillment(self):
+        facts = {"order_status": "processing", "label_created": False,
+                 "packing_started": False, "any_quantity_fulfilled": False, "carrier_collected": False}
+        self.assertEqual(self.rules.min_route("order_change", change_type="cancel", business_facts=facts)["route"], "auto")
+        self.assertEqual(self.rules.min_route("order_change", change_type="cancel", business_facts={**facts, "packing_started": True})["route"], "human")
+        self.assertEqual(self.rules.min_route("order_change", change_type="address_change")["route"], "human")
 
-    def test_a_refund_above_what_the_items_cost_is_refused(self):
-        # PR #3: $5 socks in a $100 order, customer claims $30.
-        result = self.rules.min_route("refund", 30, order_total=100, goods_value=5)
-        self.assertEqual((result["route"], result["allowed"]), ("human", False))
-        self.assertTrue(self.rules.min_route("refund", 5, order_total=100, goods_value=5)["allowed"])
+    def test_alternative_resolution_requires_a_recorded_agreement(self):
+        self.assertEqual(self.rules.min_route("exchange", business_facts=RETURN)["route"], "human")
+        agreed = self.rules.min_route("exchange", business_facts={**RETURN, "alternative_resolution_agreed": True})
+        self.assertEqual(agreed["route"], "approver")
 
-    def test_a_refund_on_a_shipped_undelivered_parcel_is_checked(self):
-        # PR #3: a $25 order, shipped, not arrived.
-        self.assertEqual(self.route("refund", 25, order_total=25, undelivered_shipment=True), "approver")
-        self.assertEqual(self.route("refund", 25, order_total=25, undelivered_shipment=True,
-                                    overdue_shipment=True), "human")
-        # A cancelled order that never shipped keeps the plain tiers.
-        self.assertEqual(self.route("refund", 25, order_total=25), "auto")
-
-    def test_a_return_the_store_has_not_processed_needs_a_human_for_any_proposal(self):
-        for operation in ("none", "refund", "return"):
-            with self.subTest(operation):
-                result = self.rules.min_route(operation, 10 if operation == "refund" else None, goods_value=10,
-                                              delivered_at=NOW - timedelta(days=3), now=NOW, pending_return=True)
-                self.assertEqual((result["route"], result["pending_return"]), ("human", True))
-                self.assertIn("has not been processed by the store", " ".join(result["reasons"]))
-
-    def test_the_window_is_measured_to_when_the_return_was_requested(self):
-        delivered = NOW - timedelta(days=50)
-        in_time = delivered + timedelta(days=4)   # asked 4 days after delivery; still unprocessed today
-        self.assertEqual(self.route("refund", 10, delivered_at=delivered, now=NOW), "human")   # judged against today
-        self.assertEqual(self.route("refund", 10, delivered_at=delivered, now=NOW, return_requested_at=in_time),
-                         "auto")
-        late = delivered + timedelta(days=31)
-        self.assertEqual(self.route("refund", 10, delivered_at=delivered, now=NOW, return_requested_at=late), "human")
-
-    def test_policy_exception_needs_at_least_the_approver(self):
-        self.assertEqual(self.route("refund", 10, policy_exception=True), "approver")
-        self.assertEqual(self.route("refund", 500, policy_exception=True), "human")
-
-    def test_operation_baselines_and_unknown_operations(self):
-        self.assertEqual(self.route("none"), "auto")
-        self.assertEqual(self.route("order_change"), "approver")
-        self.assertEqual(self.route("account_change"), "human")
-        unknown = self.rules.min_route("teleport")
-        self.assertEqual((unknown["route"], unknown["allowed"]), ("human", False))
-
-    def test_bad_refund_amounts_raise(self):
-        for amount in (None, 0, -1, "abc", float("nan"), float("inf")):
-            with self.subTest(amount=amount), self.assertRaises(ValueError):
-                self.rules.min_route("refund", amount)
-
-    def test_result_records_the_rule_and_version(self):
-        result = self.rules.min_route("refund", 50, goods_value=50)
-        self.assertEqual((result["rule"], result["version"], result["currency"]),
-                         ("mock_route_tiers_v1", "2026-10-30", "SGD"))
-        self.assertEqual(result["reasons"], ["refund above 30.00 SGD"])
+    def test_unsupported_operations_require_human_review(self):
+        self.assertEqual(self.rules.min_route("teleport")["route"], "human")
 
 
 class LoadTests(unittest.TestCase):
-    def test_invalid_routing_sections_are_rejected(self):
-        cases = {
-            "auto max above human limit": {"auto_max": "150"},
-            "zero auto max": {"auto_max": "0"},
-            "bad auto max": {"auto_max": "abc"},
-            "negative window": {"window": "-1"},
-            "unknown operation": {"extra": "teleport: auto"},
-            "unknown route": {"extra": "exchange: whenever"},
-            "unknown overdue route": {"extra": "none: auto\n  overdue_shipment_route: whenever"},
-            "unknown pending return route": {"extra": "none: auto\n  pending_return_route: whenever"},
-        }
+    def test_limits_are_read_once_from_the_shared_business_rules(self):
+        data = json.loads(DEFAULT_RULES.read_text())
+        data["groups"]["refund"].update(max_auto_amount="15", max_reviewed_amount="80")
+        data["groups"]["return_request"]["window_calendar_days"] = 14
+        self.assertNotIn("refund_auto_max_amount", data["routing"])
         with tempfile.TemporaryDirectory() as directory:
-            self.assertEqual(RoutingRules.load(write_rules(directory)).rule_id, "test_routes")
-            for name, overrides in cases.items():
-                with self.subTest(name), self.assertRaises(ValueError):
-                    RoutingRules.load(write_rules(directory, **overrides))
-            path = Path(directory) / "rules.yaml"
-            path.write_text('version: x\ncurrency: SGD\nrefund: {rule_id: r, max_auto_amount: "100"}\n')
-            with self.assertRaises(ValueError):
-                RoutingRules.load(path)
+            path = Path(directory) / "rules.json"
+            path.write_text(json.dumps(data))
+            rules = RoutingRules.load(path)
+        self.assertEqual((rules.refund_auto_max, rules.refund_approver_max, rules.return_window_days), (15, 80, 14))
 
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_unknown_or_missing_operations_are_rejected(self):
+        data = json.loads(DEFAULT_RULES.read_text())
+        for operations in ({"teleport": "auto"}, {**data["routing"]["operations"], "refund": "invalid"}):
+            with self.subTest(operations=operations), tempfile.TemporaryDirectory() as directory:
+                data["routing"]["operations"] = operations
+                path = Path(directory) / "rules.json"
+                path.write_text(json.dumps(data))
+                with self.assertRaises(ValueError):
+                    RoutingRules.load(path)

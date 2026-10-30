@@ -1,253 +1,282 @@
-"""RAG policy retrieval (S1): loading, chunking, each retrieval stage, the tool and the workflow.
-
-Stand-in models keep these tests offline: a bag-of-words embedder and a word-overlap reranker.
-"""
-import importlib.util
+"""Offline RAG checks: saved embeddings, retrieval, evaluation metrics and agent tools."""
 import tempfile
+import json
 import unittest
-from dataclasses import replace
+import nbformat
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
+from pinecone import Document
 from unittest.mock import Mock, patch
 
 from support_ops.backend.postgres import PostgresReader
 from support_ops.gateway.ticket_state import TicketState
 from support_ops.helpers.clock import Clock
-from support_ops.helpers.config import ROOT, load_config
+from support_ops.helpers.config import load_config
 from support_ops.helpers.llm import ScriptedLLM, text, tool_call
 from support_ops.policy.rag import RagPolicy
-from support_ops.policy.rag.loader import PDF_CLAUSE, load_corpus, split_clauses, split_windows
-from support_ops.policy.rag.retriever import BM25, PolicyRetriever, RagSettings, reciprocal_rank_fusion
+from support_ops.policy.rag.embeddings import prepare_embeddings, read_embeddings
+from support_ops.policy.rag.loader import Clause
+from support_ops.policy.rag.models import DIMENSION, EMBEDDING_MODEL
+from support_ops.policy.rag.pinecone_store import upload_embeddings, verify_upload
+from support_ops.policy.rag.retriever import PineconeRetriever, RagSettings, reciprocal_rank_fusion, retrieve
 from support_ops.systems.single_agent import SingleAgentWorkflow
 from support_ops.systems.tools import SupportTools
 
-MINI = ROOT / "policy/corpus/mini"
-ALL_STAGES = RagSettings()
 
-
-class WordEmbedder:
-    """Counts of a fixed vocabulary: similar wording gives similar vectors."""
-    VOCAB = ["return", "returns", "refund", "refunds", "days", "delivery", "unused", "final", "sale",
-             "tracking", "shipment", "delayed", "order", "change", "cancel", "payment", "approval"]
-
-    def __init__(self):
-        self.calls = 0
-
-    def encode(self, texts):
-        self.calls += 1
-        return [[t.lower().split().count(word) + t.lower().count(word) * 0.01 for word in self.VOCAB]
-                for t in texts]
-
-
-class OverlapReranker:
-    """Scores a passage by how many distinct query words it contains."""
-
-    def __init__(self, boost: str | None = None):
-        self.boost, self.calls = boost, 0
-
-    def score(self, query, passages):
-        self.calls += 1
-        words = set(query.lower().split())
-        return [len(words & set(p.lower().split())) + (100 if self.boost and self.boost in p else 0)
-                for p in passages]
-
-
-def retriever(settings=ALL_STAGES, embedder=None, reranker=None):
-    return PolicyRetriever(load_corpus(MINI, settings.chunking), settings,
-                           embedder or WordEmbedder(), reranker or OverlapReranker())
-
-
-class LoadingTests(unittest.TestCase):
-    def test_mini_corpus_has_clause_ids_sections_and_exception_links(self):
-        clauses = {clause.id: clause for clause in load_corpus(MINI)}
-        self.assertEqual(set(clauses), {"RET-1", "RET-1-EX-1", "REF-1", "SHP-1", "ORD-1"})
-        self.assertEqual(clauses["RET-1-EX-1"].exception_of, ("RET-1",))
-        self.assertEqual(clauses["RET-1"].section, "Returns and refunds")
-        self.assertEqual(clauses["RET-1"].source, "returns-and-refunds.md")
-        self.assertNotIn("Exception to", clauses["RET-1-EX-1"].text)
-        self.assertTrue(clauses["RET-1"].text.startswith("Customers may request a return within 30 days"))
-
-    def test_pdf_text_without_headings_splits_on_clause_id_lines(self):
-        extracted = ("Returns policy\nRET-1 Return window\nReturns within 30 days.\n"
-                     "RET-1-EX-1 Final-sale items\nException to: RET-1\nFinal-sale items cannot be returned.\n")
-        clauses = split_clauses(extracted, "returns", "returns.pdf", PDF_CLAUSE)
-        self.assertEqual([(c.id, c.title) for c in clauses],
-                         [("RET-1", "Return window"), ("RET-1-EX-1", "Final-sale items")])
-        self.assertEqual(clauses[1].exception_of, ("RET-1",))
-        self.assertEqual(clauses[0].text, "Returns within 30 days.")
-
-    def test_window_chunking_overlaps_and_covers_every_word(self):
-        words = " ".join(f"w{i}" for i in range(25))
-        chunks = split_windows(words, "s", "doc.md", size=10, overlap=3)
-        self.assertEqual([c.id for c in chunks], ["doc#w1", "doc#w2", "doc#w3", "doc#w4"])
-        self.assertEqual(chunks[1].text.split()[0], "w7")
-        self.assertEqual(chunks[-1].text.split()[-1], "w24")
-        self.assertEqual(len(load_corpus(MINI, chunking="window")), 2)
-
-    def test_bad_corpora_fail_loudly(self):
-        cases = {
-            "no ids": "# Title\nJust prose.\n",
-            "duplicate": "## RET-1 A\nx\n## RET-1 B\ny\n",
-            "dangling": "## RET-1 A\nx\n## RET-2 B\nException to: RET-9\ny\n",
-        }
-        for name, content in cases.items():
-            with self.subTest(name), tempfile.TemporaryDirectory() as directory:
-                Path(directory, "policy.md").write_text(content)
-                with self.assertRaises(ValueError):
-                    load_corpus(Path(directory))
-
-    def test_invalid_settings_are_rejected(self):
-        for settings in ({"dense": False, "bm25": False}, {"k": 30}, {"chunking": "pages"}, {"typo": 1}):
-            with self.subTest(settings), self.assertRaises(ValueError):
-                RagSettings.from_config(settings)
-
-
-class RetrievalStageTests(unittest.TestCase):
-    def test_bm25_ranks_the_clause_with_the_exact_term_first(self):
-        clauses = load_corpus(MINI)
-        scores = BM25([c.indexed_text(False) for c in clauses]).scores("final-sale")
-        self.assertEqual(clauses[scores.index(max(scores))].id, "RET-1-EX-1")
-        scores = BM25([c.indexed_text(False) for c in clauses]).scores("ORD-1")
-        self.assertEqual(clauses[scores.index(max(scores))].id, "ORD-1")
-
+class RetrievalEntryTests(unittest.TestCase):
     def test_rank_fusion_rewards_agreement_between_lists(self):
-        fused = reciprocal_rank_fusion([[0, 1, 2], [1, 2, 0]], k=60)
-        self.assertEqual(max(fused, key=fused.get), 1)
-        self.assertAlmostEqual(fused[1], 1 / 62 + 1 / 61)
+        scores = reciprocal_rank_fusion([["a", "b", "c"], ["b", "c", "a"]], k=60)
+        self.assertEqual(max(scores, key=scores.get), "b")
+        self.assertAlmostEqual(scores["b"], 1 / 62 + 1 / 61)
 
-    def test_each_stage_can_be_switched_off(self):
-        embedder, reranker = WordEmbedder(), OverlapReranker()
-        keyword_only = replace(ALL_STAGES, dense=False, rerank=False)
-        hits = retriever(keyword_only, embedder, reranker).search("final-sale")
-        self.assertEqual(hits[0]["id"], "RET-1-EX-1")
-        self.assertEqual((embedder.calls, reranker.calls), (0, 0))
+    def test_public_entry_point_uses_the_organisation_configuration(self):
+        with patch("support_ops.policy.rag.retriever.shared_retriever") as build:
+            build.return_value.search.return_value = [{"id": "RET-SupportingEvidence-3.2"}]
+            result = retrieve("Evidence is unsafe")
+            settings = build.call_args.args[0]
+            self.assertEqual(settings, RagSettings.from_config(load_config()["policy"]["rag"]))
+            build.return_value.search.assert_called_once_with("Evidence is unsafe")
+            self.assertEqual(result[0]["id"], "RET-SupportingEvidence-3.2")
 
-        hits = retriever(replace(ALL_STAGES, bm25=False, rerank=False), embedder).search("tracking delayed shipment")
-        self.assertEqual(hits[0]["id"], "SHP-1")
-        self.assertEqual(embedder.calls, 2)   # once for the corpus, once for the query
-
-    def test_keyword_search_returns_nothing_when_no_term_matches(self):
-        settings = replace(ALL_STAGES, dense=False, rerank=False)
-        self.assertEqual(retriever(settings).search("zzzz qqqq"), [])
-
-    def test_reranker_reorders_the_candidates_and_its_score_is_reported(self):
-        settings = replace(ALL_STAGES, expand_exceptions=False)
-        hits = retriever(settings, reranker=OverlapReranker(boost="Order changes")).search("refund approval")
-        self.assertEqual(hits[0]["id"], "ORD-1")
-        self.assertGreaterEqual(hits[0]["score"], 100)
-
-    def test_corpus_is_embedded_once_across_searches(self):
-        embedder = WordEmbedder()
-        search = retriever(embedder=embedder)
-        search.search("refund")
-        search.search("tracking")
-        self.assertEqual(embedder.calls, 3)
-
-    def test_warm_up_loads_models_and_embeds_the_corpus_before_the_first_search(self):
-        embedder, reranker = WordEmbedder(), OverlapReranker()
-        search = retriever(embedder=embedder, reranker=reranker)
-        search.warm_up()
-        self.assertIsNotNone(search._vectors)
-        self.assertEqual((embedder.calls, reranker.calls), (2, 1))
-        search.search("refund")
-        self.assertEqual((embedder.calls, reranker.calls), (3, 2))   # only the query is embedded
-
-        keyword_only = retriever(replace(ALL_STAGES, dense=False, rerank=False))
-        with patch("support_ops.policy.rag.retriever.load_embedder") as load:
-            keyword_only.warm_up()
-        load.assert_not_called()
-
-    def test_returned_clauses_bring_their_exceptions_once(self):
-        settings = replace(ALL_STAGES, k=1)
-        hits = retriever(settings).search("return within 30 days of delivery unused")
-        self.assertEqual([(h["id"], h["via"]) for h in hits],
-                         [("RET-1", "search"), ("RET-1-EX-1", "exception_of:RET-1")])
-        self.assertIsNone(hits[1]["score"])
-
-        hits = retriever(replace(ALL_STAGES, k=5)).search("return final sale")
-        self.assertEqual(sorted(h["id"] for h in hits), ["ORD-1", "REF-1", "RET-1", "RET-1-EX-1", "SHP-1"])
-        self.assertNotIn("exception_of:RET-1", [h["via"] for h in hits])
-
-        hits = retriever(replace(ALL_STAGES, k=1, expand_exceptions=False)).search("return within 30 days")
-        self.assertEqual([h["id"] for h in hits], ["RET-1"])
-
-    def test_contextual_chunks_prepend_the_section(self):
-        clause = load_corpus(MINI)[0]
-        self.assertTrue(clause.indexed_text(True).startswith(f"{clause.section}\n{clause.id} {clause.title}"))
-        self.assertTrue(clause.indexed_text(False).startswith(f"{clause.id} {clause.title}"))
+    def test_invalid_settings_fail(self):
+        for values in ({"dense": False, "bm25": False}, {"k": 30}, {"typo": 1},
+                       {"k": 1.5}, {"k": True}, {"rrf_k": -1}, {"rrf_k": 1.5}, {"dense": 1}):
+            with self.subTest(values=values), self.assertRaises(ValueError):
+                RagSettings.from_config(values)
 
 
 class RagToolTests(unittest.TestCase):
     def setUp(self):
+        self.engine = Mock()
+        self.engine.sections.return_value = ["Orders and Shipping Policy", "Returns and Refunds Policy"]
+        self.engine.search.return_value = [{"id": "RET-ReturnEligibility-2.5", "text": "Faulty final-sale goods may qualify."}]
+        self.policy = RagPolicy(self.engine)
         self.clock = Clock(datetime(2026, 10, 1, tzinfo=timezone.utc))
-        self.policy = RagPolicy(retriever())
 
-    def test_tool_contract_requires_query_for_search_and_amount_for_refund_check(self):
+    def test_tool_validates_arguments_and_uses_the_shared_search(self):
         tools = SupportTools(Mock(spec=PostgresReader), self.policy, TicketState(self.clock))
         for args in ({"action": "search"}, {"action": "list"}, {"action": "check", "operation": "refund"},
-                     {"action": "search", "query": ""}, {"action": "search", "query": "x", "skill": "y"}):
-            with self.subTest(args), self.assertRaises(ValueError):
+                     {"action": "search", "query": ""}):
+            with self.subTest(args=args), self.assertRaises(ValueError):
                 tools.validate("policy", args)
-        self.assertEqual(tools.validate("policy", {"action": "search", "query": "refund"}),
-                         {"action": "search", "query": "refund"})
+        result = self.policy.run({"action": "search", "query": "damaged final-sale item"})
+        self.engine.search.assert_called_once_with("damaged final-sale item")
+        self.assertEqual(result["clauses"], self.engine.search.return_value)
+        self.assertTrue(self.policy.run({"action": "check", "operation": "refund", "amount": 150})["requires_human"])
 
-    def test_search_and_shared_rule_check(self):
-        result = self.policy.run({"action": "search", "query": "refund approval limit"})
-        self.assertEqual(result["query"], "refund approval limit")
-        self.assertIn("REF-1", [clause["id"] for clause in result["clauses"]])
-        self.assertEqual(self.policy.run({"action": "check", "operation": "refund", "amount": 150})["requires_human"], True)
-
-    def test_planner_sees_section_names_only(self):
+    def test_planner_sees_policy_titles_only(self):
         context = self.policy.planner_context()
-        self.assertIn('"Orders and shipping"', context)
-        self.assertNotIn("30 days", context)
+        self.assertIn("Orders and Shipping Policy", context)
+        self.assertNotIn("Faulty final-sale", context)
 
+    def test_workflow_builds_with_the_shared_retriever(self):
+        cfg = load_config()
+        with patch("support_ops.policy.rag.policy.shared_retriever", return_value=self.engine) as build:
+            workflow = SingleAgentWorkflow(ScriptedLLM(), cfg, reader=Mock(spec=PostgresReader))
+        self.assertIs(workflow.tools.policy.retriever, self.engine)
+        build.assert_called_once()
 
-class RagWorkflowTests(unittest.TestCase):
-    def setUp(self):
-        self.cfg = load_config()
-        self.cfg["policy"]["mode"] = "rag"
-        self.reader = Mock(spec=PostgresReader)
-
-    def test_rag_mode_builds_without_loading_models(self):
-        with patch("support_ops.policy.rag.retriever.load_embedder") as embedder, \
-             patch("support_ops.policy.rag.retriever.load_reranker") as reranker:
-            workflow = SingleAgentWorkflow(ScriptedLLM(), self.cfg, reader=self.reader)
-        self.assertIsInstance(workflow.tools.policy, RagPolicy)
-        embedder.assert_not_called()
-        reranker.assert_not_called()
-
-    def test_api_warms_up_the_configured_policy_once_at_startup(self):
-        from fastapi.testclient import TestClient
-        from support_ops.api import app
-
-        with patch("support_ops.api.policy_from_config") as build, TestClient(app):
-            build.return_value.warm_up.assert_called_once()
-        build.return_value.warm_up.assert_called_once()
-
-    def test_react_agent_searches_the_policy_and_answers(self):
+    def test_react_workflow_returns_the_policy_evidence(self):
         llm = ScriptedLLM().push("guard", text("0.01")).push(
-            "supervisor", tool_call("policy", action="search", query="final sale return"),
-            text("ready"), text("Final-sale items cannot be returned (RET-1-EX-1)."),
+            "supervisor", tool_call("policy", action="search", query="damaged final-sale item"),
+            text("ready"), text("Faulty final-sale goods may qualify (section 2.5)."),
         )
-        workflow = SingleAgentWorkflow(llm, self.cfg, reader=self.reader, policy=RagPolicy(retriever()))
-        result = workflow.invoke("T1", "Can I return a final-sale item?", "react")
-        ids = [clause["id"] for clause in result["evidence"][0]["result"]["clauses"]]
-        self.assertIn("RET-1-EX-1", ids)
-        self.assertIn("RET-1", ids)
-        system = llm.calls[1][1][0]["content"]
-        self.assertIn("Search the policy for the relevant clauses", system)
-        self.assertNotIn("SKILL.md", system)
-        self.assertIn("RET-1-EX-1", str(result["trace"].tool_calls[0]["execution"]["output"]))
+        workflow = SingleAgentWorkflow(llm, load_config(), reader=Mock(spec=PostgresReader), policy=self.policy)
+        result = workflow.invoke("T1", "My final-sale item is faulty", "react")
+        self.assertEqual(result["evidence"][0]["result"]["clauses"], self.engine.search.return_value)
+        self.assertIn("Search the policy for the relevant clauses", llm.calls[1][1][0]["content"])
 
 
-@unittest.skipUnless(importlib.util.find_spec("sentence_transformers"), "rag extra not installed")
-class RealModelTests(unittest.TestCase):
-    def test_real_models_find_the_exception_for_a_paraphrased_question(self):
-        hits = PolicyRetriever(load_corpus(MINI), ALL_STAGES).search(
-            "can I send back something I bought on clearance")
-        self.assertIn("RET-1-EX-1", [hit["id"] for hit in hits])
+class SavedEmbeddingTests(unittest.TestCase):
+    def test_cache_reuses_vectors_and_invalidates_changed_policy_text(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            clause = Clause(id="returns-policy-1", title="Returns", section="Returns Policy",
+                            source="returns-policy.pdf", section_id="1", text="Returns are accepted.")
+            embedder = Mock(encode=Mock(return_value=[[1.0] + [0.0] * (DIMENSION - 1)]))
+            with patch("support_ops.policy.rag.embeddings.ROOT", root), patch(
+                "support_ops.policy.rag.embeddings.load_corpus", return_value=[clause]
+            ) as load:
+                first = prepare_embeddings(root / "pdf", root / "embeddings", embedder)
+                self.assertEqual(first, prepare_embeddings(root / "pdf", root / "embeddings", embedder))
+                self.assertEqual(embedder.encode.call_count, 1)
+                manifest, documents = read_embeddings(root / "embeddings")
+                self.assertEqual(manifest["embedding_model"], EMBEDDING_MODEL)
+                self.assertEqual(len(documents[0]["embedding"]), DIMENSION)
+                self.assertNotIn("text", documents[0])
+                self.assertTrue(embedder.encode.call_args.args[0][0].startswith("search_document: Returns Policy"))
+                load.return_value = [Clause(**{**clause.__dict__, "text": "Returns require review."})]
+                changed = prepare_embeddings(root / "pdf", root / "embeddings", embedder)
+                self.assertNotEqual(first["corpus_hash"], changed["corpus_hash"])
+                self.assertEqual(embedder.encode.call_count, 2)
+                (root / "embeddings/policies.jsonl").write_text("tampered")
+                with self.assertRaisesRegex(ValueError, "manifest"):
+                    read_embeddings(root / "embeddings")
+                self.assertEqual(changed, prepare_embeddings(root / "pdf", root / "embeddings", embedder))
+                self.assertEqual(embedder.encode.call_count, 3)
+
+                manifest_path = root / "embeddings/manifest.json"
+                wrong_recipe = {**changed, "document_prefix": "wrong_prefix: "}
+                manifest_path.write_text(json.dumps(wrong_recipe))
+                with self.assertRaisesRegex(ValueError, "recipe"):
+                    read_embeddings(root / "embeddings")
+                self.assertEqual(changed, prepare_embeddings(root / "pdf", root / "embeddings", embedder))
+                self.assertEqual(embedder.encode.call_count, 4)
+
+    def test_invalid_dimensions_do_not_produce_uploadable_records(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            clause = Clause(id="policy-1", title="Returns", section="Policy", source="policy.pdf", text="Return goods.")
+            with patch("support_ops.policy.rag.embeddings.ROOT", root), patch(
+                "support_ops.policy.rag.embeddings.load_corpus", return_value=[clause]
+            ), self.assertRaisesRegex(ValueError, "768"):
+                prepare_embeddings(root / "pdf", root / "embeddings", Mock(encode=Mock(return_value=[[1.0]])))
+            self.assertFalse((root / "embeddings/manifest.json").exists())
 
 
-if __name__ == "__main__":
-    unittest.main()
+def document(key, score=1.0, references=None):
+    return Document({"_id": key, "_score": score, "section_title": key, "search_text": f"Policy {key}.",
+                     "references": references or []})
+
+
+class PineconeRetrievalTests(unittest.TestCase):
+    def build(self, **options):
+        docs = Mock()
+        dense = [document("a", .9, ["c"]), document("b", .8, ["c"])]
+        keyword = [document("b", 20, ["c"]), document("a", 10, ["c"])]
+        docs.search.side_effect = lambda **kwargs: SimpleNamespace(matches=(
+            dense if kwargs["score_by"][0]["type"] == "dense_vector" else keyword))
+        docs.fetch.return_value = SimpleNamespace(documents={"c": document("c")})
+        settings = RagSettings(k=1, n_prime=2, **options)
+        with patch("support_ops.policy.rag.embeddings.read_embeddings", return_value=({"embedding_model": EMBEDDING_MODEL}, [])), patch(
+            "support_ops.policy.rag.pinecone_store.verify_upload"
+        ):
+            search = PineconeRetriever(settings, index=SimpleNamespace(documents=docs))
+        search._embedder = Mock(encode=Mock(return_value=[[1.0] * DIMENSION]))
+        search._reranker = Mock(score=Mock(return_value=[0.0, 10.0]))
+        return search, docs
+
+    def test_dense_mode_uses_cosine_field_and_one_reference_fetch(self):
+        search, docs = self.build(bm25=False, rerank=False)
+        hits = search.search("return")
+        self.assertEqual([hit["id"] for hit in hits], ["a", "c"])
+        self.assertEqual(docs.search.call_count, 1)
+        self.assertEqual(docs.search.call_args.kwargs["score_by"][0]["type"], "dense_vector")
+        self.assertNotIn("filter", docs.search.call_args.kwargs)
+        self.assertEqual(hits[0]["text"], "Policy a.")
+        self.assertEqual(docs.fetch.call_args.kwargs["ids"], ["c"])
+        search._embedder.encode.assert_called_once_with(["search_query: return"])
+        search._reranker.score.assert_not_called()
+
+    def test_hybrid_combines_both_searches_without_using_the_reranker(self):
+        search, docs = self.build(rerank=False)
+        hits = search.search("return")
+        self.assertEqual([hit["id"] for hit in hits], ["a", "c"])
+        self.assertEqual({call.kwargs["score_by"][0]["type"] for call in docs.search.call_args_list},
+                         {"dense_vector", "text"})
+        search._reranker.score.assert_not_called()
+
+    def test_hybrid_runs_both_remote_searches_and_reranking_can_change_the_order(self):
+        search, docs = self.build()
+        hits = search.search("return")
+        self.assertEqual([hit["id"] for hit in hits], ["b", "c"])
+        self.assertEqual({call.kwargs["score_by"][0]["type"] for call in docs.search.call_args_list},
+                         {"dense_vector", "text"})
+        search._reranker.score.assert_called_once()
+        docs.fetch.assert_called_once()
+
+    def test_missing_references_fail_instead_of_silently_omitting_evidence(self):
+        search, docs = self.build(bm25=False, rerank=False)
+        docs.fetch.return_value = SimpleNamespace(documents={})
+        with self.assertRaises(ValueError):
+            search.search("return")
+
+    def test_query_recipe_mismatch_is_rejected(self):
+        with patch("support_ops.policy.rag.embeddings.read_embeddings", return_value=({"embedding_model": EMBEDDING_MODEL}, [])):
+            with self.assertRaisesRegex(ValueError, "recipe"):
+                PineconeRetriever(RagSettings(embedding_model="different"), index=Mock())
+
+    def test_startup_warm_up_loads_and_exercises_models_without_searching(self):
+        search, docs = self.build()
+        with patch("support_ops.policy.rag.retriever.load_embedder") as embed, patch(
+            "support_ops.policy.rag.retriever.load_reranker"
+        ) as rerank:
+            search.warm_up()
+            embed.return_value.encode.assert_called_once_with(["search_query: warm-up"])
+            rerank.return_value.score.assert_called_once()
+        docs.search.assert_not_called()
+
+    def test_reference_expansion_does_not_inflate_top_k_metrics(self):
+        notebook = nbformat.read(Path(__file__).resolve().parents[1] / "src/support_ops/eval/rag_evaluation.ipynb", as_version=4)
+        cell = next(cell for cell in notebook.cells if "metrics" in cell.metadata.get("tags", []))
+        namespace = {}
+        exec(cell.source, namespace)
+        score = namespace["retrieval_metrics"]
+        self.assertEqual(score(["c"], ["a"], 1)["recall_at_k"], 0)
+        self.assertEqual(score(["c"], ["a", "c"], 1)["recall_at_k"], 0)
+        self.assertEqual(score(["c"], ["a", "c"], 2)["mrr_at_k"], 0.5)
+
+    def test_reference_checks_accept_existing_search_hits_and_report_missing_links(self):
+        notebook = nbformat.read(Path(__file__).resolve().parents[1] / "src/support_ops/eval/rag_evaluation.ipynb", as_version=4)
+        cell = next(cell for cell in notebook.cells if "reference_checks" in cell.metadata.get("tags", []))
+        namespace = {}
+        exec(cell.source, namespace)
+        check = namespace["check_references"]
+        for via in ("search", "reference"):
+            with self.subTest(via=via):
+                self.assertTrue(check(["c"], [{"id": "c", "via": via}])["references_returned"])
+        missing = check(["c"], [{"id": "a", "via": "search"}])
+        self.assertFalse(missing["references_returned"])
+        self.assertEqual(missing["missing_reference_chunk_ids"], ["c"])
+        self.assertIsNone(check([], [])["references_returned"])
+
+
+class UploadVerificationTests(unittest.TestCase):
+    def test_upload_retires_old_ids_and_verifies_the_renamed_records(self):
+        document = {"_id": "ODR-OrderChangeCancel-4.1", "source": "orders-and-shipping-policy.pdf",
+                    "search_text": "Order changes.", "references": [], "embedding": [1.0] * DIMENSION}
+        old_id = "orders-and-shipping-policy-4.1"
+        live_ids = {old_id, document["_id"]}
+        docs = Mock()
+        docs.batch_upsert.return_value = SimpleNamespace(errors=[])
+        docs.list.side_effect = lambda **args: [SimpleNamespace(id=key) for key in live_ids
+                                              if key.startswith(args["prefix"])]
+        docs.delete.side_effect = lambda **args: live_ids.difference_update(args["ids"])
+        docs.fetch.return_value = SimpleNamespace(documents={document["_id"]: document})
+        manifest = {"corpus_hash": "renamed", "data_sha256": "vectors", "count": 1, "dimension": DIMENSION}
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "support_ops.policy.rag.pinecone_store.read_embeddings", return_value=(manifest, [document])
+        ), patch("support_ops.policy.rag.pinecone_store.pinecone_client") as client:
+            client.return_value.index.return_value = SimpleNamespace(documents=docs)
+            receipt = upload_embeddings(Path(directory))
+        self.assertEqual(receipt["count"], 1)
+        self.assertEqual(live_ids, {document["_id"]})
+        docs.delete.assert_called_once_with(namespace="policies", ids=[old_id])
+
+    def test_manifest_receipt_and_live_records_must_all_agree(self):
+        document = {"_id": "policy-1", "source": "policy.pdf", "search_text": "Original policy.",
+                    "references": [], "embedding": [0.5, 0.5]}
+        manifest = {"corpus_hash": "corpus-a", "data_sha256": "vectors-a", "count": 1, "dimension": 2}
+        receipt = {**manifest, "index": "support-policies", "namespace": "policies"}
+        docs = Mock()
+        actual = dict(document)
+        docs.fetch.return_value = SimpleNamespace(documents={"policy-1": actual})
+        docs.list.return_value = [SimpleNamespace(id="policy-1")]
+        index = SimpleNamespace(documents=docs)
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            path = folder / "pinecone_upload.json"
+            path.write_text(json.dumps(receipt))
+            verify_upload(index, "policies", manifest, [document], folder)
+            path.write_text(json.dumps({**receipt, "corpus_hash": "old-corpus"}))
+            with self.assertRaisesRegex(ValueError, "manifest"):
+                verify_upload(index, "policies", manifest, [document], folder)
+            path.write_text(json.dumps(receipt))
+            actual["search_text"] = "Stale remote policy."
+            with self.assertRaisesRegex(ValueError, "Pinecone records"):
+                verify_upload(index, "policies", manifest, [document], folder)
+            actual["search_text"] = document["search_text"]
+            actual["embedding"] = [0.1, 0.9]
+            with self.assertRaisesRegex(ValueError, "Pinecone records"):
+                verify_upload(index, "policies", manifest, [document], folder)

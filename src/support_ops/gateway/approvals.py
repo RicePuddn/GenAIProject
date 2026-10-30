@@ -85,6 +85,7 @@ class TicketFlow:
         self.tokens[token] = {
             "ticket_id": ticket_id, "operation": proposal.action, "order_id": proposal.order_id,
             "amount": proposal.amount, "route": proposal.route, "issued_at": issued,
+            "payment_id": minimum.get("policy_check", {}).get("payment_id"),
             "expires_at": issued + timedelta(seconds=self.token_ttl_seconds), "used": False,
         }
         # The token itself is never written to the audit log, only what it is bound to.

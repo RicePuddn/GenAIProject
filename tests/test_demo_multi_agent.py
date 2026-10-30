@@ -28,9 +28,16 @@ CLAUSE = {"id": "REF-1", "title": "Refund method and approval", "section": "Retu
 
 def reader():
     mock = Mock(spec=PostgresReader)
-    mock.read.return_value = {"id": ORDER, "total": 275.77}
-    mock.returns_for_order.return_value = {"returns": [], "refunds": []}
-    mock.items_for_order.return_value = [{"id": "ITM-2", "quantity": 2, "unit_price": "32.00"}]
+    mock.read.return_value = {"id": ORDER, "total": 275.77, "currency": "SGD", "status": "delivered"}
+    now = datetime.now(timezone.utc)
+    mock.returns_for_order.return_value = {"returns": [{
+        "id": "RET-DEMO", "status": "approved", "reason": "damaged", "dispute_status": "none",
+        "requested_at": now - timedelta(days=2), "approved_at": now - timedelta(days=1),
+        "reviewed_at": now - timedelta(days=1), "inspection_status": "passed", "evidence_status": "verified",
+        "items": [{"order_item_id": "ITM-2", "quantity": 1, "approved_refund_amount": "32.00"}],
+    }], "refunds": []}
+    mock.payments_for_order.return_value = [{"id": "PAY-DEMO", "amount": "275.77", "status": "captured"}]
+    mock.items_for_order.return_value = [{"id": "ITM-2", "quantity": 2, "unit_price": "32.00", "paid_amount": "64.00", "final_sale": False, "product_type": "physical"}]
     mock.shipments_for_order.return_value = [{"id": "SHP-1", "delivered_at": datetime.now(timezone.utc) - timedelta(days=3)}]
     return mock
 

@@ -146,7 +146,7 @@ code reads**:
 
 So the supervisor LLM chooses **which specialists, for which part of the message** (all at once, or one
 step at a time), and **how the reply is worded**. Whether anything is executed, needs an approver or goes
-to a person comes from `policy/rules.yaml` through code. No setting lets a model skip a gate.
+to a person comes from `src/support_ops/policy/rules/rules.json` through code. No setting lets a model skip a gate.
 
 ### One message, several specialists
 
@@ -182,11 +182,11 @@ delegates the parts one by one, each with its `request`. Either way each special
 | | Approver (`agents/approver.py`) | LLM | Checks a proposal before execution and the reply before sending |
 | Deterministic | `supervisor/escalation.py`, `supervisor/outcome.py` | code | Handoff triggers and packet, missing-record checks; what the reply may say |
 | | `agents/toolbox.py`, `gateway/route.py` | code | Each specialist's tools; facts from the DB and the minimum route |
-| | `policy/routing.py` + `policy/rules.yaml` | code | Rule engine: auto < approver < human |
+| | `policy/routing.py` + `src/support_ops/policy/rules/rules.json` | code | Rule engine: auto < approver < human |
 | | `gateway/approvals.py`, `gateway/writes.py`, `gateway/ticket_state.py` | code | Ticket states, bound tokens, idempotent mock writes, audit |
 | | `agents/runtime.py` | code | Per-ticket context: LLM calls, budget, retries, JSON repair |
 | Data | `backend/postgres.py` | PostgreSQL | Read-only, allowlisted queries |
-| | `policy/rag/` | mock RAG | Hybrid search over `policy/corpus/mini` (vector DB later) |
+| | `policy/rag/` | Pinecone RAG | Cosine or hybrid search over the fixed PDF corpus, with optional reranking |
 | | Groq | LLM provider | `gpt-oss-120b` for the agents, Prompt Guard 2 for the guard |
 
 ## How a ticket flows
@@ -311,38 +311,40 @@ How the plan-and-execute steps handle model output:
 
 A proposal outside the specialist's actions is rejected, like a route that is too loose; the
 specialist then proposes `none` with route `human`. Account changes belong to neither and reach a
-human. Policy search keeps clauses from the specialist's sections plus the exceptions of the clauses
+human. Policy search keeps clauses from the specialist's sections plus the direct references of the clauses
 kept, wherever they sit; `scope: all` searches everything for a case that crosses sections. The
-sections come from `multi_agent.policy_sections`, matched to `section` in each corpus file, and a
+sections come from `multi_agent.policy_sections`, matched to the stored domain or policy title, and a
 configured section missing from the corpus is logged as `policy_sections_missing`. Triage sends any
 request for money back or to return an item to returns and refunds, even when the order is late.
 
 ### Routing rules
 
-The rule engine (`policy/routing.py`) reads the `routing:` section of `policy/rules.yaml`. Facts
-come from the database, never from the model. When an information-only proposal names no order and the
-specialist looked up exactly one, that order is checked; if it looked up several, each is checked and
-the strictest minimum applies (a late parcel or pending return on any of them counts), with the reasons
-prefixed by order and the orders listed in `min_route.orders`.
+The route tool loads backend facts and runs the shared business checks in
+`policy/rules/rules.py`. Only eligible actions reach approval routing. Limits and
+outcomes are configured in `src/support_ops/policy/rules/rules.json`.
 
-| Case | Minimum route |
+| Case | Result |
 |---|---|
-| Information only (`none`) | auto |
-| Information only (`none`) about a shipment past its estimated delivery date and not delivered (`overdue_shipment_route`). A proposed refund or change keeps its own tiers | human |
-| Refund ≤ S$30 | auto |
-| Refund > S$30 and ≤ S$100 | approver |
-| Refund > S$100 (same limit S1 hands off at) | human |
-| Refund above the order total minus earlier refunds | human, and the write is refused |
-| Any proposal on an order with a return the store has not processed (`pending_return_route`; statuses in `awaiting_shop_return_statuses`) | **human** |
-| Refund that names no order items (nothing to check its amount against) | approver or stricter |
-| Refund above what was paid for the items it names | rejected; the specialist must correct it (`allowed: false` as a backstop) |
-| Refund on a shipped order that has not been delivered | approver; **human** if the parcel is past its estimated date |
-| Return or exchange: same tiers on the value of the returned items | auto / approver / human |
-| Refund, return or exchange more than 30 days after delivery, measured to when a return was requested if there is one (so a return asked for in time stays in time) | human |
-| Return or exchange with no delivery date | human |
-| The proposal relies on a policy exception | approver or stricter |
-| Order change | approver |
-| Account change, or an operation the rules don't cover | human |
+| Eligible refund ≤ SGD 30 | auto |
+| Eligible refund > SGD 30 and ≤ SGD 100 | Approver/QA reviews the proposal before execution |
+| Refund > SGD 100, disputed facts, unsafe goods or unverified prerequisites | human |
+| Refund exceeds the captured balance, approved resolution or selected goods' value | blocked; correct the amount |
+| Verified ordinary return within 30 days | auto authorization; refund payment remains separate |
+| Existing active return for the same goods | blocked duplicate; use the existing request |
+| Ordinary cancellation with verified customer authority and no fulfillment started | auto; any refund is checked separately |
+| Information about an ordinary pending return | auto; status alone does not mandate human review |
+| Undelivered parcel more than 3 calendar days after its estimate, or an immediate investigation condition | human |
+| Agreed alternative exchange | approver, after return checks pass |
+| Other changes or unsupported operations | human |
+
+The route tool builds a temporary facts dictionary from existing backend records.
+Unrecorded inspection, approval or other prerequisites remain unknown and require
+human review; the model cannot supply verified facts.
+For information-only proposals covering several orders, each parcel is checked and
+the strictest required route applies. A policy exception can raise an otherwise
+eligible action to Approver/QA, but cannot bypass a failed business check.
+The single-agent designs use the same checks and limits; the agent itself supplies
+its review explanation when automated review is required.
 
 ### A message that is not about the store
 
@@ -401,8 +403,8 @@ any `policy.mode` other than `rag`.
 | `llm.models.orchestrator` | `openai/gpt-oss-120b` | Model for the ReAct orchestration steps (its own role, so its cost shows separately) |
 | `llm.models.supervisor` / `specialist` / `approver` | `openai/gpt-oss-120b` | Model per role |
 | `llm.cache_dir` | `results/cache` | Response cache; `null` for live timings |
-| `policy.corpus_size` | `mini` | Policy corpus under `policy/corpus/` |
-| `policy.rag.*` | see `base.yaml` | Retrieval stages: dense, BM25, rerank, exception expansion |
+| `policy.corpus_dir` | `policy/raw_policy/pdf` | Fixed PDF policy corpus |
+| `policy.rag.*` | see `base.yaml` | Retrieval stages: dense, BM25, rerank, direct reference expansion |
 | `multi_agent.triage_confidence_min` | `0.5` | Below this, hand off rather than guess |
 | `multi_agent.max_reproposals` | `1` | Approver rejections the specialist may fix |
 | `multi_agent.max_reply_drafts` | `2` | Reply drafts the approver reviews before the hold reply |
@@ -413,7 +415,7 @@ any `policy.mode` other than `rag`.
 | `multi_agent.llm_by_role.<role>` | none | Per-role overrides of `llm` (e.g. `provider`, `base_url`, `api_key_env`), to run a role on another OpenAI-compatible provider. Unset: every role uses Groq |
 | `limits.max_steps_per_ticket` / `max_agent_steps` / `max_cost_usd_per_ticket` | `40` / `12` / `0.05` | Per-ticket tool, specialist-turn and cost budgets |
 
-Thresholds for routing live in `policy/rules.yaml`, not in config.
+Thresholds for routing live in `src/support_ops/policy/rules/rules.json`, not in config.
 
 ## Repository files
 
@@ -448,10 +450,10 @@ Shared with S1 and reused unchanged:
 | `src/support_ops/helpers/` | LLM wrapper with per-role models and cost, tracing, injectable clock, config loading |
 | `src/support_ops/backend/postgres.py` | Read-only, allowlisted database queries |
 | `src/support_ops/systems/tools.py` | Tool schemas and dispatch; specialists see a subset |
-| `src/support_ops/policy/rag/` | Mock RAG: clause chunking, BM25 + embeddings, rerank, exception expansion |
-| `src/support_ops/policy/rules.py`, `policy/rules.yaml` | Hard limits; `rules.yaml` also holds the `routing:` section |
+| `src/support_ops/policy/rag/` | PDF section chunking, Pinecone BM25 + embeddings, reranking and direct references |
+| `src/support_ops/policy/rules/` | Hard limits; `rules.json` also holds the `routing:` section |
 | `src/support_ops/gateway/ticket_state.py` | Audit log and handoff store, wrapped by `approvals.py` |
-| `policy/corpus/mini/` | The small policy corpus the mock RAG indexes |
+| `policy/raw_policy/pdf/` | The two source policy PDFs |
 
 ## Reading a response
 
@@ -473,10 +475,9 @@ Approval tokens never appear in a response or in the audit log.
 
 ## Known limits
 
-- **Mock RAG.** The retriever indexes the small `mini` corpus in memory. A vector-DB retriever will
-  replace it on `main`; S3 talks to policy only through the `policy` tool, so the swap needs no agent
-  changes. The new retriever must keep the `Retriever` protocol in `policy/rag/policy.py`:
-  `search(query)`, `sections()` and `warm_up()`, with clause IDs and `via: exception_of:<id>` links.
+- **RAG scope filtering.** Pinecone retrieval uses the `Retriever` protocol in
+  `policy/rag/policy.py`: `search(query)`, `sections()` and `warm_up()`, with clause IDs,
+  `references` lists and `via: reference` for additionally fetched clauses.
   Section scoping currently filters the retriever's top-k afterwards, so a specialist can get fewer
   than k clauses; a native metadata filter (e.g. an optional `sections` argument to `search`) would
   return k clauses from the section.

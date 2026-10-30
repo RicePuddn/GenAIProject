@@ -16,8 +16,8 @@ NonEmpty = Annotated[str, Field(min_length=1)]
 Specialist = Literal["orders_shipping", "returns_refunds"]
 Action = Literal["none", "refund", "return", "exchange", "order_change", "account_change"]
 WRITE_ACTIONS = {"refund", "return", "exchange", "order_change", "account_change"}
-GOODS_ACTIONS = {"return", "exchange"}   
-ITEM_ACTIONS = GOODS_ACTIONS | {"refund"}  
+GOODS_ACTIONS = {"return", "exchange"}
+ITEM_ACTIONS = GOODS_ACTIONS | {"refund"}
 SPECIALIST_ACTIONS: dict[str, frozenset[str]] = {
     "orders_shipping": frozenset({"none", "order_change"}),
     "returns_refunds": frozenset({"none", "refund", "return", "exchange"}),

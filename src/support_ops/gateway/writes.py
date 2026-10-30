@@ -30,13 +30,14 @@ class MockWrites:
         try:
             if (status := self.flow.status(ticket_id)) != "approved":
                 raise ValueError(f"cannot execute a write for a ticket in state {status}")
-            self.flow.redeem(token, ticket_id, operation, order_id, amount)
+            grant = self.flow.redeem(token, ticket_id, operation, order_id, amount)
         except ValueError as exc:
             self.flow.audit(ticket_id, "write", outcome="refused", reason=str(exc),
                             idempotency_key=idempotency_key, **write)
             return {"status": "refused", "reason": str(exc), **request}
         result = {
             "status": "executed", "mock": True, **request, "currency": self.currency,
+            "payment_id": grant.get("payment_id"),
             "write_id": f"MW-{len(self.executed) + 1:05d}", "executed_at": self.flow.clock.now().isoformat(),
         }
         self.executed[idempotency_key] = result

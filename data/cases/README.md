@@ -1,5 +1,6 @@
 # Labelled cases
 
-The evaluation set: tickets with their expected outcome. Format to be defined by the data owner.
+- `agents/gold.json`: 10 standalone customer requests, with expected outcomes and architecture-specific tool expectations. See [evaluation guidance](agents/README.md).
+- `rag/questions.json`: retrieval-only questions labelled with relevant policy chunk IDs.
 
-Owner: Peiying.
+The agent cases reference the PostgreSQL rows inserted by `scripts/seed_backend.py`.

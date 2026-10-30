@@ -1,0 +1,6 @@
+# Pinecone BM25 + cosine search, combined with RRF.
+policy:
+  rag:
+    dense: true
+    bm25: true
+    rerank: false

@@ -73,7 +73,6 @@ def _stream_workers() -> WorkflowWorkers:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    # Pay one-off policy setup (RAG models, corpus embeddings) at startup, not in the first ticket.
     cfg = load_config()
     started = time.perf_counter()
     policy_from_config(cfg, Rules.load(cfg["policy"]["rules_file"])).warm_up()
@@ -88,7 +87,6 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Policy-Bound Support Ops", version="0.1.0", lifespan=lifespan)
 
-
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -101,7 +99,7 @@ def info() -> dict[str, Any]:
     policy = cfg["policy"]
     return {
         "policy_mode": policy.get("mode", "skills"),
-        "corpus": policy["corpus_size"] if policy.get("mode") == "rag" else policy["skills_dir"],
+        "corpus": policy["corpus_dir"] if policy.get("mode") == "rag" else policy["skills_dir"],
         "default_strategy": cfg.get("agent", {}).get("strategy", "react"),
         "model": cfg["llm"]["models"]["supervisor"],
         "reasoning_effort": cfg["llm"].get("reasoning_effort"),

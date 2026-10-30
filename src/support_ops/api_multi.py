@@ -120,7 +120,7 @@ def info() -> dict[str, Any]:
     policy = cfg["policy"]
     return {
         "system": "multi_agent", "config": config_path(), "policy_mode": policy["mode"],
-        "corpus": policy["skills_dir"] if policy["mode"] == "skills" else policy["corpus_size"],
+        "corpus": policy["skills_dir"] if policy["mode"] == "skills" else policy["corpus_dir"],
         "default_strategy": cfg.get("agent", {}).get("strategy", "react"),
         "default_orchestration": cfg.get("multi_agent", {}).get("orchestration")
         or cfg.get("agent", {}).get("strategy", "react"),

@@ -191,6 +191,13 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual([event["kind"] for event in seen], ["step", "llm_call"])
         self.assertIs(seen[0], tracer.events[0])
 
+    def test_server_startup_prepares_policy_once_before_requests(self):
+        with patch("support_ops.api.policy_from_config") as build:
+            with TestClient(app) as client:
+                self.assertEqual(client.get("/health").status_code, 200)
+                build.return_value.warm_up.assert_called_once()
+            build.assert_called_once()
+
     def test_info_reports_the_configured_policy_mode(self):
         body = TestClient(app).get("/info").json()
         self.assertEqual(body["policy_mode"], load_config()["policy"]["mode"])
@@ -254,7 +261,7 @@ class ToolTests(unittest.TestCase):
 
     def test_refund_limit_shared_and_above_limit_handoff_does_not_recurse(self):
         gateway = TicketState(self.clock)
-        self.assertTrue(Rules.load().check("refund", 100)["allowed"])
+        self.assertFalse(Rules.load().check("refund", 100)["allowed"])
         args = {"action": "write", "operation": "refund", "record_id": "O1", "amount": 100.01}
         result = gateway.run("T1", args)
         self.assertEqual(result["status"], "awaiting_human")
@@ -264,7 +271,10 @@ class ToolTests(unittest.TestCase):
 
     def test_mock_write_is_idempotent_and_rejects_conflicting_amount(self):
         gateway = TicketState(self.clock)
-        args = {"action": "write", "operation": "refund", "record_id": "O1", "amount": 50}
+        args = {"action": "write", "operation": "refund", "record_id": "O1", "amount": 50, "review_reason": "Verified the payment, approval and original destination.",
+                "facts": {"payment_id": "PAY-1", "payment_status": "captured", "currency": "SGD", "captured_amount": 100,
+                          "refunded_amount": 0, "pending_refund_amount": 0, "approved_refund_amount": 100,
+                          "request_accepted": True, "inspection_or_waiver": True}}
         first = gateway.run("T1", args)
         self.assertEqual(first, gateway.run("T1", args))
         self.assertEqual(len(gateway.audit_log), 1)
@@ -323,7 +333,7 @@ class ToolTests(unittest.TestCase):
 
 
 class SeedTests(unittest.TestCase):
-    def test_generated_totals_fulfillment_and_tracking_are_consistent(self):
+    def test_seed_totals_fulfillment_and_tracking_are_consistent(self):
         from scripts import seed_backend
 
         records = defaultdict(list)
@@ -332,16 +342,15 @@ class SeedTests(unittest.TestCase):
             records[table].append(record)
 
         with patch.object(seed_backend, "insert_record", side_effect=collect):
-            seed_backend.seed_orders(Mock())
-            seed_backend.seed_tickets(Mock())
+            seed_backend.seed_records(Mock())
         items = defaultdict(list)
         for item in records["order_items"]:
             items[item["order_id"]].append(item)
         shipments = {shipment["order_id"]: shipment for shipment in records["shipments"]}
         for order in records["orders"]:
             expected = sum(Decimal(item["unit_price"]) * item["quantity"] for item in items[order["id"]])
-            self.assertEqual(order["subtotal"], expected)
-            self.assertEqual(order["total"], expected + order["shipping_fee"] + order["tax"])
+            self.assertEqual(Decimal(order["subtotal"]), expected)
+            self.assertEqual(Decimal(order["total"]), expected + Decimal(order["shipping_fee"]) + Decimal(order["tax"]))
             shipment = shipments[order["id"]]
             events = [event for event in records["shipment_events"] if event["shipment_id"] == shipment["id"]]
             if order["status"] in {"processing", "cancelled"}:
@@ -350,14 +359,16 @@ class SeedTests(unittest.TestCase):
             if shipment["delivered_at"]:
                 self.assertEqual(events[-1]["occurred_at"], shipment["delivered_at"])
             if order["status"] == "partially_fulfilled":
-                self.assertEqual({item["item_status"] for item in items[order["id"]]}, {"fulfilled", "open"})
+                states = {item["item_status"] for item in items[order["id"]]}
+                self.assertIn("fulfilled", states)
+                self.assertTrue(states.intersection({"open", "packing", "packed"}))
         self.assertEqual({refund["status"] for refund in records["refunds"]}, {"processed", "pending"})
         for payment in records["payments"]:
             if payment["status"] == "failed":
                 self.assertIsNone(payment["paid_at"])
-        self.assertEqual(len(records["orders"]), 60)
-        self.assertEqual(len(records["returns"]), 12)
-        self.assertEqual(len(records["support_tickets"]), 20)
+        self.assertEqual(len(records["orders"]), 70)
+        self.assertEqual(len(records["returns"]), 20)
+        self.assertEqual(len(records["support_tickets"]), 30)
 
     def test_fixture_inserts_name_columns_and_preserve_existing_ids(self):
         from scripts.seed_backend import insert_record
@@ -366,7 +377,7 @@ class SeedTests(unittest.TestCase):
         insert_record(cursor, "products", id="P1", name="Bottle")
         query, values = cursor.execute.call_args.args
         self.assertIn('("id", "name") VALUES (%s, %s)', query.as_string())
-        self.assertIn("ON CONFLICT (id) DO NOTHING", query.as_string())
+        self.assertIn("ON CONFLICT DO NOTHING", query.as_string())
         self.assertEqual(values, ("P1", "Bottle"))
 
 

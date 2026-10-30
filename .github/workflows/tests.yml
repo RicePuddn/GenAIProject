@@ -18,9 +18,8 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      # The rag extra (sentence-transformers, so PyTorch) is left out: its tests skip without it.
-      # The demo extra is small and lets the Streamlit page tests run.
+      # Retrieval tests use mocked models and Pinecone; no model downloads or API keys are needed.
       - name: Install
-        run: uv sync --locked --python 3.12 --extra dev --extra demo
+        run: uv sync --locked --python 3.12 --extra dev --extra demo --extra rag
       - name: Run pytest
         run: uv run --no-sync pytest -q

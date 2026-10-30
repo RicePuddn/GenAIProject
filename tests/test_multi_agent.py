@@ -39,15 +39,28 @@ def rag_policy():
     return RagPolicy(FakeRetriever())
 
 
-def reader(total=80, delivered_days_ago=5):
+def reader(total=80, delivered_days_ago=5, return_status="approved"):
     mock = Mock(spec=PostgresReader)
     mock.read.side_effect = lambda kind, record_id: (
-        {"id": record_id, "total": total} if record_id == ORDER else {"not_found": True, "kind": kind, "id": record_id})
+        {"id": record_id, "total": total, "currency": "SGD", "status": "processing"} if record_id == ORDER else {"not_found": True, "kind": kind, "id": record_id})
     mock.returns_for_order.return_value = {"returns": [], "refunds": []}
     mock.payments_for_order.return_value = [{"id": "PAY-1", "amount": total, "status": "captured"}]
-    mock.shipments_for_order.return_value = [{"id": "SHP-1", "delivered_at": NOW - timedelta(days=delivered_days_ago)}]
+    mock.shipments_for_order.return_value = [{"id": "SHP-1", "status": "delivered" if delivered_days_ago is not None else "in_transit", "delivered_at": None if delivered_days_ago is None else NOW - timedelta(days=delivered_days_ago)}]
     mock.items_for_order.return_value = [{"id": "ITM-0031-2", "name": "Terra Insulated Bottle 750 ml",
                                           "quantity": 2, "unit_price": "100.00"}]
+    for item in mock.items_for_order.return_value:
+        item.update(final_sale=False, paid_amount=str(float(item["unit_price"])*item["quantity"]),
+                    product_type="physical", item_status="fulfilled")
+    approved = {"id": "RET-APPROVED", "status": return_status, "reason": "faulty",
+                "requested_at": NOW - timedelta(days=4), "received_at": NOW - timedelta(days=3),
+                "approved_at": NOW - timedelta(days=2), "reviewed_at": NOW - timedelta(days=2),
+                "evidence_status": "verified", "inspection_status": "passed", "dispute_status": "none",
+                "items": [{"order_item_id": item["id"], "quantity": item["quantity"], "unused": True,
+                           "original_packaging": True, "tags_complete": True, "accessories_complete": True,
+                           "approved_refund_amount": min(total, float(item["paid_amount"]))}
+                          for item in mock.items_for_order.return_value]}
+    if delivered_days_ago is not None:
+        mock.returns_for_order.return_value["returns"] = [approved]
     return mock
 
 
@@ -165,10 +178,11 @@ class RouteTests(Base):
     def test_reply_writer_gets_customer_terms_not_routing_internals(self):
         self.llm.push("supervisor", triage(), text("Your return of one bottle is recorded.")).push(
             "specialist", tool_call("get_items_for_order", order_id=ORDER),
+            tool_call("get_returns_for_order", order_id=ORDER),
             tool_call("route", action="return", order_id=ORDER, items=[{"item_id": "ITM-0031-2", "quantity": 1}],
                       reason_code="damaged_item", cited_clauses=["RET-1"], route="approver", reason="Dented.")).push(
             "approver", verdict(), verdict())
-        result = self.run_flow("One of my two bottles arrived dented.", total=275.77)
+        result = self.run_flow("One of my two bottles arrived dented.", total=275.77, return_status="requested")
         self.assertEqual((result["ticket_status"], result["execution"]["status"]), ("resolved", "executed"))
         outcome = json.loads(self.llm.calls[-2][1][1]["content"])["outcome"]
         self.assertEqual(outcome["request"]["items"], [{"product": "Terra Insulated Bottle 750 ml", "quantity": 1}])
@@ -188,7 +202,7 @@ class RouteTests(Base):
         self.workflow.reader.shipments_for_order.return_value = [late]
         result = self.workflow.invoke("T1", "Where is my order?", "react")
         self.assertEqual(result["trace"].of_kind("order_id_filled")[0]["order_id"], ORDER)
-        self.assertIn("past its estimated delivery date", result["evidence"][1]["result"]["error"])
+        self.assertIn("ordinary waiting period", result["evidence"][1]["result"]["error"])
         self.assertEqual((result["ticket_status"], result["proposal"]["order_id"]), ("awaiting_human", ORDER))
 
     def test_order_id_is_not_guessed_when_several_orders_were_looked_up(self):
@@ -229,7 +243,7 @@ class RouteTests(Base):
         self.workflow = MultiAgentWorkflow(self.llm, self.cfg, reader=reader(), policy=rag_policy(), clock=Clock(NOW))
         self.workflow.reader.shipments_for_order.return_value = [late]
         result = self.workflow.invoke("T1", "Where is my order?", "react")
-        self.assertIn("past its estimated delivery date", result["evidence"][0]["result"]["error"])
+        self.assertIn("ordinary waiting period", result["evidence"][0]["result"]["error"])
         self.assertEqual((result["ticket_status"], result["min_route"]["route"]), ("awaiting_human", "human"))
 
     def test_handoff_before_any_facts_keeps_the_plain_hold_message(self):
@@ -238,25 +252,24 @@ class RouteTests(Base):
         outcome = json.loads(self.llm.calls[-2][1][1]["content"])["outcome"]
         self.assertEqual(outcome["tell_customer"], "A support specialist will review the request. Promise nothing else.")
 
-    def test_a_return_the_store_never_processed_goes_to_a_human_and_is_apologised_for(self):
+    def test_an_ordinary_pending_return_can_be_reported_without_mandatory_human_review(self):
         # The user's case: delivered 5 Sep, return requested 9 Sep (in time), still "requested" weeks later.
         pending = {"returns": [{"id": "RET-00001", "status": "requested", "reason": "unsuitable fit",
-                                "requested_at": NOW - timedelta(days=22), "received_at": None}], "refunds": []}
-        auto, human = (tool_call("route", action="none", order_id=ORDER, route=name, reason="Return pending.")
-                       for name in ("auto", "human"))
-        self.llm.push("supervisor", triage(), text("Sorry, your return from 9 Sep is still pending; a specialist will follow up.")).push(
-            "specialist", auto, auto, human).push("approver", verdict())
-        self.workflow = MultiAgentWorkflow(self.llm, self.cfg, reader=reader(delivered_days_ago=26),
+                                "requested_at": NOW - timedelta(days=1), "received_at": None}], "refunds": []}
+        auto = tool_call("route", action="none", order_id=ORDER, route="auto", reason="Return pending.")
+        self.llm.push("supervisor", triage(), text("Your return request from 30 September is recorded.")).push(
+            "specialist", auto, auto).push("approver", verdict())
+        self.workflow = MultiAgentWorkflow(self.llm, self.cfg, reader=reader(delivered_days_ago=5),
                                            policy=rag_policy(), clock=Clock(NOW))
         self.workflow.reader.returns_for_order.return_value = pending
         result = self.workflow.invoke("T1", "Can I refund ORD-2026-00001?", "react")
         errors = [e["result"].get("error", "") for e in result["evidence"]]
         self.assertIn("RET-00001", errors[0])                                    # shown before it decides
-        self.assertIn("has not been processed by the store", errors[1])         # then auto is not enough
-        self.assertEqual((result["ticket_status"], result["min_route"]["route"]), ("awaiting_human", "human"))
+        self.assertEqual(errors[1], "")  # the ordinary pending status alone permits a factual update
+        self.assertEqual((result["ticket_status"], result["min_route"]["route"]), ("resolved", "auto"))
         outcome = json.loads(self.llm.calls[-2][1][1]["content"])["outcome"]
         self.assertEqual(outcome["existing_requests"][0]["requested_within_return_window"], True)
-        self.assertIn("The return the customer requested on 2026-09-09 has not been processed by the store yet.",
+        self.assertIn("The return the customer requested on 2026-09-30 has not been processed by the store yet.",
                       outcome["problems"])
 
     def test_a_specialist_that_looked_up_returns_is_not_bounced(self):
@@ -514,7 +527,7 @@ class RetryTests(Base):
     def test_a_tool_failing_for_an_infrastructure_reason_is_run_again(self):
         self.llm.push("supervisor", triage(), text("Recorded.")).push(
             "specialist", tool_call("get_returns_for_order", order_id=ORDER), route()).push("approver", verdict())
-        ok = {"returns": [], "refunds": []}
+        ok = reader().returns_for_order.return_value
         result = self.flow_with_failing_lookup(RuntimeError("connection timeout"), ok, ok)
         self.assertEqual(result["ticket_status"], "resolved")
         self.assertEqual(result["evidence"][0]["result"], ok)

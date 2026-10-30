@@ -7,12 +7,13 @@ from __future__ import annotations
 
 from typing import Any, Literal, Self
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from support_ops.backend.postgres import PostgresReader, RECORD_KINDS
 from support_ops.gateway.ticket_state import TicketState
 from support_ops.helpers.arguments import Amount, NonEmpty, ToolArguments
 from support_ops.policy.provider import PolicyProvider
+from support_ops.policy.facts import BackendFacts
 
 
 class ReadArguments(ToolArguments):
@@ -26,12 +27,14 @@ class OrderArguments(ToolArguments):
 
 
 class PolicyArguments(ToolArguments):
-    """list: discover skills; open: read SKILL.md; read: read a discovered clause; check: mock refund limit."""
+    """list: discover skills; open: read SKILL.md; read: read a discovered clause; check: deterministic refund, return_request, return_dispatch, cancel or delivery checks using recorded facts."""
     action: Literal["list", "open", "read", "check"]
     skill: NonEmpty | None = None
     file: NonEmpty | None = None
     operation: NonEmpty | None = None
     amount: Amount | None = None
+    order_id: NonEmpty | None = Field(default=None, description="Order ID used to load recorded policy facts for a check.")
+    item_ids: list[NonEmpty] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def required_for_action(self) -> Self:
@@ -47,11 +50,13 @@ class PolicyArguments(ToolArguments):
 
 
 class RagPolicyArguments(ToolArguments):
-    """search: retrieve the policy clauses most relevant to a query, with their exceptions; check: mock refund limit."""
+    """search: retrieve the policy clauses most relevant to a query, with their exceptions; check: deterministic refund, return_request, return_dispatch, cancel or delivery checks using recorded facts."""
     action: Literal["search", "check"]
     query: NonEmpty | None = None
     operation: NonEmpty | None = None
     amount: Amount | None = None
+    order_id: NonEmpty | None = Field(default=None, description="Order ID used to load recorded policy facts for a check.")
+    item_ids: list[NonEmpty] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def required_for_action(self) -> Self:
@@ -71,6 +76,10 @@ class TicketArguments(ToolArguments):
     record_id: NonEmpty | None = None
     amount: Amount | None = None
     reason: NonEmpty | None = None
+    item_ids: list[NonEmpty] = Field(default_factory=list)
+    review_reason: NonEmpty | None = Field(default=None, description=(
+        "For a refund requiring automated review, explain how the retrieved policy and recorded facts "
+        "support the action and amount. This cannot override a failed check or human-review requirement."))
 
     @model_validator(mode="after")
     def required_for_action(self) -> Self:
@@ -92,6 +101,7 @@ def validate_arguments(models: dict[str, type[ToolArguments]], name: str, argume
 class SupportTools:
     def __init__(self, reader: PostgresReader, policy: PolicyProvider, ticket_state: TicketState):
         self.reader, self.policy, self.ticket_state = reader, policy, ticket_state
+        self.backend_facts = BackendFacts(reader, ticket_state.clock)
         self.argument_models: dict[str, type[ToolArguments]] = {
             "read_record": ReadArguments,
             "get_shipments_for_order": OrderArguments,
@@ -138,5 +148,15 @@ class SupportTools:
         if name == "get_returns_for_order":
             return self.reader.returns_for_order(**args)
         if name == "policy":
+            if args.get("action") == "check" and args.get("operation") == "delivery" and args.get("order_id"):
+                parcels = self.backend_facts.deliveries(args["order_id"])
+                checks = [self.policy.run({**args, "facts": parcel}) for parcel in parcels or [{}]]
+                decision = next((check for check in checks if check["requires_human"]), checks[0])
+                return {**decision, "parcel_checks": checks}
+            if args.get("action") == "check":
+                args["facts"] = self.backend_facts.read(args["operation"], args["order_id"], args.get("item_ids")) \
+                    if args.get("order_id") else {}
             return self.policy.run(args)
+        if args.get("action") == "write":
+            args["facts"] = self.backend_facts.read(args["operation"], args["record_id"], args.get("item_ids"))
         return self.ticket_state.run(ticket_id, args)

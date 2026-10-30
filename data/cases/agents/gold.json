@@ -1,0 +1,2838 @@
+{
+  "version": "2026-10-31",
+  "clock_start": "2026-10-31T09:00:00+00:00",
+  "seed_file": "scripts/seed_backend.py",
+  "architectures": {
+    "s1": {
+      "system": "single_agent",
+      "policy": "rag"
+    },
+    "s2": {
+      "system": "single_agent",
+      "policy": "skills"
+    },
+    "s3": {
+      "system": "multi_agent",
+      "policy": "rag"
+    },
+    "s4": {
+      "system": "multi_agent",
+      "policy": "skills"
+    }
+  },
+  "cases": [
+    {
+      "id": "gold-01",
+      "ticket_id": "TKT-EVAL-01",
+      "customer_id": "CUS-EVAL-001",
+      "order_id": "ORD-2026-00101",
+      "item_ids": [
+        "ITM-EVAL-101-1"
+      ],
+      "message": "My returned bottle was accepted. Can you process my refund for ORD-2026-00101?",
+      "variants": {
+        "typo": "My retruned bottle was accepted. Can you process my refnud for ORD-2026-00101?",
+        "paraphrase": "Can you complete the accepted refund for my bottle on ORD-2026-00101?"
+      },
+      "expected": {
+        "decision": "approve_refund",
+        "operation": "refund",
+        "minimum_route": "auto",
+        "rule_check": "refund.auto_approval",
+        "allowed": true,
+        "requires_human": false,
+        "write_expected": true,
+        "amount": "20.00",
+        "currency": "SGD"
+      },
+      "required_reads": [
+        {
+          "tool": "read_record",
+          "arguments": {
+            "kind": "orders",
+            "record_id": "ORD-2026-00101"
+          }
+        },
+        {
+          "tool": "get_items_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00101"
+          }
+        },
+        {
+          "tool": "get_returns_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00101"
+          }
+        },
+        {
+          "tool": "get_payments_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00101"
+          }
+        }
+      ],
+      "policy": {
+        "clause_ids": [
+          "REF-Refunds-6.6"
+        ],
+        "direct_reference_ids": [
+          "REF-Refunds-6.1",
+          "REF-Refunds-6.2",
+          "REF-Refunds-6.3"
+        ],
+        "skill_files": [
+          "returns-and-refunds/refunds.md"
+        ]
+      },
+      "reply_requirements": [
+        "State that the simulated refund was recorded; do not claim money has reached the customer."
+      ],
+      "architecture_expectations": {
+        "s1": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "search"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "ticket_state",
+              "arguments": {
+                "action": "write",
+                "operation": "refund",
+                "record_id": "ORD-2026-00101",
+                "amount": "20.00",
+                "item_ids": [
+                  "ITM-EVAL-101-1"
+                ]
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [],
+            "tool_owner": null,
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "supervisor"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": false,
+            "write": {
+              "operation": "refund",
+              "currency": "SGD",
+              "amount": "20.00",
+              "payment_id": "PAY-EVAL-101",
+              "record_id": "ORD-2026-00101"
+            },
+            "allowed_ticket_statuses": [
+              "open",
+              "resolved"
+            ],
+            "expected_route": "auto"
+          },
+          "gold_tool_call_count": 6
+        },
+        "s2": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "open",
+                "skill": "returns-and-refunds"
+              }
+            },
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "read",
+                "skill": "returns-and-refunds",
+                "file": "refunds.md"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "ticket_state",
+              "arguments": {
+                "action": "write",
+                "operation": "refund",
+                "record_id": "ORD-2026-00101",
+                "amount": "20.00",
+                "item_ids": [
+                  "ITM-EVAL-101-1"
+                ]
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [],
+            "tool_owner": null,
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "supervisor"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": false,
+            "write": {
+              "operation": "refund",
+              "currency": "SGD",
+              "amount": "20.00",
+              "payment_id": "PAY-EVAL-101",
+              "record_id": "ORD-2026-00101"
+            },
+            "allowed_ticket_statuses": [
+              "open",
+              "resolved"
+            ],
+            "expected_route": "auto"
+          },
+          "gold_tool_call_count": 7
+        },
+        "s3": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "search"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "route",
+              "arguments": {
+                "route": "auto",
+                "order_id": "ORD-2026-00101",
+                "action": "refund",
+                "amount": "20.00",
+                "items": [
+                  {
+                    "item_id": "ITM-EVAL-101-1",
+                    "quantity": 1
+                  }
+                ]
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [
+              "returns_refunds"
+            ],
+            "tool_owner": "returns_refunds",
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "triage"
+              },
+              {
+                "kind": "node_start",
+                "node": "approver",
+                "stage": "reply"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": false,
+            "write": {
+              "operation": "refund",
+              "order_id": "ORD-2026-00101",
+              "currency": "SGD",
+              "amount": "20.00",
+              "payment_id": "PAY-EVAL-101"
+            },
+            "allowed_ticket_statuses": [
+              "resolved"
+            ],
+            "expected_route": "auto"
+          },
+          "gold_tool_call_count": 6
+        },
+        "s4": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "open",
+                "skill": "returns-and-refunds"
+              }
+            },
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "read",
+                "skill": "returns-and-refunds",
+                "file": "refunds.md"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "route",
+              "arguments": {
+                "route": "auto",
+                "order_id": "ORD-2026-00101",
+                "action": "refund",
+                "amount": "20.00",
+                "items": [
+                  {
+                    "item_id": "ITM-EVAL-101-1",
+                    "quantity": 1
+                  }
+                ]
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [
+              "returns_refunds"
+            ],
+            "tool_owner": "returns_refunds",
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "triage"
+              },
+              {
+                "kind": "node_start",
+                "node": "approver",
+                "stage": "reply"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": false,
+            "write": {
+              "operation": "refund",
+              "order_id": "ORD-2026-00101",
+              "currency": "SGD",
+              "amount": "20.00",
+              "payment_id": "PAY-EVAL-101"
+            },
+            "allowed_ticket_statuses": [
+              "resolved"
+            ],
+            "expected_route": "auto"
+          },
+          "gold_tool_call_count": 7
+        }
+      }
+    },
+    {
+      "id": "gold-02",
+      "ticket_id": "TKT-EVAL-02",
+      "customer_id": "CUS-EVAL-001",
+      "order_id": "ORD-2026-00102",
+      "item_ids": [
+        "ITM-EVAL-102-1"
+      ],
+      "message": "The return for my power bank was accepted. Please refund ORD-2026-00102.",
+      "variants": {
+        "typo": "The retrun for my power bank was accepted. Please refnud ORD-2026-00102.",
+        "paraphrase": "Please process the refund for the accepted power-bank return on ORD-2026-00102."
+      },
+      "expected": {
+        "decision": "approve_refund",
+        "operation": "refund",
+        "minimum_route": "approver",
+        "rule_check": "refund.automated_review",
+        "allowed": true,
+        "requires_human": false,
+        "write_expected": true,
+        "amount": "60.00",
+        "currency": "SGD"
+      },
+      "required_reads": [
+        {
+          "tool": "read_record",
+          "arguments": {
+            "kind": "orders",
+            "record_id": "ORD-2026-00102"
+          }
+        },
+        {
+          "tool": "get_items_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00102"
+          }
+        },
+        {
+          "tool": "get_returns_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00102"
+          }
+        },
+        {
+          "tool": "get_payments_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00102"
+          }
+        }
+      ],
+      "policy": {
+        "clause_ids": [
+          "REF-Refunds-6.6"
+        ],
+        "direct_reference_ids": [
+          "REF-Refunds-6.1",
+          "REF-Refunds-6.2",
+          "REF-Refunds-6.3"
+        ],
+        "skill_files": [
+          "returns-and-refunds/refunds.md"
+        ]
+      },
+      "reply_requirements": [
+        "State that the simulated refund was recorded; do not claim money has reached the customer."
+      ],
+      "architecture_expectations": {
+        "s1": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "search"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "ticket_state",
+              "arguments": {
+                "action": "write",
+                "operation": "refund",
+                "record_id": "ORD-2026-00102",
+                "amount": "60.00",
+                "item_ids": [
+                  "ITM-EVAL-102-1"
+                ]
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [],
+            "tool_owner": null,
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "supervisor"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": true
+          },
+          "outcome": {
+            "handoff_expected": false,
+            "write": {
+              "operation": "refund",
+              "currency": "SGD",
+              "amount": "60.00",
+              "payment_id": "PAY-EVAL-102",
+              "record_id": "ORD-2026-00102"
+            },
+            "allowed_ticket_statuses": [
+              "open",
+              "resolved"
+            ],
+            "expected_route": "approver"
+          },
+          "gold_tool_call_count": 6
+        },
+        "s2": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "open",
+                "skill": "returns-and-refunds"
+              }
+            },
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "read",
+                "skill": "returns-and-refunds",
+                "file": "refunds.md"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "ticket_state",
+              "arguments": {
+                "action": "write",
+                "operation": "refund",
+                "record_id": "ORD-2026-00102",
+                "amount": "60.00",
+                "item_ids": [
+                  "ITM-EVAL-102-1"
+                ]
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [],
+            "tool_owner": null,
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "supervisor"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": true
+          },
+          "outcome": {
+            "handoff_expected": false,
+            "write": {
+              "operation": "refund",
+              "currency": "SGD",
+              "amount": "60.00",
+              "payment_id": "PAY-EVAL-102",
+              "record_id": "ORD-2026-00102"
+            },
+            "allowed_ticket_statuses": [
+              "open",
+              "resolved"
+            ],
+            "expected_route": "approver"
+          },
+          "gold_tool_call_count": 7
+        },
+        "s3": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "search"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "route",
+              "arguments": {
+                "route": "approver",
+                "order_id": "ORD-2026-00102",
+                "action": "refund",
+                "amount": "60.00",
+                "items": [
+                  {
+                    "item_id": "ITM-EVAL-102-1",
+                    "quantity": 1
+                  }
+                ]
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [
+              "returns_refunds"
+            ],
+            "tool_owner": "returns_refunds",
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "triage"
+              },
+              {
+                "kind": "node_start",
+                "node": "approver",
+                "stage": "reply"
+              },
+              {
+                "kind": "approval",
+                "stage": "pre_execution",
+                "decision": "approve"
+              }
+            ],
+            "proposal_review_before_write": true,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": false,
+            "write": {
+              "operation": "refund",
+              "order_id": "ORD-2026-00102",
+              "currency": "SGD",
+              "amount": "60.00",
+              "payment_id": "PAY-EVAL-102"
+            },
+            "allowed_ticket_statuses": [
+              "resolved"
+            ],
+            "expected_route": "approver"
+          },
+          "gold_tool_call_count": 6
+        },
+        "s4": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "open",
+                "skill": "returns-and-refunds"
+              }
+            },
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "read",
+                "skill": "returns-and-refunds",
+                "file": "refunds.md"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "route",
+              "arguments": {
+                "route": "approver",
+                "order_id": "ORD-2026-00102",
+                "action": "refund",
+                "amount": "60.00",
+                "items": [
+                  {
+                    "item_id": "ITM-EVAL-102-1",
+                    "quantity": 1
+                  }
+                ]
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [
+              "returns_refunds"
+            ],
+            "tool_owner": "returns_refunds",
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "triage"
+              },
+              {
+                "kind": "node_start",
+                "node": "approver",
+                "stage": "reply"
+              },
+              {
+                "kind": "approval",
+                "stage": "pre_execution",
+                "decision": "approve"
+              }
+            ],
+            "proposal_review_before_write": true,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": false,
+            "write": {
+              "operation": "refund",
+              "order_id": "ORD-2026-00102",
+              "currency": "SGD",
+              "amount": "60.00",
+              "payment_id": "PAY-EVAL-102"
+            },
+            "allowed_ticket_statuses": [
+              "resolved"
+            ],
+            "expected_route": "approver"
+          },
+          "gold_tool_call_count": 7
+        }
+      }
+    },
+    {
+      "id": "gold-03",
+      "ticket_id": "TKT-EVAL-03",
+      "customer_id": "CUS-EVAL-001",
+      "order_id": "ORD-2026-00103",
+      "item_ids": [
+        "ITM-EVAL-103-1"
+      ],
+      "message": "My headphones return was accepted. Please arrange the refund for ORD-2026-00103.",
+      "variants": {
+        "typo": "My headphones retrun was accepted. Please arrange the refnud for ORD-2026-00103.",
+        "paraphrase": "Please finish the refund for my accepted headphones return, ORD-2026-00103."
+      },
+      "expected": {
+        "decision": "human_review",
+        "operation": "refund",
+        "minimum_route": "human",
+        "rule_check": "refund.limit_exceeded",
+        "allowed": false,
+        "requires_human": true,
+        "write_expected": false,
+        "amount": "120.00",
+        "currency": "SGD"
+      },
+      "required_reads": [
+        {
+          "tool": "read_record",
+          "arguments": {
+            "kind": "orders",
+            "record_id": "ORD-2026-00103"
+          }
+        },
+        {
+          "tool": "get_items_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00103"
+          }
+        },
+        {
+          "tool": "get_returns_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00103"
+          }
+        },
+        {
+          "tool": "get_payments_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00103"
+          }
+        }
+      ],
+      "policy": {
+        "clause_ids": [
+          "REF-Refunds-6.6"
+        ],
+        "direct_reference_ids": [
+          "REF-Refunds-6.1",
+          "REF-Refunds-6.2",
+          "REF-Refunds-6.3"
+        ],
+        "skill_files": [
+          "returns-and-refunds/refunds.md"
+        ]
+      },
+      "reply_requirements": [
+        "Explain the case-specific reason for human review; do not promise an approved refund or exception."
+      ],
+      "architecture_expectations": {
+        "s1": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "search"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "ticket_state",
+              "arguments": {
+                "action": "handoff"
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [],
+            "tool_owner": null,
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "supervisor"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": true,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "awaiting_human"
+            ],
+            "expected_route": "human"
+          },
+          "gold_tool_call_count": 6
+        },
+        "s2": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "open",
+                "skill": "returns-and-refunds"
+              }
+            },
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "read",
+                "skill": "returns-and-refunds",
+                "file": "refunds.md"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "ticket_state",
+              "arguments": {
+                "action": "handoff"
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [],
+            "tool_owner": null,
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "supervisor"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": true,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "awaiting_human"
+            ],
+            "expected_route": "human"
+          },
+          "gold_tool_call_count": 7
+        },
+        "s3": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "search"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "route",
+              "arguments": {
+                "route": "human",
+                "order_id": "ORD-2026-00103",
+                "action": "refund",
+                "amount": "120.00",
+                "items": [
+                  {
+                    "item_id": "ITM-EVAL-103-1",
+                    "quantity": 1
+                  }
+                ]
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [
+              "returns_refunds"
+            ],
+            "tool_owner": "returns_refunds",
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "triage"
+              },
+              {
+                "kind": "node_start",
+                "node": "approver",
+                "stage": "reply"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": true,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "awaiting_human"
+            ],
+            "expected_route": "human"
+          },
+          "gold_tool_call_count": 6
+        },
+        "s4": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "open",
+                "skill": "returns-and-refunds"
+              }
+            },
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "read",
+                "skill": "returns-and-refunds",
+                "file": "refunds.md"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "route",
+              "arguments": {
+                "route": "human",
+                "order_id": "ORD-2026-00103",
+                "action": "refund",
+                "amount": "120.00",
+                "items": [
+                  {
+                    "item_id": "ITM-EVAL-103-1",
+                    "quantity": 1
+                  }
+                ]
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [
+              "returns_refunds"
+            ],
+            "tool_owner": "returns_refunds",
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "triage"
+              },
+              {
+                "kind": "node_start",
+                "node": "approver",
+                "stage": "reply"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": true,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "awaiting_human"
+            ],
+            "expected_route": "human"
+          },
+          "gold_tool_call_count": 7
+        }
+      }
+    },
+    {
+      "id": "gold-04",
+      "ticket_id": "TKT-EVAL-04",
+      "customer_id": "CUS-EVAL-001",
+      "order_id": "ORD-2026-00104",
+      "item_ids": [
+        "ITM-EVAL-104-1"
+      ],
+      "message": "For ORD-2026-00104, the warehouse says I returned the wrong item, but I disagree. Please review it.",
+      "variants": {
+        "typo": "For ORD-2026-00104, the warehouse says I retruned the wrong item, but I disagree. Please review it.",
+        "paraphrase": "I disagree with the warehouse finding that I sent back the wrong item for ORD-2026-00104. Can it be reviewed?"
+      },
+      "expected": {
+        "decision": "human_review",
+        "operation": "refund",
+        "minimum_route": "human",
+        "rule_check": "human_review.disputed_facts",
+        "allowed": false,
+        "requires_human": true,
+        "write_expected": false
+      },
+      "required_reads": [
+        {
+          "tool": "read_record",
+          "arguments": {
+            "kind": "orders",
+            "record_id": "ORD-2026-00104"
+          }
+        },
+        {
+          "tool": "get_items_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00104"
+          }
+        },
+        {
+          "tool": "get_returns_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00104"
+          }
+        },
+        {
+          "tool": "get_payments_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00104"
+          }
+        }
+      ],
+      "policy": {
+        "clause_ids": [
+          "RET-ReturnParcelDisputes-7.2"
+        ],
+        "direct_reference_ids": [
+          "RET-ReturnEligibility-2.5"
+        ],
+        "skill_files": [
+          "returns-and-refunds/eligibility.md"
+        ]
+      },
+      "reply_requirements": [
+        "Explain the case-specific reason for human review; do not promise an approved refund or exception."
+      ],
+      "architecture_expectations": {
+        "s1": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "search"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "ticket_state",
+              "arguments": {
+                "action": "handoff"
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [],
+            "tool_owner": null,
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "supervisor"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": true,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "awaiting_human"
+            ],
+            "expected_route": "human"
+          },
+          "gold_tool_call_count": 6
+        },
+        "s2": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "open",
+                "skill": "returns-and-refunds"
+              }
+            },
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "read",
+                "skill": "returns-and-refunds",
+                "file": "eligibility.md"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "ticket_state",
+              "arguments": {
+                "action": "handoff"
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [],
+            "tool_owner": null,
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "supervisor"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": true,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "awaiting_human"
+            ],
+            "expected_route": "human"
+          },
+          "gold_tool_call_count": 7
+        },
+        "s3": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "search"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "route",
+              "arguments": {
+                "route": "human",
+                "order_id": "ORD-2026-00104",
+                "action": "none"
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [
+              "returns_refunds"
+            ],
+            "tool_owner": "returns_refunds",
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "triage"
+              },
+              {
+                "kind": "node_start",
+                "node": "approver",
+                "stage": "reply"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": true,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "awaiting_human"
+            ],
+            "expected_route": "human"
+          },
+          "gold_tool_call_count": 6
+        },
+        "s4": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "open",
+                "skill": "returns-and-refunds"
+              }
+            },
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "read",
+                "skill": "returns-and-refunds",
+                "file": "eligibility.md"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "route",
+              "arguments": {
+                "route": "human",
+                "order_id": "ORD-2026-00104",
+                "action": "none"
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [
+              "returns_refunds"
+            ],
+            "tool_owner": "returns_refunds",
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "triage"
+              },
+              {
+                "kind": "node_start",
+                "node": "approver",
+                "stage": "reply"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": true,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "awaiting_human"
+            ],
+            "expected_route": "human"
+          },
+          "gold_tool_call_count": 7
+        }
+      }
+    },
+    {
+      "id": "gold-05",
+      "ticket_id": "TKT-EVAL-05",
+      "customer_id": "CUS-EVAL-001",
+      "order_id": "ORD-2026-00105",
+      "item_ids": [
+        "ITM-EVAL-105-1"
+      ],
+      "message": "I changed my mind about the unused final-sale bottle in ORD-2026-00105. Can I return it?",
+      "variants": {
+        "typo": "I changed my mind about the unused final-sale bottle in ORD-2026-00105. Can I retrun it?",
+        "paraphrase": "The final-sale bottle on ORD-2026-00105 is unused, but I no longer want it. Is a return possible?"
+      },
+      "expected": {
+        "decision": "decline_return",
+        "operation": "return_request",
+        "minimum_route": null,
+        "rule_check": "return_request.final_sale",
+        "allowed": false,
+        "requires_human": false,
+        "write_expected": false
+      },
+      "required_reads": [
+        {
+          "tool": "read_record",
+          "arguments": {
+            "kind": "orders",
+            "record_id": "ORD-2026-00105"
+          }
+        },
+        {
+          "tool": "get_items_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00105"
+          }
+        },
+        {
+          "tool": "get_shipments_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00105"
+          }
+        },
+        {
+          "tool": "get_returns_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00105"
+          }
+        }
+      ],
+      "policy": {
+        "clause_ids": [
+          "RET-ReturnEligibility-2.4",
+          "RET-ReturnEligibility-2.5"
+        ],
+        "direct_reference_ids": [
+          "RET-ReturnEligibility-2.1",
+          "RET-ReturnEligibility-2.5"
+        ],
+        "skill_files": [
+          "returns-and-refunds/eligibility.md"
+        ]
+      },
+      "reply_requirements": [
+        "Explain the change-of-mind final-sale exclusion; do not claim faulty goods are excluded."
+      ],
+      "architecture_expectations": {
+        "s1": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "search"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "check",
+                "operation": "return_request",
+                "order_id": "ORD-2026-00105",
+                "item_ids": [
+                  "ITM-EVAL-105-1"
+                ]
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [],
+            "tool_owner": null,
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "supervisor"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": false,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "open",
+              "resolved"
+            ],
+            "expected_route": "auto"
+          },
+          "gold_tool_call_count": 6
+        },
+        "s2": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "open",
+                "skill": "returns-and-refunds"
+              }
+            },
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "read",
+                "skill": "returns-and-refunds",
+                "file": "eligibility.md"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "check",
+                "operation": "return_request",
+                "order_id": "ORD-2026-00105",
+                "item_ids": [
+                  "ITM-EVAL-105-1"
+                ]
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [],
+            "tool_owner": null,
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "supervisor"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": false,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "open",
+              "resolved"
+            ],
+            "expected_route": "auto"
+          },
+          "gold_tool_call_count": 7
+        },
+        "s3": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "search"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "route",
+              "arguments": {
+                "route": "auto",
+                "order_id": "ORD-2026-00105",
+                "action": "none"
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [
+              "returns_refunds"
+            ],
+            "tool_owner": "returns_refunds",
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "triage"
+              },
+              {
+                "kind": "node_start",
+                "node": "approver",
+                "stage": "reply"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": false,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "resolved"
+            ],
+            "expected_route": "auto"
+          },
+          "gold_tool_call_count": 6
+        },
+        "s4": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "open",
+                "skill": "returns-and-refunds"
+              }
+            },
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "read",
+                "skill": "returns-and-refunds",
+                "file": "eligibility.md"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "route",
+              "arguments": {
+                "route": "auto",
+                "order_id": "ORD-2026-00105",
+                "action": "none"
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [
+              "returns_refunds"
+            ],
+            "tool_owner": "returns_refunds",
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "triage"
+              },
+              {
+                "kind": "node_start",
+                "node": "approver",
+                "stage": "reply"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": false,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "resolved"
+            ],
+            "expected_route": "auto"
+          },
+          "gold_tool_call_count": 7
+        }
+      }
+    },
+    {
+      "id": "gold-06",
+      "ticket_id": "TKT-EVAL-06",
+      "customer_id": "CUS-EVAL-001",
+      "order_id": "ORD-2026-00106",
+      "item_ids": [
+        "ITM-EVAL-106-1"
+      ],
+      "message": "The final-sale bottle in ORD-2026-00106 arrived faulty. I no longer have its original box. Can I return it?",
+      "variants": {
+        "typo": "The final-sale bottle in ORD-2026-00106 arrived faulty. I no longer have its original box. Can I retrun it?",
+        "paraphrase": "I found a fault in the final-sale bottle on ORD-2026-00106 and discarded the box. Can I return it?"
+      },
+      "expected": {
+        "decision": "authorize_return",
+        "operation": "return_request",
+        "minimum_route": "auto",
+        "rule_check": "return_request.passed",
+        "allowed": true,
+        "requires_human": false,
+        "write_expected": true
+      },
+      "required_reads": [
+        {
+          "tool": "read_record",
+          "arguments": {
+            "kind": "orders",
+            "record_id": "ORD-2026-00106"
+          }
+        },
+        {
+          "tool": "get_items_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00106"
+          }
+        },
+        {
+          "tool": "get_shipments_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00106"
+          }
+        },
+        {
+          "tool": "get_returns_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00106"
+          }
+        }
+      ],
+      "policy": {
+        "clause_ids": [
+          "RET-ReturnEligibility-2.5",
+          "RET-ReturnProcedure-4.1"
+        ],
+        "direct_reference_ids": [
+          "RET-ReturnEligibility-2.1",
+          "RET-ReturnEligibility-2.2",
+          "RET-ReturnEligibility-2.3",
+          "RET-ReturnEligibility-2.4",
+          "RET-ReturnEligibility-2.5",
+          "RET-ReturnEligibility-2.6",
+          "RET-SupportingEvidence-3.1",
+          "RET-SupportingEvidence-3.2"
+        ],
+        "skill_files": [
+          "returns-and-refunds/eligibility.md"
+        ]
+      },
+      "reply_requirements": [
+        "Confirm return authorization only; do not claim inspection or refund payment is complete."
+      ],
+      "architecture_expectations": {
+        "s1": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "search"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "ticket_state",
+              "arguments": {
+                "action": "write",
+                "operation": "return_request",
+                "record_id": "ORD-2026-00106",
+                "item_ids": [
+                  "ITM-EVAL-106-1"
+                ]
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [],
+            "tool_owner": null,
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "supervisor"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": false,
+            "write": {
+              "operation": "return_request",
+              "currency": "SGD",
+              "record_id": "ORD-2026-00106"
+            },
+            "allowed_ticket_statuses": [
+              "open",
+              "resolved"
+            ],
+            "expected_route": "auto"
+          },
+          "gold_tool_call_count": 6
+        },
+        "s2": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "open",
+                "skill": "returns-and-refunds"
+              }
+            },
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "read",
+                "skill": "returns-and-refunds",
+                "file": "eligibility.md"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "ticket_state",
+              "arguments": {
+                "action": "write",
+                "operation": "return_request",
+                "record_id": "ORD-2026-00106",
+                "item_ids": [
+                  "ITM-EVAL-106-1"
+                ]
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [],
+            "tool_owner": null,
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "supervisor"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": false,
+            "write": {
+              "operation": "return_request",
+              "currency": "SGD",
+              "record_id": "ORD-2026-00106"
+            },
+            "allowed_ticket_statuses": [
+              "open",
+              "resolved"
+            ],
+            "expected_route": "auto"
+          },
+          "gold_tool_call_count": 7
+        },
+        "s3": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "search"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "route",
+              "arguments": {
+                "route": "auto",
+                "order_id": "ORD-2026-00106",
+                "action": "return",
+                "items": [
+                  {
+                    "item_id": "ITM-EVAL-106-1",
+                    "quantity": 1
+                  }
+                ]
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [
+              "returns_refunds"
+            ],
+            "tool_owner": "returns_refunds",
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "triage"
+              },
+              {
+                "kind": "node_start",
+                "node": "approver",
+                "stage": "reply"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": false,
+            "write": {
+              "operation": "return",
+              "order_id": "ORD-2026-00106",
+              "currency": "SGD"
+            },
+            "allowed_ticket_statuses": [
+              "resolved"
+            ],
+            "expected_route": "auto"
+          },
+          "gold_tool_call_count": 6
+        },
+        "s4": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "open",
+                "skill": "returns-and-refunds"
+              }
+            },
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "read",
+                "skill": "returns-and-refunds",
+                "file": "eligibility.md"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "route",
+              "arguments": {
+                "route": "auto",
+                "order_id": "ORD-2026-00106",
+                "action": "return",
+                "items": [
+                  {
+                    "item_id": "ITM-EVAL-106-1",
+                    "quantity": 1
+                  }
+                ]
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [
+              "returns_refunds"
+            ],
+            "tool_owner": "returns_refunds",
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "triage"
+              },
+              {
+                "kind": "node_start",
+                "node": "approver",
+                "stage": "reply"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": false,
+            "write": {
+              "operation": "return",
+              "order_id": "ORD-2026-00106",
+              "currency": "SGD"
+            },
+            "allowed_ticket_statuses": [
+              "resolved"
+            ],
+            "expected_route": "auto"
+          },
+          "gold_tool_call_count": 7
+        }
+      }
+    },
+    {
+      "id": "gold-07",
+      "ticket_id": "TKT-EVAL-07",
+      "customer_id": "CUS-EVAL-001",
+      "order_id": "ORD-2026-00107",
+      "item_ids": [
+        "ITM-EVAL-107-1"
+      ],
+      "message": "The battery in ORD-2026-00107 is leaking. I cannot safely switch it on to record a video. Can you help with my return?",
+      "variants": {
+        "typo": "The battery in ORD-2026-00107 is leaking. I cannot safely switch it on to record a video. Can you help with my retrun?",
+        "paraphrase": "I cannot safely make a demonstration video because the battery from ORD-2026-00107 is leaking. What can I do?"
+      },
+      "expected": {
+        "decision": "human_review",
+        "operation": "return_request",
+        "minimum_route": "human",
+        "rule_check": "human_review.evidence_unavailable",
+        "allowed": false,
+        "requires_human": true,
+        "write_expected": false
+      },
+      "required_reads": [
+        {
+          "tool": "read_record",
+          "arguments": {
+            "kind": "orders",
+            "record_id": "ORD-2026-00107"
+          }
+        },
+        {
+          "tool": "get_items_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00107"
+          }
+        },
+        {
+          "tool": "get_shipments_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00107"
+          }
+        },
+        {
+          "tool": "get_returns_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00107"
+          }
+        }
+      ],
+      "policy": {
+        "clause_ids": [
+          "RET-SupportingEvidence-3.2"
+        ],
+        "direct_reference_ids": [
+          "RET-SupportingEvidence-3.1"
+        ],
+        "skill_files": [
+          "returns-and-refunds/eligibility.md"
+        ]
+      },
+      "reply_requirements": [
+        "Explain the case-specific reason for human review; do not promise an approved refund or exception."
+      ],
+      "architecture_expectations": {
+        "s1": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "search"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "ticket_state",
+              "arguments": {
+                "action": "handoff"
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [],
+            "tool_owner": null,
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "supervisor"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": true,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "awaiting_human"
+            ],
+            "expected_route": "human"
+          },
+          "gold_tool_call_count": 6
+        },
+        "s2": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "open",
+                "skill": "returns-and-refunds"
+              }
+            },
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "read",
+                "skill": "returns-and-refunds",
+                "file": "eligibility.md"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "ticket_state",
+              "arguments": {
+                "action": "handoff"
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [],
+            "tool_owner": null,
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "supervisor"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": true,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "awaiting_human"
+            ],
+            "expected_route": "human"
+          },
+          "gold_tool_call_count": 7
+        },
+        "s3": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "search"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "route",
+              "arguments": {
+                "route": "human",
+                "order_id": "ORD-2026-00107",
+                "action": "none"
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [
+              "returns_refunds"
+            ],
+            "tool_owner": "returns_refunds",
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "triage"
+              },
+              {
+                "kind": "node_start",
+                "node": "approver",
+                "stage": "reply"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": true,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "awaiting_human"
+            ],
+            "expected_route": "human"
+          },
+          "gold_tool_call_count": 6
+        },
+        "s4": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "open",
+                "skill": "returns-and-refunds"
+              }
+            },
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "read",
+                "skill": "returns-and-refunds",
+                "file": "eligibility.md"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "route",
+              "arguments": {
+                "route": "human",
+                "order_id": "ORD-2026-00107",
+                "action": "none"
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [
+              "returns_refunds"
+            ],
+            "tool_owner": "returns_refunds",
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "triage"
+              },
+              {
+                "kind": "node_start",
+                "node": "approver",
+                "stage": "reply"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": true,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "awaiting_human"
+            ],
+            "expected_route": "human"
+          },
+          "gold_tool_call_count": 7
+        }
+      }
+    },
+    {
+      "id": "gold-08",
+      "ticket_id": "TKT-EVAL-08",
+      "customer_id": "CUS-EVAL-001",
+      "order_id": "ORD-2026-00108",
+      "item_ids": [
+        "ITM-EVAL-108-1"
+      ],
+      "message": "I received ORD-2026-00108 35 days ago and have found a fault. Can I still return it?",
+      "variants": {
+        "typo": "I received ORD-2026-00108 35 days ago and have found a fault. Can I still retrun it?",
+        "paraphrase": "The item on ORD-2026-00108 developed a fault after delivery 35 days ago. Can you review a return?"
+      },
+      "expected": {
+        "decision": "human_review",
+        "operation": "return_request",
+        "minimum_route": "human",
+        "rule_check": "return_request.window_exceeded",
+        "allowed": false,
+        "requires_human": true,
+        "write_expected": false
+      },
+      "required_reads": [
+        {
+          "tool": "read_record",
+          "arguments": {
+            "kind": "orders",
+            "record_id": "ORD-2026-00108"
+          }
+        },
+        {
+          "tool": "get_items_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00108"
+          }
+        },
+        {
+          "tool": "get_shipments_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00108"
+          }
+        },
+        {
+          "tool": "get_returns_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00108"
+          }
+        }
+      ],
+      "policy": {
+        "clause_ids": [
+          "RET-ReturnEligibility-2.6",
+          "RET-ReturnEligibility-2.1"
+        ],
+        "direct_reference_ids": [
+          "RET-ReturnEligibility-2.6"
+        ],
+        "skill_files": [
+          "returns-and-refunds/eligibility.md"
+        ]
+      },
+      "reply_requirements": [
+        "Explain the case-specific reason for human review; do not promise an approved refund or exception."
+      ],
+      "architecture_expectations": {
+        "s1": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "search"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "ticket_state",
+              "arguments": {
+                "action": "handoff"
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [],
+            "tool_owner": null,
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "supervisor"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": true,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "awaiting_human"
+            ],
+            "expected_route": "human"
+          },
+          "gold_tool_call_count": 6
+        },
+        "s2": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "open",
+                "skill": "returns-and-refunds"
+              }
+            },
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "read",
+                "skill": "returns-and-refunds",
+                "file": "eligibility.md"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "ticket_state",
+              "arguments": {
+                "action": "handoff"
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [],
+            "tool_owner": null,
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "supervisor"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": true,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "awaiting_human"
+            ],
+            "expected_route": "human"
+          },
+          "gold_tool_call_count": 7
+        },
+        "s3": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "search"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "route",
+              "arguments": {
+                "route": "human",
+                "order_id": "ORD-2026-00108",
+                "action": "none"
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [
+              "returns_refunds"
+            ],
+            "tool_owner": "returns_refunds",
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "triage"
+              },
+              {
+                "kind": "node_start",
+                "node": "approver",
+                "stage": "reply"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": true,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "awaiting_human"
+            ],
+            "expected_route": "human"
+          },
+          "gold_tool_call_count": 6
+        },
+        "s4": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "open",
+                "skill": "returns-and-refunds"
+              }
+            },
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "read",
+                "skill": "returns-and-refunds",
+                "file": "eligibility.md"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "route",
+              "arguments": {
+                "route": "human",
+                "order_id": "ORD-2026-00108",
+                "action": "none"
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [
+              "returns_refunds"
+            ],
+            "tool_owner": "returns_refunds",
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "triage"
+              },
+              {
+                "kind": "node_start",
+                "node": "approver",
+                "stage": "reply"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": true,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "awaiting_human"
+            ],
+            "expected_route": "human"
+          },
+          "gold_tool_call_count": 7
+        }
+      }
+    },
+    {
+      "id": "gold-09",
+      "ticket_id": "TKT-EVAL-09",
+      "customer_id": "CUS-EVAL-001",
+      "order_id": "ORD-2026-00109",
+      "item_ids": [
+        "ITM-EVAL-109-1"
+      ],
+      "message": "Please cancel ORD-2026-00109. I placed it by mistake.",
+      "variants": {
+        "typo": "Please cancle ORD-2026-00109. I placed it by mistake.",
+        "paraphrase": "I ordered ORD-2026-00109 accidentally. Could you cancel it?"
+      },
+      "expected": {
+        "decision": "cancel_order",
+        "operation": "cancel",
+        "minimum_route": "auto",
+        "rule_check": "cancel.passed",
+        "allowed": true,
+        "requires_human": false,
+        "write_expected": true
+      },
+      "required_reads": [
+        {
+          "tool": "read_record",
+          "arguments": {
+            "kind": "orders",
+            "record_id": "ORD-2026-00109"
+          }
+        },
+        {
+          "tool": "get_items_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00109"
+          }
+        },
+        {
+          "tool": "get_shipments_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00109"
+          }
+        }
+      ],
+      "policy": {
+        "clause_ids": [
+          "ODR-OrderChangeCancel-4.1"
+        ],
+        "direct_reference_ids": [
+          "ODR-OrderChangeCancel-4.2"
+        ],
+        "skill_files": [
+          "orders-and-shipping/changes.md"
+        ]
+      },
+      "reply_requirements": [
+        "Confirm the simulated cancellation; treat any resulting refund as a separate action."
+      ],
+      "architecture_expectations": {
+        "s1": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "search"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "ticket_state",
+              "arguments": {
+                "action": "write",
+                "operation": "cancel",
+                "record_id": "ORD-2026-00109",
+                "item_ids": [
+                  "ITM-EVAL-109-1"
+                ]
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [],
+            "tool_owner": null,
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "supervisor"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": false,
+            "write": {
+              "operation": "cancel",
+              "currency": "SGD",
+              "record_id": "ORD-2026-00109"
+            },
+            "allowed_ticket_statuses": [
+              "open",
+              "resolved"
+            ],
+            "expected_route": "auto"
+          },
+          "gold_tool_call_count": 5
+        },
+        "s2": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "open",
+                "skill": "orders-and-shipping"
+              }
+            },
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "read",
+                "skill": "orders-and-shipping",
+                "file": "changes.md"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "ticket_state",
+              "arguments": {
+                "action": "write",
+                "operation": "cancel",
+                "record_id": "ORD-2026-00109",
+                "item_ids": [
+                  "ITM-EVAL-109-1"
+                ]
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [],
+            "tool_owner": null,
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "supervisor"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": false,
+            "write": {
+              "operation": "cancel",
+              "currency": "SGD",
+              "record_id": "ORD-2026-00109"
+            },
+            "allowed_ticket_statuses": [
+              "open",
+              "resolved"
+            ],
+            "expected_route": "auto"
+          },
+          "gold_tool_call_count": 6
+        },
+        "s3": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "search"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "route",
+              "arguments": {
+                "route": "auto",
+                "order_id": "ORD-2026-00109",
+                "action": "order_change",
+                "reason_code": "cancel"
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [
+              "orders_shipping"
+            ],
+            "tool_owner": "orders_shipping",
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "triage"
+              },
+              {
+                "kind": "node_start",
+                "node": "approver",
+                "stage": "reply"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": false,
+            "write": {
+              "operation": "order_change",
+              "order_id": "ORD-2026-00109",
+              "currency": "SGD"
+            },
+            "allowed_ticket_statuses": [
+              "resolved"
+            ],
+            "expected_route": "auto"
+          },
+          "gold_tool_call_count": 5
+        },
+        "s4": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "open",
+                "skill": "orders-and-shipping"
+              }
+            },
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "read",
+                "skill": "orders-and-shipping",
+                "file": "changes.md"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "route",
+              "arguments": {
+                "route": "auto",
+                "order_id": "ORD-2026-00109",
+                "action": "order_change",
+                "reason_code": "cancel"
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [
+              "orders_shipping"
+            ],
+            "tool_owner": "orders_shipping",
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "triage"
+              },
+              {
+                "kind": "node_start",
+                "node": "approver",
+                "stage": "reply"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": false,
+            "write": {
+              "operation": "order_change",
+              "order_id": "ORD-2026-00109",
+              "currency": "SGD"
+            },
+            "allowed_ticket_statuses": [
+              "resolved"
+            ],
+            "expected_route": "auto"
+          },
+          "gold_tool_call_count": 6
+        }
+      }
+    },
+    {
+      "id": "gold-10",
+      "ticket_id": "TKT-EVAL-10",
+      "customer_id": "CUS-EVAL-001",
+      "order_id": "ORD-2026-00110",
+      "item_ids": [
+        "ITM-EVAL-110-1",
+        "ITM-EVAL-110-2"
+      ],
+      "message": "Only one parcel from ORD-2026-00110 arrived. Where is the other parcel? It was due several days ago.",
+      "variants": {
+        "typo": "Only one parcle from ORD-2026-00110 arrived. Where is the other parcle? It was due several days ago.",
+        "paraphrase": "One parcel on ORD-2026-00110 arrived, while the other is several days overdue. Please check both."
+      },
+      "expected": {
+        "decision": "human_review",
+        "operation": "delivery",
+        "minimum_route": "human",
+        "rule_check": "delivery.waiting_period_exceeded",
+        "allowed": false,
+        "requires_human": true,
+        "write_expected": false
+      },
+      "required_reads": [
+        {
+          "tool": "read_record",
+          "arguments": {
+            "kind": "orders",
+            "record_id": "ORD-2026-00110"
+          }
+        },
+        {
+          "tool": "get_items_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00110"
+          }
+        },
+        {
+          "tool": "get_shipments_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00110"
+          }
+        },
+        {
+          "tool": "get_shipment_events_for_order",
+          "arguments": {
+            "order_id": "ORD-2026-00110"
+          }
+        }
+      ],
+      "policy": {
+        "clause_ids": [
+          "SHP-SeparateShipPartialDel-6.2",
+          "SHP-DeliveryProblems-7.1"
+        ],
+        "direct_reference_ids": [
+          "SHP-DeliveryProblems-7.1",
+          "SHP-DeliveryProblems-7.2",
+          "SHP-DeliveryProblems-7.3",
+          "SHP-DeliveryProblems-7.4",
+          "SHP-DeliveryProblems-7.5"
+        ],
+        "skill_files": [
+          "orders-and-shipping/tracking.md"
+        ]
+      },
+      "reply_requirements": [
+        "Explain the case-specific reason for human review; do not promise an approved refund or exception."
+      ],
+      "architecture_expectations": {
+        "s1": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "search"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "ticket_state",
+              "arguments": {
+                "action": "handoff"
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [],
+            "tool_owner": null,
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "supervisor"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": true,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "awaiting_human"
+            ],
+            "expected_route": "human"
+          },
+          "gold_tool_call_count": 6
+        },
+        "s2": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "open",
+                "skill": "orders-and-shipping"
+              }
+            },
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "read",
+                "skill": "orders-and-shipping",
+                "file": "tracking.md"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "ticket_state",
+              "arguments": {
+                "action": "handoff"
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [],
+            "tool_owner": null,
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "supervisor"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": true,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "awaiting_human"
+            ],
+            "expected_route": "human"
+          },
+          "gold_tool_call_count": 7
+        },
+        "s3": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "search"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "route",
+              "arguments": {
+                "route": "human",
+                "order_id": "ORD-2026-00110",
+                "action": "none"
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [
+              "orders_shipping"
+            ],
+            "tool_owner": "orders_shipping",
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "triage"
+              },
+              {
+                "kind": "node_start",
+                "node": "approver",
+                "stage": "reply"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": true,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "awaiting_human"
+            ],
+            "expected_route": "human"
+          },
+          "gold_tool_call_count": 6
+        },
+        "s4": {
+          "policy_calls": [
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "open",
+                "skill": "orders-and-shipping"
+              }
+            },
+            {
+              "tool": "policy",
+              "arguments": {
+                "action": "read",
+                "skill": "orders-and-shipping",
+                "file": "tracking.md"
+              }
+            }
+          ],
+          "action_calls": [
+            {
+              "tool": "route",
+              "arguments": {
+                "route": "human",
+                "order_id": "ORD-2026-00110",
+                "action": "none"
+              }
+            }
+          ],
+          "workflow": {
+            "required_specialists": [
+              "orders_shipping"
+            ],
+            "tool_owner": "orders_shipping",
+            "required_events": [
+              {
+                "kind": "node_start",
+                "node": "triage"
+              },
+              {
+                "kind": "node_start",
+                "node": "approver",
+                "stage": "reply"
+              }
+            ],
+            "proposal_review_before_write": false,
+            "single_agent_review_reason": false
+          },
+          "outcome": {
+            "handoff_expected": true,
+            "write": null,
+            "allowed_ticket_statuses": [
+              "awaiting_human"
+            ],
+            "expected_route": "human"
+          },
+          "gold_tool_call_count": 7
+        }
+      }
+    }
+  ]
+}

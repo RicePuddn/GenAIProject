@@ -1,0 +1,342 @@
+[
+  {
+    "id": "q01",
+    "question": "I received my item on 5 October. What is the last day I can request a return?",
+    "expected_chunk_ids": [
+      "RET-ReturnEligibility-2.1"
+    ]
+  },
+  {
+    "id": "q02",
+    "question": "My items arrived in separate parcels on different dates. When does each return period start?",
+    "expected_chunk_ids": [
+      "RET-ReturnEligibility-2.1",
+      "SHP-SeparateShipPartialDel-6.3"
+    ]
+  },
+  {
+    "id": "q03",
+    "question": "My final-sale item arrived faulty and I threw away its original box. Can I still request a return?",
+    "expected_chunk_ids": [
+      "RET-ReturnEligibility-2.5"
+    ]
+  },
+  {
+    "id": "q04",
+    "question": "I changed my mind about a final-sale item, but it is unopened. Is it returnable?",
+    "expected_chunk_ids": [
+      "RET-ReturnEligibility-2.4",
+      "RET-ReturnEligibility-2.5"
+    ]
+  },
+  {
+    "id": "q05",
+    "question": "The battery is leaking. I cannot safely switch it on to record evidence. Will my claim be rejected?",
+    "expected_chunk_ids": [
+      "RET-SupportingEvidence-3.2"
+    ],
+    "expected_reference_chunk_ids": [
+      "RET-SupportingEvidence-3.1"
+    ]
+  },
+  {
+    "id": "q06",
+    "question": "My return was approved today. How long do I have to hand it to the carrier?",
+    "expected_chunk_ids": [
+      "RET-ReturnProcedure-4.2"
+    ],
+    "expected_reference_chunk_ids": [
+      "RET-ReturnProcedure-4.5"
+    ]
+  },
+  {
+    "id": "q07",
+    "question": "The store-arranged return pickup failed and my dispatch deadline is passing. What happens?",
+    "expected_chunk_ids": [
+      "RET-ReturnProcedure-4.5"
+    ]
+  },
+  {
+    "id": "q08",
+    "question": "Can I pay a courier myself and claim back shipping for an accepted faulty-item return?",
+    "expected_chunk_ids": [
+      "RET-ShippingFees-5.1"
+    ]
+  },
+  {
+    "id": "q09",
+    "question": "For a change-of-mind return, who pays return shipping and do I get the original shipping fee back?",
+    "expected_chunk_ids": [
+      "RET-ShippingFees-5.1",
+      "RET-ShippingFees-5.2"
+    ]
+  },
+  {
+    "id": "q10",
+    "question": "Is my partial refund calculated using the current catalogue price?",
+    "expected_chunk_ids": [
+      "REF-Refunds-6.2"
+    ]
+  },
+  {
+    "id": "q11",
+    "question": "Can my refund be sent to a different bank account I provide in this chat?",
+    "expected_chunk_ids": [
+      "REF-Refunds-6.3"
+    ]
+  },
+  {
+    "id": "q12",
+    "question": "After my card refund is processed, when should I see the money?",
+    "expected_chunk_ids": [
+      "REF-Refunds-6.4"
+    ]
+  },
+  {
+    "id": "q13",
+    "question": "The warehouse says my returned parcel contained the wrong item, but I disagree. Can they reject me immediately?",
+    "expected_chunk_ids": [
+      "RET-ReturnParcelDisputes-7.2"
+    ]
+  },
+  {
+    "id": "q14",
+    "question": "I think my purchase is counterfeit. Am I automatically entitled to double compensation?",
+    "expected_chunk_ids": [
+      "RET-ReturnParcelDisputes-7.3"
+    ]
+  },
+  {
+    "id": "q15",
+    "question": "I returned an unused item but inspection says it was used. How do I dispute the finding?",
+    "expected_chunk_ids": [
+      "RET-ReturnParcelDisputes-7.4"
+    ]
+  },
+  {
+    "id": "q16",
+    "question": "Can you guarantee delivery at 3 pm tomorrow?",
+    "expected_chunk_ids": [
+      "SHP-ShippingOptions-2.2"
+    ]
+  },
+  {
+    "id": "q17",
+    "question": "A label has been generated but the courier has not collected it. Can I change the address?",
+    "expected_chunk_ids": [
+      "ODR-OrderChangeCancel-4.4"
+    ],
+    "expected_reference_chunk_ids": [
+      "SHP-DeliveryProblems-7.3",
+      "SHP-DeliveryProblems-7.4"
+    ]
+  },
+  {
+    "id": "q18",
+    "question": "My order says processing but packing has started. Can I cancel it through the ordinary process?",
+    "expected_chunk_ids": [
+      "ODR-OrderChangeCancel-4.1",
+      "ODR-OrderChangeCancel-4.3"
+    ]
+  },
+  {
+    "id": "q19",
+    "question": "My order has three tracking numbers. Do I owe three delivery charges?",
+    "expected_chunk_ids": [
+      "SHP-ShippingFees-3.2",
+      "SHP-SeparateShipPartialDel-6.1"
+    ]
+  },
+  {
+    "id": "q20",
+    "question": "Only one of my three parcels arrived. Does delivered mean everything has arrived?",
+    "expected_chunk_ids": [
+      "ODR-OrderStatusTracking-5.1",
+      "SHP-SeparateShipPartialDel-6.2"
+    ]
+  },
+  {
+    "id": "q21",
+    "question": "There is no estimated delivery date for my parcel. How long do I have to wait before someone checks it?",
+    "expected_chunk_ids": [
+      "ODR-OrderStatusTracking-5.3",
+      "SHP-DeliveryProblems-7.1"
+    ]
+  },
+  {
+    "id": "q22",
+    "question": "The carrier has confirmed my parcel is lost. Must I wait another three days before investigation?",
+    "expected_chunk_ids": [
+      "SHP-DeliveryProblems-7.2"
+    ]
+  },
+  {
+    "id": "q23",
+    "question": "Tracking says delivered, but nobody at my address received anything. Must I wait three days?",
+    "expected_chunk_ids": [
+      "SHP-DeliveryProblems-7.4"
+    ]
+  },
+  {
+    "id": "q24",
+    "question": "I received the item sixteen days ago and want to return it because I changed my mind. What conditions matter?",
+    "expected_chunk_ids": [
+      "RET-ReturnEligibility-2.1",
+      "RET-ReturnEligibility-2.4"
+    ]
+  },
+  {
+    "id": "q25",
+    "question": "My $60 refund has been accepted, but you say another check is needed. Does a person need to approve it?",
+    "expected_chunk_ids": [
+      "REF-Refunds-6.6"
+    ],
+    "expected_reference_chunk_ids": [
+      "REF-Refunds-6.1",
+      "REF-Refunds-6.2",
+      "REF-Refunds-6.3"
+    ]
+  },
+  {
+    "id": "q26",
+    "question": "I paid for express delivery yesterday, but tracking only says label created. When does the delivery time start?",
+    "expected_chunk_ids": [
+      "SHP-ShippingOptions-2.2"
+    ]
+  },
+  {
+    "id": "q27",
+    "question": "Can I upgrade my order to express delivery before it gets packed?",
+    "expected_chunk_ids": [
+      "SHP-ShippingOptions-2.3"
+    ],
+    "expected_reference_chunk_ids": [
+      "ODR-OrderChangeCancel-4.1"
+    ]
+  },
+  {
+    "id": "q28",
+    "question": "Shipping is cheaper on the website today. Can you reduce the delivery fee on the order I already paid for?",
+    "expected_chunk_ids": [
+      "SHP-ShippingFees-3.1"
+    ]
+  },
+  {
+    "id": "q29",
+    "question": "I forgot to buy a second charger. Can you add it to the order I have already paid for?",
+    "expected_chunk_ids": [
+      "ODR-OrderChangeCancel-4.5"
+    ]
+  },
+  {
+    "id": "q30",
+    "question": "I cancelled an unpaid order. Will any money be refunded?",
+    "expected_chunk_ids": [
+      "ODR-OrderChangeCancel-4.2"
+    ]
+  },
+  {
+    "id": "q31",
+    "question": "The courier website says my tracking number is invalid. Does that mean my parcel is lost?",
+    "expected_chunk_ids": [
+      "ODR-OrderStatusTracking-5.2"
+    ]
+  },
+  {
+    "id": "q32",
+    "question": "My parcel is four days past its estimated delivery date and still has not arrived. Can someone investigate?",
+    "expected_chunk_ids": [
+      "SHP-DeliveryProblems-7.1"
+    ],
+    "expected_reference_chunk_ids": [
+      "SHP-DeliveryProblems-7.2",
+      "SHP-DeliveryProblems-7.4"
+    ]
+  },
+  {
+    "id": "q33",
+    "question": "I missed the delivery driver. Will they definitely come back tomorrow?",
+    "expected_chunk_ids": [
+      "SHP-DeliveryProblems-7.3"
+    ]
+  },
+  {
+    "id": "q34",
+    "question": "The headphones arrived without the charging cable that should be included. Can I request a return or refund?",
+    "expected_chunk_ids": [
+      "RET-ReturnEligibility-2.3"
+    ]
+  },
+  {
+    "id": "q35",
+    "question": "I received this item 35 days ago and have only just found a fault. Can someone still review my return request?",
+    "expected_chunk_ids": [
+      "RET-ReturnEligibility-2.6"
+    ]
+  },
+  {
+    "id": "q36",
+    "question": "The wrong colour arrived. What evidence should I send with my return request?",
+    "expected_chunk_ids": [
+      "RET-SupportingEvidence-3.1"
+    ],
+    "expected_reference_chunk_ids": [
+      "RET-SupportingEvidence-3.2"
+    ]
+  },
+  {
+    "id": "q37",
+    "question": "I want to return this item. Can I send it back before you give me a return address?",
+    "expected_chunk_ids": [
+      "RET-ReturnProcedure-4.1"
+    ]
+  },
+  {
+    "id": "q38",
+    "question": "Can I change my return from a pickup to a courier I arrange myself?",
+    "expected_chunk_ids": [
+      "RET-ReturnProcedure-4.3"
+    ],
+    "expected_reference_chunk_ids": [
+      "RET-ShippingFees-5.1"
+    ]
+  },
+  {
+    "id": "q39",
+    "question": "Return tracking says the warehouse received my parcel today. Does that mean my refund has been approved?",
+    "expected_chunk_ids": [
+      "REF-Refunds-6.1"
+    ]
+  },
+  {
+    "id": "q40",
+    "question": "Could I get a replacement or store credit instead of a refund?",
+    "expected_chunk_ids": [
+      "REF-Refunds-6.5"
+    ]
+  },
+  {
+    "id": "q41",
+    "question": "My $20 refund has been accepted and the item inspection is complete. Can it be processed automatically?",
+    "expected_chunk_ids": [
+      "REF-Refunds-6.6"
+    ],
+    "expected_reference_chunk_ids": [
+      "REF-Refunds-6.1",
+      "REF-Refunds-6.2",
+      "REF-Refunds-6.3"
+    ]
+  },
+  {
+    "id": "q42",
+    "question": "My $120 refund is on hold for review. Why can't you just process it?",
+    "expected_chunk_ids": [
+      "REF-Refunds-6.6"
+    ],
+    "expected_reference_chunk_ids": [
+      "REF-Refunds-6.1",
+      "REF-Refunds-6.2",
+      "REF-Refunds-6.3"
+    ]
+  }
+]
