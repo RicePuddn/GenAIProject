@@ -33,8 +33,8 @@ from support_ops.agents.guard import screen
 from support_ops.agents.models import ApprovalResult, Proposal, SupervisorStep, Task, Triage
 from support_ops.agents.runtime import AgentContext, Budget, BudgetExceeded, Retries, llm_from_config
 from support_ops.agents.specialist import STRATEGIES, Specialist
-from support_ops.agents.toolbox import (ORDERS_SHIPPING_TOOLS, RETURNS_REFUNDS_TOOLS, Toolbox, policy_search_tool,
-                                        policy_skills_tool, returns_lookup_tool)
+from support_ops.agents.toolbox import (ORDERS_SHIPPING_TOOLS, RETURNS_REFUNDS_TOOLS, Toolbox,
+                                        returns_lookup_tool)
 from support_ops.backend.postgres import PostgresReader
 from support_ops.gateway.approvals import TicketFlow
 from support_ops.gateway.route import RouteTool
@@ -47,7 +47,6 @@ from support_ops.helpers.tracing import Tracer
 from support_ops.policy.provider import PolicyProvider
 from support_ops.policy.routing import RoutingRules
 from support_ops.policy.rules import Rules
-from support_ops.policy.skills import SkillsPolicy
 from support_ops.supervisor.escalation import (FIXED_REPLY_TRIGGERS, HOLD_REPLY, confirm_question, customer_insists,
                                               handoff_packet, missing_records, plain_dashes,
                                               triage_escalation)
@@ -106,6 +105,10 @@ class MultiAgentWorkflow:
                  cancellation: CancellationToken | None = None):
         self.llm, self.cfg = llm, cfg
         self.settings = {**DEFAULTS, **cfg.get("multi_agent", {})}
+        for key in ("policy_sections", "policy_skills"):
+            # Per specialist, so a config naming one specialist's scope keeps the other's default scope
+            # instead of leaving it unscoped (None, the whole policy, stays available when set explicitly).
+            self.settings[key] = {**DEFAULTS[key], **(cfg.get("multi_agent", {}).get(key) or {})}
         self.retries = Retries.from_config(cfg)
         self.clock = clock or Clock(datetime.fromisoformat(cfg["run"]["clock_start"]))
         self._provided_tracer = tracer
@@ -116,6 +119,12 @@ class MultiAgentWorkflow:
         self.reader = reader or PostgresReader()
         self.ticket_state = TicketState(self.clock, rules=rules)
         self.tools = SupportTools(self.reader, policy or policy_from_config(cfg, rules), self.ticket_state)
+        policy = self.tools.policy
+        if policy.strict_scope:   # e.g. a mistyped skill folder: fail now, not as empty lists mid-ticket
+            for specialist, scope in self.settings[policy.scope_setting].items():
+                if missing := policy.check_scope(scope):
+                    raise ValueError(f"multi_agent.{policy.scope_setting} for {specialist} names parts the "
+                                     f"policy does not have: {missing}")
         self.flow = TicketFlow(self.ticket_state, self.clock)
         self.writes = MockWrites(self.flow, self.routing.currency)
         self._tokens: dict[str, str | None] = {}   # kept out of graph state, so never returned
@@ -320,14 +329,13 @@ class MultiAgentWorkflow:
         route = RouteTool(self.reader, self.routing, self.clock, name, returns_checked, orders_seen)
         wrapped = {"policy", "get_returns_for_order"}
         reads = [tool for tool in SPECIALIST_TOOLS[name] if tool not in wrapped]
-        if isinstance(self.tools.policy, SkillsPolicy):
-            skills = self.settings["policy_skills"].get(name)
-            self._check_skills(name, skills)
-            extra = {"policy": policy_skills_tool(self.tools, skills)}
-        else:
-            sections = self.settings["policy_sections"].get(name)
-            self._check_sections(name, sections)
-            extra = {"policy": policy_search_tool(self.tools, sections)}
+        policy = self.tools.policy
+        scope = self.settings[policy.scope_setting].get(name)
+        # A strict provider already refused a missing part at start-up; otherwise an empty search is never
+        # a silent mystery.
+        if not policy.strict_scope and (missing := policy.check_scope(scope)):
+            self._event(f"{policy.scope_setting}_missing", specialist=name, missing=missing)
+        extra: dict[str, Any] = {"policy": policy.scoped_tool(scope)}
         if "get_returns_for_order" in SPECIALIST_TOOLS[name]:
             extra["get_returns_for_order"] = returns_lookup_tool(self.tools, returns_checked)
         toolbox = Toolbox(self.tools, reads, {**extra, "route": route.as_tool()})
@@ -402,22 +410,6 @@ class MultiAgentWorkflow:
         """A finished part for the response and the handoff packet (its evidence is in the ticket's)."""
         dump = lambda value: value.model_dump(mode="json") if hasattr(value, "model_dump") else value
         return {key: dump(value) for key, value in part.items() if key != "evidence"}
-
-    def _check_sections(self, name: str, sections: list[str] | None) -> None:
-        """Flag configured sections the corpus does not have, so an empty search is never a silent mystery."""
-        retriever = getattr(self.tools.policy, "retriever", None)
-        try:
-            known = {section.casefold() for section in retriever.sections()} if retriever else None
-        except Exception:
-            known = None
-        if known and (missing := [section for section in sections or [] if section.casefold() not in known]):
-            self._event("policy_sections_missing", specialist=name, missing=missing, corpus_sections=sorted(known))
-
-    def _check_skills(self, name: str, skills: list[str] | None) -> None:
-        """The skills counterpart of `_check_sections`: flag configured skill folders that do not exist."""
-        known = {item["skill"] for item in self.tools.policy.catalog()}
-        if missing := [skill for skill in skills or [] if skill not in known]:
-            self._event("policy_skills_missing", specialist=name, missing=missing, available=sorted(known))
 
     def _decide(self, state: MultiAgentState) -> dict[str, Any]:
         self._event("node_start", node="decide", route=state["proposal"].route)
