@@ -70,7 +70,6 @@ class Toolbox:
     def names(self) -> list[str]:
         return list(self.argument_models)
 
-
     def validate(self, name: str, arguments: Any) -> dict[str, Any]:
         return validate_arguments(self.argument_models, name, arguments)
 

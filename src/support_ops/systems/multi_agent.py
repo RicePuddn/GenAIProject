@@ -105,6 +105,10 @@ class MultiAgentWorkflow:
                  cancellation: CancellationToken | None = None):
         self.llm, self.cfg = llm, cfg
         self.settings = {**DEFAULTS, **cfg.get("multi_agent", {})}
+        for key in ("policy_sections", "policy_skills"):
+            # Per specialist, so a config naming one specialist's scope keeps the other's default scope
+            # instead of leaving it unscoped (None, the whole policy, stays available when set explicitly).
+            self.settings[key] = {**DEFAULTS[key], **(cfg.get("multi_agent", {}).get(key) or {})}
         self.retries = Retries.from_config(cfg)
         self.clock = clock or Clock(datetime.fromisoformat(cfg["run"]["clock_start"]))
         self._provided_tracer = tracer
@@ -305,7 +309,9 @@ class MultiAgentWorkflow:
         reads = [tool for tool in SPECIALIST_TOOLS[name] if tool not in wrapped]
         policy = self.tools.policy
         scope = self.settings[policy.scope_setting].get(name)
-        if missing := policy.check_scope(scope):   # an empty search is never a silent mystery
+        # A strict provider already refused a missing part at start-up; otherwise an empty search is never
+        # a silent mystery.
+        if not policy.strict_scope and (missing := policy.check_scope(scope)):
             self._event(f"{policy.scope_setting}_missing", specialist=name, missing=missing)
         extra: dict[str, Any] = {"policy": policy.scoped_tool(scope)}
         if "get_returns_for_order" in SPECIALIST_TOOLS[name]:

@@ -34,6 +34,20 @@ SCOPES: dict[SpecialistName, str] = {
 }
 
 
+def citation_forms(clause: str) -> set[str]:
+    """The ways a citation may name what was read, casefolded: as written, each side of a `#` anchor, a
+    path cut to its last two parts (skill/file, so another skill's file of the same name does not match),
+    and the leading clause ID of "RET-1 Return window"."""
+    forms = set()
+    for part in clause.strip().casefold().split("#"):
+        part = part.strip().strip("/")
+        if not part:
+            continue
+        pieces = part.split("/")
+        forms |= {part, "/".join(pieces[-2:]), part.split()[0]}
+    return forms
+
+
 @dataclass
 class SpecialistResult:
     proposal: Proposal | None = None
@@ -149,7 +163,8 @@ class Specialist:
         if not self.cfg.get("multi_agent", {}).get("check_citations", True) or not isinstance(arguments, dict):
             return
         cited = arguments.get("cited_clauses") or []
-        if unread := [str(clause) for clause in cited if str(clause).strip() not in result.citable]:
+        citable = {item.casefold() for item in result.citable}
+        if unread := [str(clause) for clause in cited if not citation_forms(str(clause)) & citable]:
             self.ctx.log("citation_rejected", agent=self.name, unread=unread)
             raise ValueError(f"cited_clauses {unread} were not returned by your policy tool in this case; "
                              "read them first, or cite only the clause IDs or files you read")
@@ -231,7 +246,8 @@ class Specialist:
                     return
                 if "error" in value:
                     # The rest of the plan, and a proposal, would rest on evidence that is missing.
-                    failed = f"planned call {name} failed: {value['error']}; plan again using the evidence"
+                    failed = (f"planned call {name} failed: {value['error']}; plan again using the evidence, "
+                              "without repeating calls whose results are already in it")
                     break
             if failed:
                 previous_error = failed

@@ -125,11 +125,13 @@ class SkillsPolicy:
 
     @staticmethod
     def citable(result: dict[str, Any]) -> set[str]:
-        """A file read can be cited by its name, skill/name, or a clause ID heading in it."""
+        """A file read can be cited by its name, skill/name, or a clause ID heading in it. Every skill has a
+        SKILL.md, so that one needs its skill: a bare SKILL.md does not say which policy was read."""
         if "file" not in result or "content" not in result:
             return set()
         ids = {match.group(1) for match in MARKDOWN_CLAUSE.finditer(result["content"])}
-        return {result["file"], f"{result['skill']}/{result['file']}", *ids}
+        names = {f"{result['skill']}/{result['file']}"} | ({result["file"]} if result["file"] != "SKILL.md" else set())
+        return names | ids
 
     def scoped_tool(self, scope: Sequence[str] | None) -> ScopedPolicyTool:
         """list/open/read without `check`, limited by default to the specialist's `scope` skill folders."""

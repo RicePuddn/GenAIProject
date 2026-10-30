@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from support_ops.api_multi import app
+from support_ops.agents.specialist import citation_forms
 from support_ops.agents.toolbox import Toolbox
 from support_ops.helpers.clock import Clock
 from support_ops.helpers.config import load_config
@@ -227,6 +228,7 @@ class CitationTests(SkillsBase):
         result = self.run_flow(strategy="plan_and_execute")
         rejected = result["trace"].of_kind("plan_rejected")
         self.assertIn("planned call policy failed", rejected[0]["reason"])
+        self.assertIn("without repeating calls", rejected[0]["reason"])
         self.assertEqual(result["ticket_status"], "resolved")
         self.assertEqual(result["proposal"]["cited_clauses"], ["returns-and-refunds/refunds.md"])
 
@@ -254,3 +256,59 @@ class CitationTests(SkillsBase):
         self.assertEqual(SkillsPolicy.citable({"skill": "returns-and-refunds", "file": "refunds.md",
                                                "content": "# Refunds\n## RET-1 Return window\nWithin 30 days."}),
                          {"refunds.md", "returns-and-refunds/refunds.md", "RET-1"})
+
+    def test_a_read_file_can_be_cited_by_case_path_or_anchor(self):
+        self.llm.push("supervisor", triage(), text("Your refund of 20 SGD is recorded.")).push(
+            "specialist", tool_call("policy", action="read", skill="returns-and-refunds", file="refunds.md"),
+            route(cited_clauses=["Returns-And-Refunds/Refunds.md", "policy/skills/returns-and-refunds/refunds.md",
+                                 "refunds.md#damaged-items"])).push("approver", verdict())
+        result = self.run_flow()
+        self.assertEqual(result["trace"].of_kind("citation_rejected"), [])
+        self.assertEqual(result["ticket_status"], "resolved")
+
+    def test_the_same_file_name_in_another_skill_is_still_unread(self):
+        self.llm.push("supervisor", triage(), text("Your refund of 20 SGD is recorded.")).push(
+            "specialist", tool_call("policy", action="open", skill="returns-and-refunds"),
+            route(cited_clauses=["policy/skills/orders-and-shipping/SKILL.md"]),   # opened the other SKILL.md
+            route(cited_clauses=["returns-and-refunds/SKILL.md"])).push("approver", verdict())
+        result = self.run_flow()
+        self.assertEqual(result["trace"].of_kind("citation_rejected")[0]["unread"],
+                         ["policy/skills/orders-and-shipping/SKILL.md"])
+        self.assertEqual(result["ticket_status"], "resolved")
+
+    def test_citation_forms(self):
+        self.assertIn("ret-1", citation_forms("RET-1 Return window"))
+        self.assertIn("ret-1", citation_forms("refunds.md#RET-1"))
+        self.assertIn("returns-and-refunds/refunds.md", citation_forms("/policy/skills/returns-and-refunds/refunds.md"))
+        self.assertNotIn("refunds.md", citation_forms("orders-and-shipping/refunds.md"))
+
+
+class ScopeSettingTests(SkillsBase):
+    def test_a_partial_scope_map_keeps_the_other_specialists_default(self):
+        self.cfg["multi_agent"]["policy_skills"] = {"returns_refunds": ["returns-and-refunds", "orders-and-shipping"]}
+        self.cfg["multi_agent"]["policy_sections"] = {"orders_shipping": ["Orders"]}
+        workflow = MultiAgentWorkflow(self.llm, self.cfg, reader=reader(), policy=SkillsPolicy(skills_dir()),
+                                      clock=Clock(NOW))
+        self.assertEqual(workflow.settings["policy_skills"],
+                         {"orders_shipping": ["orders-and-shipping"],
+                          "returns_refunds": ["returns-and-refunds", "orders-and-shipping"]})
+        self.assertEqual(workflow.settings["policy_sections"],
+                         {"orders_shipping": ["Orders"], "returns_refunds": ["Returns and refunds"]})
+
+    def test_an_explicit_null_scope_still_means_the_whole_policy(self):
+        self.cfg["multi_agent"]["policy_skills"] = {"orders_shipping": None}
+        workflow = MultiAgentWorkflow(self.llm, self.cfg, reader=reader(), policy=SkillsPolicy(skills_dir()),
+                                      clock=Clock(NOW))
+        self.assertIsNone(workflow.settings["policy_skills"]["orders_shipping"])
+
+    def test_skills_scope_is_checked_once_at_start_not_per_ticket(self):
+        self.llm.push("supervisor", triage(), text("Recorded.")).push("specialist", route()).push("approver", verdict())
+        with patch.object(SkillsPolicy, "check_scope", autospec=True, return_value=[]) as check_scope:
+            self.run_flow()
+        self.assertEqual(check_scope.call_count, len(self.workflow.settings["policy_skills"]))
+
+
+class SkillMdCitationTests(unittest.TestCase):
+    def test_skill_md_must_name_its_skill(self):
+        citable = SkillsPolicy.citable({"skill": "returns-and-refunds", "file": "SKILL.md", "content": "# Returns\n"})
+        self.assertEqual(citable, {"returns-and-refunds/SKILL.md"})
