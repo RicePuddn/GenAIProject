@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from support_ops.api_multi import app
-from support_ops.agents.specialist import citation_forms
+from support_ops.policy.citations import citation_forms
 from support_ops.agents.toolbox import Toolbox
 from support_ops.helpers.clock import Clock
 from tests.fake_writer import FakeWriter

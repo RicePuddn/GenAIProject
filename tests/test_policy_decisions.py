@@ -16,9 +16,19 @@ from tests.test_routing import REFUND
 
 
 class BackendFactTests(unittest.TestCase):
-    def tools(self, provider="skills", backend=None):
+    def tools(self, provider="skills", backend=None, reviewer=None):
         policy = SkillsPolicy() if provider == "skills" else RagPolicy(Mock())
-        return SupportTools(backend or reader(), policy, TicketState(Clock(NOW)), FakeWriter())
+        return SupportTools(backend or reader(), policy, TicketState(Clock(NOW)), FakeWriter(), reviewer=reviewer)
+
+    @staticmethod
+    def retrieve(tools, provider="skills"):
+        """Retrieve the refunds policy in ticket T1 and return a citation for it."""
+        if provider == "skills":
+            tools.execute("T1", "policy", {"action": "read", "skill": "returns-and-refunds", "file": "refunds.md"})
+            return "refunds.md"
+        tools.policy.retriever.search.return_value = [{"id": "REF-Refunds-6.6", "text": "Refund rules."}]
+        tools.execute("T1", "policy", {"action": "search", "query": "refund"})
+        return "REF-Refunds-6.6"
 
     def write(self, tools, amount=20, **details):
         return tools.execute("T1", "backend_write", {
@@ -154,16 +164,64 @@ class BackendFactTests(unittest.TestCase):
                 tools = self.tools(provider)
                 with patch.object(tools.backend_facts, "read", return_value=REFUND):
                     self.assertEqual(self.write(tools)["policy_check"]["route"], "auto")
-                tools = self.tools(provider)
+                requests = []
+                approve = lambda request: requests.append(request) or {"decision": "approve", "issues": []}
+                tools = self.tools(provider, reviewer=approve)
+                cited = self.retrieve(tools, provider)
                 with patch.object(tools.backend_facts, "read", return_value=REFUND):
                     self.assertEqual(self.write(tools, 60)["status"], "review_required")
+                    self.assertEqual(self.write(tools, 60, review_reason="Reviewed.")["status"], "review_required")
                     self.assertFalse(tools.writer.applied)
-                    reviewed = self.write(tools, 60, review_reason="Reviewed the policy, facts and amount.")
+                    reviewed = self.write(tools, 60, review_reason="Reviewed the policy, facts and amount.",
+                                          cited_clauses=[cited])
                     self.assertEqual(reviewed["policy_check"]["route"], "approver")
                     self.assertEqual(reviewed["status"], "executed")
+                self.assertEqual(len(requests), 1)
+                self.assertEqual(requests[0]["proposal"]["cited_clauses"], [cited])
+                self.assertEqual(requests[0]["evidence"][0]["tool"], "policy")
                 tools = self.tools(provider)
                 with patch.object(tools.backend_facts, "read", return_value=REFUND):
                     self.assertEqual(self.write(tools, 120, review_reason="Please allow.")["status"], "awaiting_human")
+
+    def test_a_write_may_cite_only_what_the_policy_tool_returned_in_this_ticket(self):
+        for provider in ("rag", "skills"):
+            with self.subTest(provider=provider):
+                tools = self.tools(provider, reviewer=lambda request: {"decision": "approve", "issues": []})
+                with patch.object(tools.backend_facts, "read", return_value=REFUND):
+                    with self.assertRaisesRegex(ValueError, "were not returned by the policy tool"):
+                        self.write(tools, 60, review_reason="Per policy.", cited_clauses=["REF-Refunds-6.6"])
+                    cited = self.retrieve(tools, provider)
+                    with self.assertRaisesRegex(ValueError, "were not returned"):   # another ticket's reads
+                        tools.execute("T2", "backend_write", {
+                            "operation": "refund", "order_id": ORDER, "reason": "damaged_item", "amount": 60,
+                            "items": [{"item_id": "ITM-1", "quantity": 1}], "review_reason": "Per policy.",
+                            "cited_clauses": [cited]})
+                    with self.assertRaisesRegex(ValueError, "were not returned"):   # checked on auto writes too
+                        self.write(tools, cited_clauses=[cited, "REF-Invented-9.9"])
+                self.assertFalse(tools.writer.applied)
+
+    def test_the_independent_review_decides_writes_requiring_review(self):
+        verdicts = {"reject": {"decision": "reject", "issues": ["amount exceeds the item paid"]},
+                    "escalate": {"decision": "escalate", "issues": ["needs an operator"]}}
+        for name, verdict in verdicts.items():
+            with self.subTest(verdict=name):
+                tools = self.tools(reviewer=lambda request: verdict)
+                cited = self.retrieve(tools)
+                with patch.object(tools.backend_facts, "read", return_value=REFUND):
+                    first = self.write(tools, 60, review_reason="Per policy.", cited_clauses=[cited])
+                    if name == "reject":   # the agent may fix one rejection; the next goes to a human
+                        self.assertEqual(first["status"], "blocked")
+                        self.assertIn("amount exceeds the item paid", first["reason"])
+                        first = self.write(tools, 60, review_reason="Per policy.", cited_clauses=[cited])
+                    self.assertEqual(first["status"], "awaiting_human")
+                    self.assertIn(f"reviewer {name}", first["handoff_packet"]["reason"])
+                self.assertFalse(tools.writer.applied)
+        tools = self.tools()   # no reviewer: a write requiring review is never executed unreviewed
+        cited = self.retrieve(tools)
+        with patch.object(tools.backend_facts, "read", return_value=REFUND):
+            self.assertEqual(self.write(tools, 60, review_reason="Per policy.", cited_clauses=[cited])["status"],
+                             "awaiting_human")
+        self.assertFalse(tools.writer.applied)
 
     def test_review_cannot_override_a_blocked_amount_or_human_condition(self):
         for changes, expected in (({"refunded_amount": 190}, "blocked"), ({"disputed": True}, "awaiting_human")):

@@ -209,6 +209,10 @@ class FakePolicy:
         self.calls.append(args)
         return {"clauses": [{"id": "RET-1", "text": "30-day returns."}]}
 
+    @staticmethod
+    def citable(result):
+        return {clause["id"] for clause in result.get("clauses", [])}
+
 
 class WorkflowWiringTests(unittest.TestCase):
     def setUp(self):

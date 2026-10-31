@@ -2,12 +2,13 @@
 
 Read and ticket-state tools are identical in every architecture; the `policy` tool's arguments
 and description come from the plugged-in policy provider (RAG or skills). `backend_write` is for
-architectures with no gateway in front of their writes, so it runs the rules itself; the
-multi-agent specialists are never given it.
+architectures with no gateway in front of their writes, so it runs the rules itself and, on the
+approver route, an independent review; the multi-agent specialists are never given it.
 """
 from __future__ import annotations
 
-from typing import Any, Literal, Self
+from collections import defaultdict
+from typing import Any, Callable, Literal, Self
 
 import json
 
@@ -17,8 +18,12 @@ from support_ops.backend.postgres import (PostgresReader, PostgresWriter, RECORD
                                           TicketPriority, TicketStatus, WriteRefused)
 from support_ops.gateway.ticket_state import TicketState
 from support_ops.helpers.arguments import Amount, NonEmpty, ToolArguments
+from support_ops.policy.citations import unread_citations
 from support_ops.policy.provider import PolicyProvider
 from support_ops.policy.facts import WRITE_OPERATIONS, BackendFacts
+
+# Review rejections a ticket's agent may fix before the write goes to a human (as multi_agent.max_reproposals).
+MAX_REVIEW_REJECTIONS = 1
 
 
 class ReadArguments(ToolArguments):
@@ -94,16 +99,21 @@ class WriteLine(ToolArguments):
 class BackendWriteArguments(ToolArguments):
     """Write an action to the database: refund (recorded as pending; no money moves), return_request or
     cancel. The recorded facts and the rules are checked first, so the result may be a block, a request
-    for review or a handoff instead. Each action is written once per ticket."""
+    for review or a handoff instead. A write requiring review goes to an independent reviewer before it
+    is executed. Each action is written once per ticket."""
     operation: NonEmpty
     order_id: NonEmpty
     amount: Amount | None = None
     items: list[WriteLine] = Field(default_factory=list, description=(
         "The order lines affected, from get_items_for_order. Required for a return_request."))
     reason: NonEmpty = Field(description="Why, in a short phrase such as damaged_item or order_cancellation.")
+    cited_clauses: list[NonEmpty] = Field(default_factory=list, description=(
+        "Clause IDs or policy files you retrieved in this ticket that support the action. Required when "
+        "the write requires review; citing anything the policy tool did not return is refused."))
     review_reason: NonEmpty | None = Field(default=None, description=(
-        "For a refund requiring automated review, explain how the retrieved policy and recorded facts "
-        "support the action and amount. This cannot override a failed check or human-review requirement."))
+        "For a write requiring review, explain how the retrieved policy and recorded facts support the "
+        "action and amount; an independent reviewer checks it against the evidence. This cannot override "
+        "a failed check or human-review requirement."))
 
     @model_validator(mode="after")
     def required_for_operation(self) -> Self:
@@ -133,10 +143,18 @@ def validate_arguments(models: dict[str, type[ToolArguments]], name: str, argume
 
 class SupportTools:
     def __init__(self, reader: PostgresReader, policy: PolicyProvider, ticket_state: TicketState,
-                 writer: PostgresWriter | None = None):
+                 writer: PostgresWriter | None = None,
+                 reviewer: Callable[[dict[str, Any]], dict[str, Any]] | None = None):
         self.reader, self.policy, self.ticket_state = reader, policy, ticket_state
         self.writer = writer or PostgresWriter()
         self.backend_facts = BackendFacts(reader, ticket_state.clock)
+        # Takes the proposed write, its rule check and the evidence; returns a decision (approve, reject or
+        # escalate), issues and reason. Without one, writes requiring review go to a human.
+        self.reviewer = reviewer
+        # Per ticket: successful read and policy results, what they let the agent cite, and review rejections.
+        self._evidence: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        self._citable: dict[str, set[str]] = defaultdict(set)
+        self._rejections: dict[str, int] = defaultdict(int)
         self.argument_models: dict[str, type[ToolArguments]] = {
             "read_record": ReadArguments,
             "get_shipments_for_order": OrderArguments,
@@ -173,6 +191,14 @@ class SupportTools:
         return validate_arguments(self.argument_models, name, arguments)
 
     def execute(self, ticket_id: str, name: str, arguments: Any) -> dict[str, Any]:
+        value = self._dispatch(ticket_id, name, arguments)
+        if name not in {"backend_write", "update_ticket", "ticket_state"} and "error" not in value:
+            self._evidence[ticket_id].append({"tool": name, "result": value})
+            if name == "policy":
+                self._citable[ticket_id] |= self.policy.citable(value)
+        return value
+
+    def _dispatch(self, ticket_id: str, name: str, arguments: Any) -> dict[str, Any]:
         args = self.validate(name, arguments)
         if name == "read_record":
             return self.reader.read(**args)
@@ -217,9 +243,14 @@ class SupportTools:
             return self.ticket_state.run(ticket_id, {**handoff, "reason": decision["reason"]})
         if not decision["allowed"]:
             return {"status": "blocked", "reason": decision["reason"], "policy_check": decision}
-        if decision["route"] == "approver" and not args.get("review_reason", "").strip():
+        cited = args.get("cited_clauses", [])
+        if decision["route"] == "approver" and not (args.get("review_reason", "").strip() and cited):
             return {"status": "review_required", "policy_check": decision,
-                    "reason": "Review the policy and recorded facts, then supply review_reason before writing."}
+                    "reason": "This write goes to an independent reviewer: supply review_reason and the "
+                              "cited_clauses you retrieved that support it."}
+        if unread := unread_citations(cited, self._citable[ticket_id]):
+            raise ValueError(f"cited_clauses {unread} were not returned by the policy tool in this ticket; "
+                             "retrieve them first, or cite only the clause IDs or files you retrieved")
         request = {"ticket_id": ticket_id, "operation": WRITE_OPERATIONS[operation], "order_id": order_id,
                    "amount": amount, "items": lines}
         # The amount is left out of the key, so one ticket cannot write the same action for two amounts.
@@ -228,6 +259,8 @@ class SupportTools:
             if json.dumps(previous["request"], sort_keys=True) != json.dumps(request, sort_keys=True):
                 raise ValueError("conflicting amount or items for an existing write")
             return {**previous["result"], "replayed": True, "policy_check": decision}
+        if decision["route"] == "approver" and (refused := self._review(ticket_id, args, decision, handoff)):
+            return refused
         try:
             result = self.writer.apply(request, idempotency_key=key, reason=args["reason"],
                                        at=self.ticket_state.clock.now(), payment_id=decision.get("payment_id"),
@@ -236,5 +269,23 @@ class SupportTools:
             return {"status": "blocked", "reason": str(exc), "policy_check": decision}
         self.ticket_state.run(ticket_id, {"action": "audit", "type": "write", "operation": operation,
                                           "order_id": order_id, "amount": amount, "write_id": result["write_id"],
-                                          "review_reason": args.get("review_reason")})
+                                          "review_reason": args.get("review_reason"), "cited_clauses": cited})
         return {**result, "policy_check": decision}
+
+    def _review(self, ticket_id: str, args: dict[str, Any], decision: dict[str, Any],
+                handoff: dict[str, Any]) -> dict[str, Any] | None:
+        """The independent review of a write on the approver route: None when it approves, else the
+        result to return. A rejection the agent can fix comes back as a block; an escalation, or a
+        rejection after MAX_REVIEW_REJECTIONS, goes to a human."""
+        if self.reviewer is None:
+            return self.ticket_state.run(ticket_id, {**handoff, "reason": "no reviewer for a write requiring review"})
+        verdict = self.reviewer({"proposal": args, "rule_engine_minimum": decision,
+                                 "evidence": self._evidence[ticket_id]})
+        if verdict["decision"] == "approve":
+            return None
+        issues = "; ".join(verdict.get("issues") or []) or verdict.get("reason", "")
+        self._rejections[ticket_id] += 1
+        if verdict["decision"] != "reject" or self._rejections[ticket_id] > MAX_REVIEW_REJECTIONS:
+            return self.ticket_state.run(ticket_id, {**handoff, "reason": f"reviewer {verdict['decision']}: {issues}"})
+        return {"status": "blocked", "reason": f"the independent review rejected this write: {issues}",
+                "review": verdict, "policy_check": decision}

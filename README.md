@@ -257,6 +257,13 @@ policy provider plugged into the `policy` tool.
 
 Unsupported write operations and above-limit refunds require a human handoff.
 
+A write requiring review needs a `review_reason` and `cited_clauses`. Every citation must be a clause
+or file the `policy` tool returned in this ticket (the same check as the multi-agent specialists, in
+`policy/citations.py`). The write then goes to an independent review: a separate, stateless
+`approver` call that sees the proposed write, the rule check and the tool evidence, but not the
+agent's conversation. It holds the write to the same criteria as the multi-agent approver. The agent
+may fix one rejection; a second rejection, or an escalation, goes to a human.
+
 The read tools only read data. The `backend_write` tool changes the database after checking
 the recorded facts and the rules: a refund is recorded as `pending` and no money moves, a
 return as `requested`, and a cancellation updates the order. Applied writes are kept in

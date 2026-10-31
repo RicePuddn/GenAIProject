@@ -53,6 +53,31 @@ class WorkflowTests(unittest.TestCase):
         self.assertIsNotNone(result["trace"].tool_calls[0]["execution"])
         self.assertGreater(result["trace"].tool_calls[0]["execution"]["elapsed_s"], 0)
 
+    def test_a_write_requiring_review_gets_a_separate_stateless_review_call(self):
+        facts = {"payment_id": "PAY-1", "payment_status": "captured", "currency": "SGD", "captured_amount": 100,
+                 "refunded_amount": 0, "pending_refund_amount": 0, "approved_refund_amount": 100,
+                 "request_accepted": True, "inspection_or_waiver": True}
+        write = {"operation": "refund", "order_id": "ORD-2026-00001", "amount": 50, "reason": "damaged_item",
+                 "review_reason": "Accepted return; 50 is within the captured balance.",
+                 "cited_clauses": ["refunds.md"]}
+        llm = ScriptedLLM().push("guard", text("0.01")).push(
+            "supervisor",
+            tool_call("policy", action="read", skill="returns-and-refunds", file="refunds.md"),
+            tool_call("backend_write", **write), text("ready"), text("Your refund is recorded."),
+        ).push("approver", text(json.dumps({"decision": "approve", "issues": [], "reason": "Supported."})))
+        writer = FakeWriter()
+        workflow = SingleAgentWorkflow(llm, self.cfg, reader=self.reader, writer=writer)
+        with patch.object(workflow.tools.backend_facts, "read", return_value=facts):
+            result = workflow.invoke("TKT-TEST", "Please refund my damaged item.", "react")
+        self.assertEqual(result["evidence"][-1]["result"]["status"], "executed")
+        self.assertEqual(len(writer.applied), 1)
+        [(role, messages)] = [call for call in llm.calls if call[0] == "approver"]
+        self.assertEqual([message["role"] for message in messages], ["system", "user"])
+        request = json.loads(messages[1]["content"])
+        self.assertEqual(request["proposal"]["cited_clauses"], ["refunds.md"])
+        self.assertEqual(request["rule_engine_minimum"]["route"], "approver")
+        self.assertNotIn("Please refund my damaged item.", messages[1]["content"])   # no conversation
+
     def test_invalid_plan_retries_without_executing_unknown_tools(self):
         llm = ScriptedLLM().push("guard", text("safe")).push(
             "supervisor", text('{"calls":[{"name":"order_status","arguments":{}}]}'),
@@ -274,9 +299,12 @@ class ToolTests(unittest.TestCase):
 
     def test_backend_write_is_idempotent_and_rejects_a_conflicting_amount(self):
         gateway = TicketState(self.clock)
-        tools = SupportTools(Mock(spec=PostgresReader), SkillsPolicy(), gateway, FakeWriter())
+        tools = SupportTools(Mock(spec=PostgresReader), SkillsPolicy(), gateway, FakeWriter(),
+                             reviewer=lambda request: {"decision": "approve", "issues": []})
+        tools.execute("T1", "policy", {"action": "read", "skill": "returns-and-refunds", "file": "refunds.md"})
         args = {"operation": "refund", "order_id": "O1", "amount": 50, "reason": "damaged_item",
-                "review_reason": "Verified the payment, approval and original destination."}
+                "review_reason": "Verified the payment, approval and original destination.",
+                "cited_clauses": ["refunds.md"]}
         facts = {"payment_id": "PAY-1", "payment_status": "captured", "currency": "SGD", "captured_amount": 100,
                  "refunded_amount": 0, "pending_refund_amount": 0, "approved_refund_amount": 100,
                  "request_accepted": True, "inspection_or_waiver": True}

@@ -94,6 +94,11 @@ class RagPolicy:
             return {"query": args["query"], "clauses": self.retriever.search(args["query"])}
         raise ValueError("unsupported policy action")
 
+    @staticmethod
+    def citable(result: dict[str, Any]) -> set[str]:
+        """A search can be cited by the IDs of the clauses it returned, references included."""
+        return {clause["id"] for clause in result.get("clauses", [])}
+
     def scoped_tool(self, scope: Sequence[str] | None) -> ScopedPolicyTool:
         """Search only, limited by default to the specialist's `scope` sections. The retriever's top-k is
         filtered afterwards; a native section filter in the retriever would return k clauses from the
@@ -105,8 +110,7 @@ class RagPolicy:
             return own_sections(result, scope)
 
         return ScopedPolicyTool(PolicySearchArguments, PolicySearchArguments.__doc__, run,
-                                self.prompt_hint, self.scope_hint, self.planner_context,
-                                lambda result: {clause["id"] for clause in result.get("clauses", [])})
+                                self.prompt_hint, self.scope_hint, self.planner_context, self.citable)
 
     def check_scope(self, scope: Sequence[str] | None) -> list[str]:
         try:

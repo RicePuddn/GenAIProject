@@ -8,6 +8,8 @@ from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+from support_ops.agents.approver import Approver
+from support_ops.agents.runtime import AgentContext, Budget, Retries
 from support_ops.backend.postgres import PostgresReader, PostgresWriter
 from support_ops.gateway.ticket_state import TicketState
 from support_ops.helpers.cancellation import CancellationToken
@@ -68,7 +70,7 @@ class SingleAgentWorkflow:
         rules = Rules.load(cfg["policy"]["rules_file"])
         self.tools = SupportTools(
             reader or PostgresReader(), policy or policy_from_config(cfg, rules),
-            ticket_state or TicketState(self.clock, rules=rules), writer,
+            ticket_state or TicketState(self.clock, rules=rules), writer, reviewer=self._review,
         )
         self._call_sequence = 0
         graph = StateGraph(SupportState)
@@ -129,6 +131,13 @@ class SingleAgentWorkflow:
                     **({"reasoning": result.reasoning} if result.reasoning else {}))
         return result
 
+    def _review(self, request: dict[str, Any]) -> dict[str, Any]:
+        """`backend_write`'s independent review: a separate, stateless LLM call that sees the proposed
+        write and its evidence but none of the agent's conversation or reasoning."""
+        ctx = AgentContext(chat=self._chat, log=self._event, clock=self.clock,
+                           budget=Budget(self.cfg["limits"], self.tracer), retries=Retries.from_config(self.cfg))
+        return Approver(ctx).check_write(request).model_dump(mode="json")
+
     def _guard(self, state: SupportState) -> dict[str, Any]:
         self._event("node_start", node="guard", ticket_id=state["ticket_id"])
         if not self.cfg.get("guard", {}).get("enabled", True):
@@ -184,7 +193,9 @@ class SingleAgentWorkflow:
             "Use policy check with order_id and the affected item_ids; the tool loads verified facts itself. "
             "A blocked result means correct the action or explain the policy, not automatic human escalation. "
             "For review_required, review the retrieved clauses, recorded facts and amount, then retry with "
-            "review_reason explaining your decision. This never overrides a failed check or human requirement. "
+            "review_reason explaining your decision and cited_clauses listing the clauses you retrieved that "
+            "support it; an independent reviewer checks the write before it runs. This never overrides a "
+            "failed check or human requirement. "
             "Calculate return windows using the workflow date and delivery date. "
             "Use backend_write to record an action once its check passes; it changes the database. No money "
             "moves: a refund is recorded as pending, so never describe it as paid. A cancelled order is owed "

@@ -43,6 +43,10 @@ class PolicyProvider(Protocol):
         """Execute validated `policy` tool arguments."""
         ...
 
+    def citable(self, result: dict[str, Any]) -> set[str]:
+        """What a successful `run` result lets the agent cite: clause IDs, or the files it read."""
+        ...
+
     def warm_up(self) -> None:
         """Prepare policy retrieval before ticket timing begins."""
         ...

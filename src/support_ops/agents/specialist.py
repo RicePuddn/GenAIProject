@@ -17,6 +17,7 @@ from support_ops.agents.models import SPECIALIST_ACTIONS, Proposal, ProposalDraf
 from support_ops.agents.runtime import AgentContext, BudgetExceeded, chat_json, parse_json
 from support_ops.agents.toolbox import Toolbox
 from support_ops.helpers.llm import ChatResult, ToolCall
+from support_ops.policy.citations import unread_citations
 
 # The same tool failing with the same error this many times in a row ends the attempt.
 MAX_REPEATED_ERRORS = 3
@@ -36,20 +37,6 @@ SCOPES: dict[SpecialistName, str] = {
                        "the captured balance less earlier and pending refunds, listing no items; if nothing "
                        "is owed, propose action none",
 }
-
-
-def citation_forms(clause: str) -> set[str]:
-    """The ways a citation may name what was read, casefolded: as written, each side of a `#` anchor, a
-    path cut to its last two parts (skill/file, so another skill's file of the same name does not match),
-    and the leading clause ID of "RET-1 Return window"."""
-    forms = set()
-    for part in clause.strip().casefold().split("#"):
-        part = part.strip().strip("/")
-        if not part:
-            continue
-        pieces = part.split("/")
-        forms |= {part, "/".join(pieces[-2:]), part.split()[0]}
-    return forms
 
 
 @dataclass
@@ -166,9 +153,7 @@ class Specialist:
         """A proposal may cite only clauses or files its policy tool returned in this case."""
         if not self.cfg.get("multi_agent", {}).get("check_citations", True) or not isinstance(arguments, dict):
             return
-        cited = arguments.get("cited_clauses") or []
-        citable = {item.casefold() for item in result.citable}
-        if unread := [str(clause) for clause in cited if not citation_forms(str(clause)) & citable]:
+        if unread := unread_citations(arguments.get("cited_clauses") or [], result.citable):
             self.ctx.log("citation_rejected", agent=self.name, unread=unread)
             raise ValueError(f"cited_clauses {unread} were not returned by your policy tool in this case; "
                              "read them first, or cite only the clause IDs or files you read")

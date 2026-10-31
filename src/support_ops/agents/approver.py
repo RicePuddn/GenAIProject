@@ -2,6 +2,7 @@
 
 Its verdict is advisory to the graph but binding on tokens: the gateway issues none on the
 approver route without an approve from `check_proposal`. Unreadable output counts as escalate.
+`check_write` is the same check for the single agent's `backend_write`, as one separate LLM call.
 """
 from __future__ import annotations
 
@@ -11,15 +12,30 @@ from typing import Any
 from support_ops.agents.models import ApprovalResult, Proposal
 from support_ops.agents.runtime import AgentContext, chat_json
 
-VERDICT = (' Return JSON only: {"decision": "approve" | "reject" | "escalate", '
-           '"issues": ["specific problems"], "reason": "one sentence"}. '
-           "reject: the specialist can fix it; escalate: an operator must decide.")
+VERDICT_FORMAT = (' Return JSON only: {"decision": "approve" | "reject" | "escalate", '
+                  '"issues": ["specific problems"], "reason": "one sentence"}. ')
+VERDICT = VERDICT_FORMAT + "reject: the specialist can fix it; escalate: an operator must decide."
+
+# The bar every pre-execution review holds a proposal to, in both architectures.
+PROPOSAL_CRITERIA = (
+    "Approve only if every fact it relies on appears in the tool evidence, the amount does not exceed "
+    "what was paid, the cited clauses were retrieved and support the action (including any exception), "
+    "and the rule engine's minimum route is respected."
+)
 
 PROPOSAL_PROMPT = (
     "You are the approver for a policy-bound support team, giving the second check on a specialist's "
-    "proposal before anything is executed. Approve only if every fact it relies on appears in the tool "
-    "evidence, the amount does not exceed what was paid, the cited clauses were retrieved and support "
-    "the action (including any exception), and the rule engine's minimum route is respected." + VERDICT
+    "proposal before anything is executed. " + PROPOSAL_CRITERIA + VERDICT
+)
+
+# The single agent's review: a separate, stateless call that sees only the proposed write and its
+# evidence, never the agent's conversation, so it does not inherit the agent's reasoning.
+WRITE_REVIEW_PROMPT = (
+    "You are an independent reviewer for a policy-bound support service. A support agent proposes the "
+    "database write below; you took no part in the conversation and see only this request. Treat the "
+    "agent's justification as a claim to verify against the evidence, not as evidence. "
+    + PROPOSAL_CRITERIA + VERDICT_FORMAT
+    + "reject: the agent can fix it; escalate: an operator must decide."
 )
 
 REPLY_CHECK_PROMPT = (
@@ -60,6 +76,11 @@ class Approver:
             "case": brief, "proposal": proposal.model_dump(mode="json"),
             "rule_engine_minimum": minimum, "evidence": evidence,
         })
+
+    def check_write(self, request: dict[str, Any]) -> ApprovalResult:
+        """The single agent's pre-execution review: `request` holds the proposal, the rule check and the
+        evidence, as `check_proposal` receives them."""
+        return self._verdict("pre_execution", WRITE_REVIEW_PROMPT, request)
 
     def check_reply(self, brief: dict[str, Any], reply: str, outcome: dict[str, Any]) -> ApprovalResult:
         return self._verdict("reply", REPLY_CHECK_PROMPT, {"case": brief, "outcome": outcome, "reply": reply})
