@@ -8,7 +8,7 @@ import hashlib
 import os
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 import psycopg
 from psycopg import sql
@@ -20,6 +20,14 @@ RECORD_KINDS = (
     "returns", "refunds", "support_tickets",
 )
 
+# The `support_tickets.category` values, plus other. The customer on every agent ticket until login exists:
+# naming an order does not prove who is chatting.
+TicketCategory = Literal["delivery", "returns", "refund", "payment", "order_change", "cancellation", "product",
+                         "account", "other"]
+TicketStatus = Literal["in_progress", "resolved", "awaiting_customer", "awaiting_human"]
+TicketPriority = Literal["low", "normal", "high"]
+UNKNOWN_CUSTOMER = "dummy_00"
+CATEGORY_TEAMS = {"payment": "payments_team", "refund": "returns_team", "returns": "returns_team"}
 RECORD_PREFIXES = {"refund": "RFD-W", "return": "RET-W", "exchange": "EXC-W", "order_change": "CHG-W"}
 
 
@@ -115,6 +123,38 @@ class PostgresWriter:
             raise RuntimeError("set SUPPORT_OPS_WRITE_DATABASE_URL or SUPPORT_OPS_DATABASE_URL to enable writes")
         return psycopg.connect(self.dsn, row_factory=dict_row, connect_timeout=5,
                                options="-c statement_timeout=10000")
+
+    def save_ticket(self, *, ticket_id: str, status: str, category: str, priority: str, subject: str,
+                    customer_message: str, assigned_team: str | None = None, order_id: str | None = None,
+                    resolution: str | None = None, handoff_packet: dict[str, Any] | None = None,
+                    at: datetime) -> dict[str, Any]:
+        """Create or update one conversation's ticket; a ticket keeps its first message and creation time.
+        An `order_id` not in the database is ignored. No caller is identified yet, so the customer is
+        always `UNKNOWN_CUSTOMER`, even when the order has an owner."""
+        team = assigned_team or CATEGORY_TEAMS.get(category, "order_support")
+        with self._connect() as conn, conn.cursor() as cur:
+            order = None
+            if order_id:
+                cur.execute("SELECT id FROM orders WHERE lower(id) = lower(%s)", (order_id,))
+                order = cur.fetchone()
+            cur.execute(
+                """INSERT INTO support_tickets (id, customer_id, order_id, created_at, channel, category, priority,
+                       status, subject, customer_message, resolution, assigned_team, handoff_packet, updated_at)
+                   VALUES (%(id)s, %(customer)s, %(order)s, %(at)s, 'chat', %(category)s, %(priority)s, %(status)s,
+                       %(subject)s, %(message)s, %(resolution)s, %(team)s, %(packet)s, %(at)s)
+                   ON CONFLICT (id) DO UPDATE SET
+                       order_id = COALESCE(support_tickets.order_id, EXCLUDED.order_id),
+                       category = EXCLUDED.category, priority = EXCLUDED.priority, status = EXCLUDED.status,
+                       subject = EXCLUDED.subject, assigned_team = EXCLUDED.assigned_team,
+                       resolution = COALESCE(EXCLUDED.resolution, support_tickets.resolution),
+                       handoff_packet = COALESCE(EXCLUDED.handoff_packet, support_tickets.handoff_packet),
+                       updated_at = EXCLUDED.updated_at
+                   RETURNING *""",
+                {"id": ticket_id, "customer": UNKNOWN_CUSTOMER,
+                 "order": order["id"] if order else None, "at": at, "category": category, "priority": priority,
+                 "status": status, "subject": subject, "message": customer_message, "resolution": resolution,
+                 "team": team, "packet": Jsonb(handoff_packet) if handoff_packet else None})
+            return cur.fetchone()
 
     def replay(self, idempotency_key: str) -> dict[str, Any] | None:
         """The stored request and result of an earlier write with this key."""

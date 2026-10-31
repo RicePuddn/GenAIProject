@@ -5,7 +5,7 @@ from support_ops.agents.models import Case, Proposal
 from support_ops.supervisor.escalation import handoff_packet
 from support_ops.supervisor.outcome import customer_outcome, verified_facts
 
-CASE = Case(issue="Refund.", intent="refund_request", urgency="normal", language="en")
+CASE = Case(issue="Refund.", intent="refund_request", category="refund", urgency="normal", language="en")
 RETURN = Proposal(specialist="returns_refunds", action="return", order_id="ORD-1", cited_clauses=["RET-1"],
                   items=[{"item_id": "ITM-1-2", "quantity": 1}], route="approver", reason="Dented on arrival.")
 ITEMS = {"agent": "returns_refunds", "tool": "get_items_for_order",

@@ -240,7 +240,7 @@ LLM cost between calls. A single call can exceed the remaining cost budget.
 The current tools are `read_record`, the order lookups `get_shipments_for_order`,
 `get_shipment_events_for_order`, `get_items_for_order` (with product details),
 `get_payments_for_order` and `get_returns_for_order` (returns and refunds), then `policy`,
-`ticket_state` and `backend_write`.
+`ticket_state`, `backend_write` and `update_ticket`.
 A dedicated final response node generates the customer reply through the shared LLM wrapper after operational tool work completes.
 
 RAG searches return ranked clauses and their direct references. Skills retrieval

@@ -10,6 +10,7 @@ from typing import Annotated, Any, Literal, Self
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
+from support_ops.backend.postgres import TicketCategory, TicketPriority
 from support_ops.policy.routing import Route
 
 NonEmpty = Annotated[str, Field(min_length=1)]
@@ -39,7 +40,8 @@ class Case(AgentOutput):
     """The supervisor's reading of the message. These are the customer's claims, not verified facts."""
     issue: NonEmpty                        # what is wrong or wanted, in a sentence
     intent: NonEmpty                       # e.g. order_status, refund_request, return_request
-    urgency: Literal["low", "normal", "high"]
+    category: TicketCategory               # the support ticket's category
+    urgency: TicketPriority
     language: NonEmpty                     # e.g. en
     order_ids: list[NonEmpty] = Field(default_factory=list)
     items: list[NonEmpty] = Field(default_factory=list)     # products or item IDs the customer named

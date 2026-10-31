@@ -132,6 +132,38 @@ class WriterTests(unittest.TestCase):
         blocked = tools.execute("T2", "backend_write", {**args, "review_reason": "Again."})
         self.assertEqual(blocked["status"], "blocked")
 
+    def ticket(self, **overrides):
+        fields = dict(ticket_id="TKT-NEW", status="in_progress", category="refund", priority="normal",
+                      subject="Refund asked.", customer_message="Refund please", at=NOW)
+        return self.writer.save_ticket(**{**fields, **overrides})
+
+    def test_a_ticket_with_an_unknown_order_links_no_order(self):
+        row = self.ticket(order_id="ORD-NOPE")
+        self.assertEqual((row["customer_id"], row["order_id"], row["channel"]), ("dummy_00", None, "chat"))
+        self.assertEqual(self.reader.read("support_tickets", "TKT-NEW")["assigned_team"], "returns_team")
+
+    def test_a_ticket_is_updated_in_place_and_keeps_the_placeholder_customer_even_with_an_order(self):
+        self.ticket()
+        later = datetime(2026, 10, 31, 10, tzinfo=timezone.utc)
+        row = self.ticket(order_id=ACCEPTED, status="awaiting_human", customer_message="Second message", at=later,
+                          handoff_packet={"reason": "route: human"}, assigned_team="payments_team")
+        self.assertEqual((row["customer_id"], row["order_id"]), ("dummy_00", ACCEPTED))
+        self.assertEqual((row["status"], row["handoff_packet"]["reason"], row["assigned_team"]),
+                         ("awaiting_human", "route: human", "payments_team"))
+        self.assertEqual((row["customer_message"], row["created_at"], row["updated_at"]), ("Refund please", NOW, later))
+        resolved = self.ticket(status="resolved", resolution="Refund recorded.")
+        self.assertEqual((resolved["order_id"], resolved["resolution"]), (row["order_id"], "Refund recorded."))
+        self.assertEqual(resolved["handoff_packet"], {"reason": "route: human"})
+
+    def test_the_update_ticket_tool_saves_the_conversation(self):
+        tools = SupportTools(self.reader, SkillsPolicy(), TicketState(Clock(NOW)), self.writer)
+        result = tools.execute("TKT-S1", "update_ticket", {
+            "status": "resolved", "category": "cancellation", "subject": "Cancelled by mistake.",
+            "customer_message": "Please cancel", "order_id": CANCELLABLE, "resolution": "Cancelled."})
+        self.assertEqual((result["status"], result["ticket_status"], result["order_id"]),
+                         ("ticket_saved", "resolved", CANCELLABLE))
+        self.assertEqual(self.reader.read("support_tickets", "TKT-S1")["assigned_team"], "order_support")
+
     def test_a_refused_database_write_comes_back_as_refused_through_the_gateway(self):
         clock = Clock(NOW)
         flow = TicketFlow(TicketState(clock), clock)

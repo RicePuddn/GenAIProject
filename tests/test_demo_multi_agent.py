@@ -52,7 +52,7 @@ def scripted_turn(llm: ScriptedLLM, reply: str) -> None:
         "supervisor",
         text(json.dumps({"thought": "They want a refund for one bottle.", "action": "delegate", "reason": "Refund.",
                          "tasks": [{"specialist": "returns_refunds", "request": "Refund the dented bottle in " + ORDER}],
-                         "case": {"issue": "Dented bottle.", "intent": "refund_request", "urgency": "normal",
+                         "case": {"issue": "Dented bottle.", "intent": "refund_request", "category": "refund", "urgency": "normal",
                                   "language": "en"}})),
         text(json.dumps({"thought": "The refund is done.", "action": "finish", "reason": "Done."})),
         text(reply),

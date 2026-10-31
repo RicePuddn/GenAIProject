@@ -26,6 +26,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Callable, TypedDict
 
+import psycopg
 from langgraph.graph import END, START, StateGraph
 
 from support_ops.agents.approver import Approver
@@ -38,6 +39,7 @@ from support_ops.agents.toolbox import (ORDERS_SHIPPING_TOOLS, RETURNS_REFUNDS_T
 from support_ops.backend.postgres import PostgresReader, PostgresWriter
 from support_ops.gateway.approvals import TicketFlow
 from support_ops.gateway.route import RouteTool
+from support_ops.gateway.tickets import ticket_fields
 from support_ops.gateway.ticket_state import TicketState
 from support_ops.gateway.writes import BackendWrites
 from support_ops.helpers.cancellation import CancellationToken
@@ -118,7 +120,7 @@ class MultiAgentWorkflow:
         self.routing = RoutingRules.load(cfg["policy"]["rules_file"])
         self.reader = reader or PostgresReader()
         self.ticket_state = TicketState(self.clock, rules=rules)
-        writer = writer or PostgresWriter()
+        self.writer = writer = writer or PostgresWriter()
         self.tools = SupportTools(self.reader, policy or policy_from_config(cfg, rules), self.ticket_state, writer)
         policy = self.tools.policy
         if policy.strict_scope:   # e.g. a mistyped skill folder: fail now, not as empty lists mid-ticket
@@ -171,6 +173,7 @@ class MultiAgentWorkflow:
             "supervisor_note": None,
         }, {"recursion_limit": 40})
         status = self.flow.status(ticket_id)
+        self._save_ticket(state)
         self._event("workflow_end", status=status, llm_calls=self.tracer.llm_calls,
                     elapsed_s=round(self.tracer.elapsed_s, 4))
         dump = lambda value: value.model_dump(mode="json") if value is not None else None
@@ -364,6 +367,7 @@ class MultiAgentWorkflow:
                 "unfound_record": unfound_record, "evidence": merged["evidence"][state["part_start"]:]}
         parts = [*state["parts"], part]
         update = {**update, "parts": parts}
+        self._save_ticket({**merged, "parts": parts})
         react = state["orchestration"] == "react"
         if react or state["part"] + 1 < len(state["tasks"]):
             self._event("part_done", part=state["part"] + 1, specialist=task.specialist, status=status)
@@ -391,6 +395,18 @@ class MultiAgentWorkflow:
             return {**update, "customer_question": " ".join(done["customer_question"] for done in asking),
                     "next": "reply"}
         return {**update, "next": "reply"}
+
+    def _save_ticket(self, state: MultiAgentState) -> None:
+        """Keep `support_tickets` current. A failed save is logged: it must not cost the customer their reply."""
+        ticket_id = state["ticket_id"]
+        try:
+            self.writer.save_ticket(ticket_id=ticket_id, at=self.clock.now(), **ticket_fields(
+                flow_status=self.flow.status(ticket_id), case=state.get("case"),
+                customer_message=state["customer_message"], parts=state.get("parts", []),
+                proposal=state.get("proposal"), evidence=state.get("evidence", []), reply=state.get("reply"),
+                handoff_packet=state.get("handoff_packet")))
+        except (psycopg.Error, RuntimeError) as exc:
+            self.tracer.log("ticket_save_failed", ticket_id=ticket_id, error=str(exc)[:300])
 
     @staticmethod
     def _last_part(parts: list[dict[str, Any]]) -> dict[str, Any]:

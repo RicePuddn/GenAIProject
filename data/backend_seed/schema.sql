@@ -84,6 +84,9 @@ CREATE TABLE IF NOT EXISTS support_tickets (
   resolution TEXT, assigned_team TEXT NOT NULL
 );
 -- One row per applied agent write; its key turns a retried write into a replay.
+-- Added after the first release, so a plain seed run upgrades an existing database.
+ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS handoff_packet JSONB;
+ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
 CREATE TABLE IF NOT EXISTS backend_writes (
   idempotency_key TEXT PRIMARY KEY, ticket_id TEXT NOT NULL, operation TEXT NOT NULL,
   order_id TEXT NOT NULL REFERENCES orders(id), request JSONB NOT NULL, result JSONB NOT NULL,

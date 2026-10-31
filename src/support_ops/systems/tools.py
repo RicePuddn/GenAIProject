@@ -13,7 +13,8 @@ import json
 
 from pydantic import Field, model_validator
 
-from support_ops.backend.postgres import PostgresReader, PostgresWriter, RECORD_KINDS, WriteRefused
+from support_ops.backend.postgres import (PostgresReader, PostgresWriter, RECORD_KINDS, TicketCategory,
+                                          TicketPriority, TicketStatus, WriteRefused)
 from support_ops.gateway.ticket_state import TicketState
 from support_ops.helpers.arguments import Amount, NonEmpty, ToolArguments
 from support_ops.policy.provider import PolicyProvider
@@ -113,6 +114,17 @@ class BackendWriteArguments(ToolArguments):
         return self
 
 
+class UpdateTicketArguments(ToolArguments):
+    """Create or update this conversation's support ticket in the database. Call it when the outcome is known."""
+    status: TicketStatus
+    category: TicketCategory
+    priority: TicketPriority = "normal"
+    subject: NonEmpty = Field(description="The issue in one sentence.")
+    customer_message: NonEmpty = Field(description="The customer's first message; kept from the first save.")
+    order_id: NonEmpty | None = Field(default=None, description="An order confirmed with read tools.")
+    resolution: NonEmpty | None = Field(default=None, description="What was done, when status is resolved.")
+
+
 def validate_arguments(models: dict[str, type[ToolArguments]], name: str, arguments: Any) -> dict[str, Any]:
     if not isinstance(name, str) or name not in models:
         raise ValueError(f"unknown tool: {name!r}; available tools: {', '.join(models)}")
@@ -135,6 +147,7 @@ class SupportTools:
             "policy": policy.arguments,
             "ticket_state": TicketArguments,
             "backend_write": BackendWriteArguments,
+            "update_ticket": UpdateTicketArguments,
         }
         descriptions = {
             "read_record": ReadArguments.__doc__,
@@ -147,6 +160,7 @@ class SupportTools:
             "policy": policy.description,
             "ticket_state": TicketArguments.__doc__,
             "backend_write": BackendWriteArguments.__doc__,
+            "update_ticket": UpdateTicketArguments.__doc__,
         }
         self.schemas = [
             {"type": "function", "function": {
@@ -184,6 +198,10 @@ class SupportTools:
             return self.policy.run(args)
         if name == "backend_write":
             return self._backend_write(ticket_id, args)
+        if name == "update_ticket":
+            row = self.writer.save_ticket(ticket_id=ticket_id, at=self.ticket_state.clock.now(), **args)
+            return {"status": "ticket_saved", "ticket_id": row["id"], "ticket_status": row["status"],
+                    "customer_id": row["customer_id"], "order_id": row["order_id"]}
         return self.ticket_state.run(ticket_id, args)
 
     def _backend_write(self, ticket_id: str, args: dict[str, Any]) -> dict[str, Any]:

@@ -31,8 +31,8 @@ SUPERVISE_PROMPT = (
     "example general knowledge, weather, coding or chit-chat); anything about the customer's own account is a "
     "support request, so it is a handoff, not a redirect; a mixed message is not a redirect: delegate its "
     "support part and leave the rest out. finish when every support part has been handled. "
-    "In case, state the issue and the details the customer gave; these are their claims, which the "
-    "specialists verify. Put your reasoning in thought. "
+    "In case, state the issue, its category and the details the customer gave; these are their claims, "
+    "which the specialists verify. Put your reasoning in thought. "
 )
 PLAN_ORCHESTRATION = (
     "You decide once: if you delegate, list every task now, in the order they should run. You will not see "

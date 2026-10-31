@@ -68,6 +68,7 @@ class ToolboxTests(unittest.TestCase):
             self.assertEqual([schema["function"]["name"] for schema in box.schemas], list(names))
             self.assertNotIn("ticket_state", box.names)
             self.assertNotIn("backend_write", box.names)
+            self.assertNotIn("update_ticket", box.names)
         box = Toolbox(self.shared, ORDERS_SHIPPING_TOOLS)
         with self.assertRaisesRegex(ValueError, "available tools: read_record"):
             box.execute("T1", "get_payments_for_order", {"order_id": ORDER})

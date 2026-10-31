@@ -75,7 +75,7 @@ class OtherModelTests(unittest.TestCase):
         base = dict(thought="t", reason="r", action="redirect")
         with self.assertRaises(ValidationError):
             FirstDecision(**base)
-        case = {"issue": "Cancel.", "intent": "cancel", "urgency": "low", "language": "en", "order_ids": ["ORD-1"]}
+        case = {"issue": "Cancel.", "intent": "cancel", "category": "cancellation", "urgency": "low", "language": "en", "order_ids": ["ORD-1"]}
         self.assertEqual(FirstDecision(**base, case=case).case.order_ids, ["ORD-1"])
 
     def test_rejection_or_escalation_must_name_an_issue(self):

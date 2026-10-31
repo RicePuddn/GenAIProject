@@ -389,6 +389,24 @@ store processes it (see the routing rules).
 each trial, on a database of its own. It deletes all rows, including earlier agent writes. Record IDs come from
 the idempotency key, so a rerun of the same ticket writes the same IDs.
 
+### Support tickets
+
+Each conversation has one row in `support_tickets`, keyed by its `ticket_id`. It is saved after each part and at the
+end of the turn, so it stays current right after each write; a failed save is logged (`ticket_save_failed`) and the
+customer still gets the reply. `gateway/tickets.py` builds the row from the workflow state, with no LLM call.
+
+| Column | Value |
+|---|---|
+| `customer_id` | Always the seeded placeholder `dummy_00` until login exists: naming an order does not prove who is chatting. Use `order_id` to find an order's tickets |
+| `order_id` | The first order from a proposal or lookup, never one the customer only claimed |
+| `category`, `priority`, `subject` | `case.category`, `case.urgency`, `case.issue`; `other`, `normal` and a fixed subject when no case exists (a guard hold) |
+| `status` | `resolved`, `awaiting_customer` or `awaiting_human`; `in_progress` while parts run |
+| `assigned_team` | From the specialist of the first part needing a person, else the first part; `payments_team` for the `payment` category |
+| `resolution`, `handoff_packet` | The reply when resolved; the packet on a handoff |
+
+The first `customer_message` and `created_at` never change. S1 and S2
+have the `update_ticket` tool in the shared list, but their flow does not call it yet.
+
 ### Cancelling a paid order
 
 Under ODR-OrderChangeCancel-4.2 a cancelled order is owed its captured balance, less anything refunded or
@@ -471,6 +489,7 @@ New for S3 (nothing in S1's files was changed for it):
 | `src/support_ops/gateway/route.py` | `route` tool: reads facts, computes the minimum route, rejects looser routes |
 | `src/support_ops/gateway/approvals.py` | Ticket state machine, approval tokens, handoff |
 | `src/support_ops/gateway/writes.py` | Write endpoint: token check, idempotency, audit |
+| `src/support_ops/gateway/tickets.py` | Builds the `support_tickets` row from the workflow state |
 | `src/support_ops/backend/postgres.py` | `PostgresReader` (read-only) and `PostgresWriter` (one transaction per operation) |
 | `src/support_ops/policy/routing.py` | Rule engine for minimum routes |
 | `src/support_ops/api_multi.py` | FastAPI app for S3 |
@@ -527,4 +546,4 @@ Approval tokens never appear in a response or in the audit log.
   identity with every request; S3 must then limit its reads and writes to that account, with the write
   check in `PostgresWriter.apply`.
 - **Nothing processes `pending` refunds.** A written refund stays `pending`, and no money moves.
-- **Approvals and the audit log live in memory for one request.** Applied writes are in `backend_writes`.
+- **Approvals and the audit log live in memory for one request.** Applied writes are in `backend_writes`, tickets in `support_tickets`.

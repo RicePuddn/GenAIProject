@@ -6,6 +6,12 @@ from typing import Any
 class FakeWriter:
     def __init__(self):
         self.applied: dict[str, dict[str, Any]] = {}
+        self.ticket_saves: list[dict[str, Any]] = []
+
+    def save_ticket(self, **ticket: Any) -> dict[str, Any]:
+        self.ticket_saves.append(ticket)
+        return {"id": ticket["ticket_id"], "status": ticket["status"], "customer_id": "dummy_00",
+                "order_id": ticket.get("order_id")}
 
     def replay(self, idempotency_key: str) -> dict[str, Any] | None:
         return self.applied.get(idempotency_key)

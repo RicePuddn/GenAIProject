@@ -34,6 +34,9 @@ PRODUCTS = [
 # Customers.
 CUSTOMERS_COLUMNS = ('id', 'first_name', 'last_name', 'email', 'phone', 'created_at', 'loyalty_tier', 'address')
 CUSTOMERS = [
+    # Stands in on support tickets with no confirmed order, until login identifies the customer.
+    ('dummy_00', 'Unknown', 'Customer', 'dummy_00@example.test', '+65 0000 0000', '2025-01-01T00:00:00+00:00', 'standard',
+     {'line1': 'Unknown', 'line2': '', 'city': 'Singapore', 'postal_code': '000000', 'country': 'SG'}),
     ('CUS-1001', 'Avery', 'Tan', 'avery.tan.1@example.test', '+65 8000 1000', '2025-04-19T09:00:00+00:00', 'standard',
      {'line1': '18 Orchard Avenue', 'line2': '#01-01', 'city': 'Singapore', 'postal_code': '238801', 'country': 'SG'}),
     ('CUS-1002', 'Jordan', 'Lee', 'jordan.lee.2@example.test', '+65 8001 1001', '2025-04-28T09:00:00+00:00', 'silver',
