@@ -309,11 +309,11 @@ class WorkflowTests(unittest.TestCase):
         llm = ScriptedLLM().push("guard", text("0.01")).push("supervisor", text("ready"), text("Hello."))
         self.run_flow(llm)
         self.assertIn("check the order's items and any existing returns or refunds", llm.calls[1][1][0]["content"])
-        # The reply prompt was reworded in 0709674; it still forbids internal IDs, e.g. as a greeting.
-        reply_prompt = llm.calls[2][1][0]["content"]
-        self.assertIn("Never show the customer internal IDs", reply_prompt)
+        # The reply prompt is shared with the multi-agent arms; it still forbids internal IDs, e.g. as a greeting.
+        reply_prompt = " ".join(llm.calls[2][1][0]["content"].split())
+        self.assertIn("Never show internal IDs", reply_prompt)
         self.assertIn("not for this reply", reply_prompt)
-        self.assertIn("use a neutral greeting", reply_prompt)
+        self.assertIn("never an internal ID as a name", reply_prompt)
 
     def test_reasoning_is_traced_but_never_sent_back_to_the_model(self):
         thought = ChatResult(None, [ToolCall("a", "policy", {"action": "list"})], reasoning="I should list skills.")

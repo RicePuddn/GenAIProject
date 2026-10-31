@@ -282,6 +282,8 @@ use the same two prompts (`PROPOSAL_PROMPT` and `REPLY_CHECK_PROMPT` in `agents/
 arms differ only in what each check is given. The agent may fix `review.max_rejections` rejections (shared with the
 multi-agent approver); the next rejection, or an escalation, goes to a human.
 
+Every arm drafts its reply with the same prompt (`helpers/reply_prompt.py`); only its last paragraph
+differs, saying whether the writer is given the ticket's evidence (single agent) or an outcome summary (multi-agent).
 Every final reply is checked the same way before it is sent, by a separate `approver` call: S1/S2
 give it the ticket's evidence, the multi-agent arms their outcome summary. A rejected draft is redrafted with the issues; if none passes within
 `review.max_reply_drafts`, the customer gets the fixed hold reply and the ticket goes to a human. Before that check, code rejects a draft that
