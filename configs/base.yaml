@@ -55,11 +55,14 @@ policy:
 review:                     # before a write requiring review, and on each reply
   max_rejections: 1         # rejected write proposals the agent may fix; the next rejection goes to a human
   max_reply_drafts: 2       # reply drafts checked before the fixed hold reply and a human handoff
+  max_wording_rewrites: 2   # single agent: drafts code rejects for wording (paid claim, internal ID) that
+                            # are redrafted without counting as reply drafts
 
 limits:                     # enforced by the workflow between calls
   max_steps_per_ticket: 40  # maximum tool executions
   max_agent_steps: 12
   max_cost_usd_per_ticket: 0.05  # stop before the next call once reached
-  max_replans: 2            # plan-and-execute only
+  max_replans: 2            # plan-and-execute only: corrections after an invalid plan or a failed call
+  max_plan_checks: 3        # plan-and-execute only: completion checks after a plan runs in full
 
 human_cost_per_ticket_usd: 4.00   # baseline for the "acceptable cost" goal; cite your source in the report

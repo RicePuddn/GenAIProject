@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from datetime import datetime
 from decimal import Decimal
@@ -29,6 +30,12 @@ TicketPriority = Literal["low", "normal", "high"]
 UNKNOWN_CUSTOMER = "dummy_00"
 CATEGORY_TEAMS = {"payment": "payments_team", "refund": "returns_team", "returns": "returns_team"}
 RECORD_PREFIXES = {"refund": "RFD-W", "return": "RET-W", "exchange": "EXC-W", "order_change": "CHG-W"}
+
+
+def json_dumps(value: Any) -> str:
+    """JSON for a JSONB column. A handoff packet can carry raw records, whose dates and amounts are
+    datetime and Decimal values; they are stored as text."""
+    return json.dumps(value, default=str)
 
 
 class WriteRefused(ValueError):
@@ -175,7 +182,7 @@ class PostgresWriter:
                 {"id": ticket_id, "customer": customer,
                  "order": order["id"] if order else None, "at": at, "category": category, "priority": priority,
                  "status": status, "subject": subject, "message": customer_message, "resolution": resolution,
-                 "team": team, "packet": Jsonb(handoff_packet) if handoff_packet else None})
+                 "team": team, "packet": Jsonb(handoff_packet, dumps=json_dumps) if handoff_packet else None})
             if (row := cur.fetchone()) is None:
                 raise WriteRefused(f"ticket {ticket_id} belongs to another customer")
             return row

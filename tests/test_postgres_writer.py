@@ -147,6 +147,14 @@ class WriterTests(unittest.TestCase):
         self.assertEqual((row["customer_id"], row["order_id"], row["channel"]), ("dummy_00", None, "chat"))
         self.assertEqual(self.reader.read("support_tickets", "TKT-NEW")["assigned_team"], "returns_team")
 
+    def test_a_handoff_packet_with_raw_records_is_saved(self):
+        # The single agent's packet carries tool evidence: database dates and amounts, not JSON types.
+        packet = {"reason": "route: human", "evidence": [{"tool": "read_record", "result": {
+            "id": ACCEPTED, "placed_at": NOW, "total": Decimal("20.00")}}]}
+        row = self.ticket(status="awaiting_human", handoff_packet=packet)
+        stored = row["handoff_packet"]["evidence"][0]["result"]
+        self.assertEqual((stored["placed_at"], stored["total"]), (str(NOW), "20.00"))
+
     def test_a_ticket_is_updated_in_place_and_keeps_the_placeholder_customer_even_with_an_order(self):
         self.ticket()
         later = datetime(2026, 10, 31, 10, tzinfo=timezone.utc)

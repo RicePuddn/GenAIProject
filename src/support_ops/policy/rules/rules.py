@@ -139,7 +139,7 @@ class Rules:
         result = dict(outcome)
         result["rule"] = definition["rule_id"]
         result["check"] = f"{group}.{check}"
-        result["policy_sections"] = definition["sources"]
+        result["rule_sources"] = definition["sources"]
         result.update(details)
         return result
 
