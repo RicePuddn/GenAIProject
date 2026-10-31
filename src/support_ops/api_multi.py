@@ -25,7 +25,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from support_ops.agents.runtime import llm_from_config
-from support_ops.api import MAX_HISTORY_TURNS, CancellableStreamingResponse, Turn, _retain_history, _sse
+from support_ops.api import (MAX_HISTORY_TURNS, CancellableStreamingResponse, Turn, _retain_history, _sse,
+                             customers, signed_in)
 from support_ops.helpers.cancellation import CancellationToken, WorkflowCancelled
 from support_ops.helpers.clock import Clock
 from support_ops.helpers.config import load_config
@@ -50,6 +51,8 @@ class MultiChatRequest(BaseModel):
     orchestration: Literal["react", "plan_and_execute"] | None = None   # the supervisor; default: config, else strategy
     # workflow: fixed steps (MultiAgentWorkflow); supervisor: the supervisor chooses every step. Default: config.
     design: Literal["workflow", "supervisor"] | None = None
+    # The signed-in account, as in `api.py`: reads and writes are scoped to it, and the ticket is theirs.
+    customer_id: str | None = Field(default=None, min_length=1, max_length=100)
     # Stateless: the client sends the earlier turns of the ticket; the server keeps nothing.
     history: list[Turn] = Field(default_factory=list, max_length=MAX_HISTORY_TURNS)
 
@@ -59,6 +62,7 @@ class MultiChatResponse(BaseModel):
     strategy: str
     orchestration: str
     design: str = "workflow"
+    customer_id: str | None = None
     reply: str
     ticket_status: str
     case: dict[str, Any] | None = None
@@ -118,6 +122,10 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+# The same account list as the single-agent API.
+app.get("/customers")(customers)
+
+
 @app.get("/info")
 def info() -> dict[str, Any]:
     cfg = load_config(config_path())
@@ -145,7 +153,8 @@ def _run_chat(request: MultiChatRequest, tracer: Tracer,
     # A fresh workflow per request keeps ticket state, tokens and the tracer isolated.
     design = request.design or cfg.get("multi_agent", {}).get("design", "workflow")
     system = SupervisorAgentWorkflow if design == "supervisor" else MultiAgentWorkflow
-    workflow = system(llm, cfg, clock=Clock(datetime.now(timezone.utc)), cancellation=cancellation)
+    workflow = system(llm, cfg, clock=Clock(datetime.now(timezone.utc)), cancellation=cancellation,
+                      customer_id=signed_in(request.customer_id))
     history = [turn.model_dump() for turn in request.history]
     result = workflow.invoke(tracer.ticket_id, request.customer_message, strategy=request.strategy,
                              tracer=tracer, history=history, orchestration=request.orchestration)
@@ -153,7 +162,8 @@ def _run_chat(request: MultiChatRequest, tracer: Tracer,
     reply = result.pop("reply")
     result.pop("history")
     return MultiChatResponse(
-        **result, reply=reply, tool_call_count=tracer.tool_call_count, tool_calls=tracer.tool_calls,
+        **result, reply=reply, customer_id=request.customer_id, tool_call_count=tracer.tool_call_count,
+        tool_calls=tracer.tool_calls,
         trace=tracer.summary(),
         history=_retain_history([*history, {"role": "customer", "content": request.customer_message},
                                  *([{"role": "agent", "content": reply}] if reply else [])]),

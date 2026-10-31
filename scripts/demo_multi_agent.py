@@ -293,6 +293,17 @@ with st.sidebar:
     except RuntimeError as exc:
         info = {"default_strategy": "react"}
         st.error(str(exc))
+    try:
+        accounts = call_api("/customers", timeout=10)
+    except RuntimeError as exc:
+        accounts = []
+        st.warning(f"Accounts unavailable, chatting signed out: {exc}")
+    names = {row["id"]: f"{row['first_name']} {row['last_name']} ({row['id']})" for row in accounts}
+    # Switching account starts a new ticket, so one conversation never spans two customers.
+    customer_id = st.selectbox("Signed in as", [None, *names], key="customer_id", on_change=new_ticket,
+                               format_func=lambda account: names.get(account, "Not signed in"),
+                               help="The agent sees and changes only this customer's orders, and the "
+                                    "ticket is saved as theirs. Signed out, nothing is scoped.")
     default = info.get("default_strategy", "react")
     default_design = info.get("default_design", "workflow")
     design = st.radio("Multi-agent design", list(DESIGNS), format_func=DESIGNS.get,
@@ -322,6 +333,8 @@ if message := st.chat_input("Write as the customer, e.g. One bottle in ORD-2026-
                "history": st.session_state.history}
     if st.session_state.ticket_id:
         payload["ticket_id"] = st.session_state.ticket_id
+    if customer_id:
+        payload["customer_id"] = customer_id
     with st.chat_message("user"):
         st.markdown(message)
     with st.chat_message("assistant"):

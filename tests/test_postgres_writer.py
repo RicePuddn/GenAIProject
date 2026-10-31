@@ -160,6 +160,26 @@ class WriterTests(unittest.TestCase):
         self.assertEqual((resolved["order_id"], resolved["resolution"]), (row["order_id"], "Refund recorded."))
         self.assertEqual(resolved["handoff_packet"], {"reason": "route: human"})
 
+    def test_a_signed_in_ticket_is_the_customers_and_another_customer_cannot_take_it_over(self):
+        row = self.ticket(order_id=ACCEPTED, customer_id="CUS-EVAL-001")
+        self.assertEqual((row["customer_id"], row["order_id"]), ("CUS-EVAL-001", ACCEPTED))
+        with self.assertRaisesRegex(WriteRefused, "belongs to another customer"):
+            self.ticket(status="resolved", customer_id="CUS-1001")
+        self.assertEqual(self.reader.read("support_tickets", "TKT-NEW")["status"], "in_progress")
+        other = self.ticket(ticket_id="TKT-OTHER", order_id=ACCEPTED, customer_id="CUS-1001")
+        self.assertIsNone(other["order_id"])   # another customer's order is never linked
+
+    def test_a_signed_in_write_to_another_customers_order_is_refused_as_not_found(self):
+        with self.assertRaisesRegex(WriteRefused, f"order {CANCELLABLE} not found"):
+            self.apply("order_change", CANCELLABLE, customer_id="CUS-1001")
+        self.assertEqual(self.reader.read("orders", CANCELLABLE)["status"], "processing")
+        self.assertEqual(self.apply("order_change", CANCELLABLE, customer_id="CUS-EVAL-001")["status"], "executed")
+
+    def test_the_customer_list_leaves_out_the_placeholder(self):
+        ids = [row["id"] for row in self.reader.customers()]
+        self.assertIn("CUS-EVAL-001", ids)
+        self.assertNotIn("dummy_00", ids)
+
     def test_the_update_ticket_tool_saves_the_conversation(self):
         tools = SupportTools(self.reader, SkillsPolicy(), TicketState(Clock(NOW)), self.writer)
         result = tools.execute("TKT-S1", "update_ticket", {

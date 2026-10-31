@@ -350,6 +350,8 @@ class DemoPageTests(unittest.TestCase):
                     client = TestClient(api)
                     if request.full_url.endswith("/info"):
                         return io.BytesIO(client.get("/info").content)
+                    if request.full_url.endswith("/customers"):   # the account picker: signed out
+                        return io.BytesIO(b"[]")
                     payload = json.loads(request.data)
                     self.chat_payloads.append(payload)
                     steps = [plan(("ask_specialist", {"specialist": "returns_refunds", "request": "Refund the mug"}),
