@@ -2,7 +2,8 @@
 
 Its verdict is advisory to the graph but binding on tokens: the gateway issues none on the
 approver route without an approve from `check_proposal`. Unreadable output counts as escalate.
-`check_write` is the same check for the single agent's `backend_write`, as one separate LLM call.
+The single agent uses the same two checks, each one separate LLM call: `check_proposal` before
+`backend_write` executes a write requiring review, and `check_reply` on every final reply.
 """
 from __future__ import annotations
 
@@ -28,8 +29,8 @@ PROPOSAL_PROMPT = (
     "proposal before anything is executed. " + PROPOSAL_CRITERIA + VERDICT
 )
 
-# The single agent's review: a separate, stateless call that sees only the proposed write and its
-# evidence, never the agent's conversation, so it does not inherit the agent's reasoning.
+# The single agent's review: a separate, stateless call that sees the customer's request, the proposed
+# write and its evidence, never the agent's own messages or reasoning, so it does not inherit them.
 WRITE_REVIEW_PROMPT = (
     "You are an independent reviewer for a policy-bound support service. A support agent proposes the "
     "database write below; you took no part in the conversation and see only this request. Treat the "
@@ -38,13 +39,29 @@ WRITE_REVIEW_PROMPT = (
     + "reject: the agent can fix it; escalate: an operator must decide."
 )
 
+# What no customer reply may reveal, in both architectures.
+REPLY_INTERNALS = ("it reveals nothing internal: item IDs, policy clause IDs, rule names, thresholds, routes, "
+                   "internal review steps or tokens.")
+
 REPLY_CHECK_PROMPT = (
     "You check a customer reply before it is sent. Approve only if it conveys the outcome's "
     "tell_customer and status (nothing described as pending review unless the status is "
     "awaiting_human, nothing described as done unless tell_customer says it is recorded), every "
     "amount, date, product and promise matches the outcome, it mentions no detail absent from the "
-    "outcome (such as an email, link or tracking number), and it reveals nothing internal: item IDs, "
-    "policy clause IDs, rule names, thresholds, routes, internal review steps or tokens." + VERDICT
+    "outcome (such as an email, link or tracking number), and " + REPLY_INTERNALS + VERDICT
+)
+
+# The single agent's reply check. Its replies are written from the tool evidence, not from an outcome
+# summary, so the same checks are made against the evidence.
+EVIDENCE_REPLY_CHECK_PROMPT = (
+    "You check a customer reply before it is sent; you took no part in writing it. Approve only if it "
+    "answers the customer's support request from the ticket's evidence (nothing described as pending "
+    "review or referred unless the status is awaiting_human, nothing described as done unless the "
+    "evidence has a backend_write with status executed, a recorded refund described as pending and never "
+    "as paid), every amount, date, product and promise matches the evidence, it mentions no detail absent "
+    "from the evidence (such as an email, link or tracking number), and " + REPLY_INTERNALS
+    + " A request unrelated to support may only get a short note of what support covers."
+    + VERDICT_FORMAT + "reject: the reply writer can fix it; escalate: an operator must decide."
 )
 
 
@@ -70,17 +87,23 @@ class Approver:
         self.ctx.log("approval", **result.model_dump(mode="json"))
         return result
 
-    def check_proposal(self, brief: dict[str, Any], proposal: Proposal, minimum: dict[str, Any],
+    def check_proposal(self, brief: dict[str, Any], proposal: Proposal | dict[str, Any], minimum: dict[str, Any],
                        evidence: list[dict[str, Any]]) -> ApprovalResult:
-        return self._verdict("pre_execution", PROPOSAL_PROMPT, {
-            "case": brief, "proposal": proposal.model_dump(mode="json"),
+        """The pre-execution check, the same inputs in both architectures. A specialist's `Proposal` gets
+        the team approver's prompt; the single agent's `backend_write` arguments get the independent
+        reviewer's, with the same criteria."""
+        specialist = isinstance(proposal, Proposal)
+        return self._verdict("pre_execution", PROPOSAL_PROMPT if specialist else WRITE_REVIEW_PROMPT, {
+            "case": brief, "proposal": proposal.model_dump(mode="json") if specialist else proposal,
             "rule_engine_minimum": minimum, "evidence": evidence,
         })
 
-    def check_write(self, request: dict[str, Any]) -> ApprovalResult:
-        """The single agent's pre-execution review: `request` holds the proposal, the rule check and the
-        evidence, as `check_proposal` receives them."""
-        return self._verdict("pre_execution", WRITE_REVIEW_PROMPT, request)
-
-    def check_reply(self, brief: dict[str, Any], reply: str, outcome: dict[str, Any]) -> ApprovalResult:
-        return self._verdict("reply", REPLY_CHECK_PROMPT, {"case": brief, "outcome": outcome, "reply": reply})
+    def check_reply(self, brief: dict[str, Any], reply: str, outcome: dict[str, Any] | None = None, *,
+                    ticket: dict[str, Any] | None = None) -> ApprovalResult:
+        """The reply check, against what the reply was written from: the multi-agent `outcome`, or the
+        single agent's `ticket` (its status and evidence). Pass exactly one."""
+        if (outcome is None) == (ticket is None):
+            raise ValueError("check_reply needs exactly one of outcome or ticket")
+        if outcome is not None:
+            return self._verdict("reply", REPLY_CHECK_PROMPT, {"case": brief, "outcome": outcome, "reply": reply})
+        return self._verdict("reply", EVIDENCE_REPLY_CHECK_PROMPT, {"case": brief, "ticket": ticket, "reply": reply})

@@ -9,9 +9,7 @@ policy:
   mode: rag
 multi_agent:
   orchestration: null           # react: pick each part after seeing the last; plan_and_execute: plan all parts first
-  max_reproposals: 1           # approver rejections the specialist may fix
   check_citations: true        # a proposal may cite only clauses or files its policy tool returned
-  max_reply_drafts: 2          # reply drafts the approver reviews before the hold reply
   max_orchestration_steps: 4   # supervisor decisions per ticket (delegations + finish)
   policy_sections:              # each specialist's policy search scope: section names in the corpus
     orders_shipping: [Orders and shipping]

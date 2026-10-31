@@ -118,11 +118,16 @@ class WriterTests(unittest.TestCase):
 
     def test_the_single_agent_tool_cancels_and_refunds_as_two_real_writes(self):
         clock = Clock(NOW)
-        tools = SupportTools(self.reader, SkillsPolicy(), TicketState(clock), self.writer)
+        tools = SupportTools(self.reader, SkillsPolicy(), TicketState(clock), self.writer,
+                             reviewer=lambda request: {"decision": "approve", "issues": []})
+        for file in ("SKILL.md", "refunds.md"):
+            tools.execute("T1", "policy", {"action": "read", "skill": "returns-and-refunds", "file": file})
         cancel = tools.execute("T1", "backend_write", {"operation": "cancel", "order_id": CANCELLABLE,
-                                                       "reason": "order_cancellation"})
+                                                       "reason": "order_cancellation",
+                                                       "cited_clauses": ["returns-and-refunds/SKILL.md"]})
         self.assertEqual((cancel["status"], self.reader.read("orders", CANCELLABLE)["status"]), ("executed", "cancelled"))
-        args = {"operation": "refund", "order_id": CANCELLABLE, "amount": 32, "reason": "order_cancellation"}
+        args = {"operation": "refund", "order_id": CANCELLABLE, "amount": 32, "reason": "order_cancellation",
+                "cited_clauses": ["refunds.md"]}
         self.assertEqual(tools.execute("T1", "backend_write", args)["status"], "review_required")
         refund = tools.execute("T1", "backend_write", {**args, "review_reason": "Cancelled before fulfilment; "
                                                        "the captured balance is owed under 4.2."})

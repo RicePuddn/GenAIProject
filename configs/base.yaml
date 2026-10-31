@@ -52,6 +52,10 @@ policy:
     embedding_model: nomic-ai/nomic-embed-text-v1.5
     rerank_model: BAAI/bge-reranker-v2-m3
 
+review:                     # before a write requiring review, and on each reply
+  max_rejections: 1         # rejected write proposals the agent may fix; the next rejection goes to a human
+  max_reply_drafts: 2       # reply drafts checked before the fixed hold reply and a human handoff
+
 limits:                     # enforced by the workflow between calls
   max_steps_per_ticket: 40  # maximum tool executions
   max_agent_steps: 12

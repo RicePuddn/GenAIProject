@@ -252,7 +252,7 @@ flowchart TD
      the part waits for the customer;
    - otherwise the ticket is `proposed` and goes to **decide**.
 5. **Decide.** `human` → the part needs a human. `approver` → the approver's pre-execution check: approve
-   continues; the first reject sends the issues back to the specialist (`max_reproposals`, per part); a
+   continues; the first reject sends the issues back to the specialist (`review.max_rejections`, per part); a
    second reject or an escalate → the part needs a human. `auto` and approved proposals reach the gateway.
 6. **Gateway and write.** `TicketFlow.approve` re-checks the route against the minimum and issues a token
    bound to the ticket, operation, order and amount (none for an information-only answer, which ends the
@@ -459,8 +459,8 @@ any `policy.mode` other than `rag`.
 | `llm.cache_dir` | `results/cache` | Response cache; `null` for live timings |
 | `policy.corpus_dir` | `policy/raw_policy/pdf` | Fixed PDF policy corpus |
 | `policy.rag.*` | see `base.yaml` | Retrieval stages: dense, BM25, rerank, direct reference expansion |
-| `multi_agent.max_reproposals` | `1` | Approver rejections the specialist may fix |
-| `multi_agent.max_reply_drafts` | `2` | Reply drafts the approver reviews before the hold reply |
+| `review.max_rejections` | `1` | Approver rejections the specialist may fix (shared with the single agent's write review) |
+| `review.max_reply_drafts` | `2` | Reply drafts the approver reviews before the hold reply (shared with the single agent) |
 | `multi_agent.policy_sections.<specialist>` | `Orders and shipping` / `Returns and refunds` | The corpus sections a specialist's policy search covers by default |
 | `multi_agent.retries.tool_errors` | `1` | Automatic re-runs of a tool that failed for a reason the model can't fix (database timeout, dropped connection). Argument mistakes are never re-run; they go back to the specialist. After the last attempt the ticket is handed off |
 | `multi_agent.retries.invalid_json` | `1` | Extra tries after a malformed JSON reply from the supervisor, a plan-and-execute proposal or the approver; the validation error is sent back with the retry. After the last try, the supervisor settles the parts done (or hands off), the specialist replans, and the approver escalates |

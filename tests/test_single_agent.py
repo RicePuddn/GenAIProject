@@ -16,7 +16,8 @@ from support_ops.gateway.ticket_state import TicketState
 from tests.fake_writer import FakeWriter
 from support_ops.helpers.clock import Clock
 from support_ops.helpers.config import load_config
-from support_ops.helpers.llm import ChatResult, OpenAICompatLLM, ScriptedLLM, ToolCall, text, tool_call
+from support_ops.helpers.llm import ChatResult, OpenAICompatLLM, ToolCall, text, tool_call
+from tests.scripted import ScriptedLLM
 from support_ops.policy.rules import Rules
 from support_ops.policy.skills import SkillsPolicy
 from support_ops.systems.single_agent import SingleAgentWorkflow
@@ -71,12 +72,47 @@ class WorkflowTests(unittest.TestCase):
             result = workflow.invoke("TKT-TEST", "Please refund my damaged item.", "react")
         self.assertEqual(result["evidence"][-1]["result"]["status"], "executed")
         self.assertEqual(len(writer.applied), 1)
-        [(role, messages)] = [call for call in llm.calls if call[0] == "approver"]
-        self.assertEqual([message["role"] for message in messages], ["system", "user"])
-        request = json.loads(messages[1]["content"])
+        write_review, reply_check = [messages for role, messages in llm.calls if role == "approver"]
+        for messages in (write_review, reply_check):
+            self.assertEqual([message["role"] for message in messages], ["system", "user"])
+            # The customer's request, as the multi-agent approver gets it, but none of the agent's messages.
+            self.assertEqual(json.loads(messages[1]["content"])["case"], {"message": "Please refund my damaged item."})
+            self.assertNotIn("policy-bound customer support agent", messages[1]["content"])
+        request = json.loads(write_review[1]["content"])
+        self.assertEqual(set(request), {"case", "proposal", "rule_engine_minimum", "evidence"})
         self.assertEqual(request["proposal"]["cited_clauses"], ["refunds.md"])
         self.assertEqual(request["rule_engine_minimum"]["route"], "approver")
-        self.assertNotIn("Please refund my damaged item.", messages[1]["content"])   # no conversation
+        checked = json.loads(reply_check[1]["content"])
+        self.assertEqual(checked["reply"], "Your refund is recorded.")
+        self.assertEqual(checked["ticket"]["evidence"][-1]["result"]["status"], "executed")
+        self.assertEqual(result["reply_review"]["decision"], "approve")
+        trace = result["trace"]
+        self.assertEqual([event["decision"] for event in trace.of_kind("write_review")], ["approve"])
+        write_end = [event for event in trace.of_kind("tool_end") if event["tool"] == "backend_write"][-1]
+        self.assertGreaterEqual(write_end["elapsed_s"], write_end["review_elapsed_s"])   # timed apart
+        read_end = [event for event in trace.of_kind("tool_end") if event["tool"] == "policy"][-1]
+        self.assertNotIn("review_elapsed_s", read_end)
+
+    def test_a_reply_that_fails_its_check_is_redrafted_then_held_for_a_human(self):
+        reject = text(json.dumps({"decision": "reject", "issues": ["claims the refund was paid"], "reason": "x"}))
+        llm = ScriptedLLM().push("guard", text("0.01")).push(
+            "supervisor", text("ready"), text("Your refund has been paid."), text("Your refund is pending."),
+        ).push("approver", reject, text(json.dumps({"decision": "approve", "issues": [], "reason": "ok"})))
+        result = self.run_flow(llm)
+        self.assertEqual(result["reply"], "Your refund is pending.")
+        redraft = json.loads([m for role, m in llm.calls if role == "supervisor"][-1][1]["content"])
+        self.assertEqual(redraft["previous_draft_issues"], ["claims the refund was paid"])
+        first_draft = json.loads([m for role, m in llm.calls if role == "supervisor"][-2][1]["content"])
+        self.assertNotIn("previous_draft_issues", first_draft)
+
+        llm = ScriptedLLM().push("guard", text("0.01")).push(
+            "supervisor", text("ready"), text("Paid."), text("Paid again."),
+        ).push("approver", reject, reject)
+        result = self.run_flow(llm)
+        self.assertEqual(result["reply"], "I’ve referred your request to a support specialist for review.")
+        self.assertEqual(result["ticket_status"], "awaiting_human")
+        self.assertEqual(result["handoff_packet"]["reason"], "reply failed review")
+        self.assertEqual(result["reply_review"]["decision"], "reject")
 
     def test_invalid_plan_retries_without_executing_unknown_tools(self):
         llm = ScriptedLLM().push("guard", text("safe")).push(

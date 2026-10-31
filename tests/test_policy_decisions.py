@@ -31,6 +31,9 @@ class BackendFactTests(unittest.TestCase):
         return "REF-Refunds-6.6"
 
     def write(self, tools, amount=20, **details):
+        """A refund in ticket T1; unless the test names its citations, it retrieves and cites the refunds policy."""
+        if "cited_clauses" not in details:
+            details["cited_clauses"] = [self.retrieve(tools, "skills" if isinstance(tools.policy, SkillsPolicy) else "rag")]
         return tools.execute("T1", "backend_write", {
             "operation": "refund", "order_id": ORDER, "reason": "damaged_item",
             "items": [{"item_id": "ITM-1", "quantity": 1}], "amount": amount, **details,
@@ -170,7 +173,9 @@ class BackendFactTests(unittest.TestCase):
                 cited = self.retrieve(tools, provider)
                 with patch.object(tools.backend_facts, "read", return_value=REFUND):
                     self.assertEqual(self.write(tools, 60)["status"], "review_required")
-                    self.assertEqual(self.write(tools, 60, review_reason="Reviewed.")["status"], "review_required")
+                    for amount in (20, 60):   # auto and approver routes alike need a citation
+                        with self.assertRaisesRegex(ValueError, "requires at least one cited policy clause"):
+                            self.write(tools, amount, review_reason="Reviewed.", cited_clauses=[])
                     self.assertFalse(tools.writer.applied)
                     reviewed = self.write(tools, 60, review_reason="Reviewed the policy, facts and amount.",
                                           cited_clauses=[cited])
@@ -199,6 +204,20 @@ class BackendFactTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "were not returned"):   # checked on auto writes too
                         self.write(tools, cited_clauses=[cited, "REF-Invented-9.9"])
                 self.assertFalse(tools.writer.applied)
+
+    def test_the_gate_decides_without_writing_and_the_executor_writes_what_it_is_handed(self):
+        tools = self.tools(reviewer=lambda request: {"decision": "approve", "issues": []})
+        args = {"operation": "refund", "order_id": ORDER, "reason": "damaged_item", "amount": 60,
+                "items": [{"item_id": "ITM-1", "quantity": 1}], "review_reason": "Per policy.",
+                "cited_clauses": [self.retrieve(tools)]}
+        with patch.object(tools.backend_facts, "read", return_value=REFUND):
+            checked = tools.gate.check("T1", args)
+        self.assertEqual((checked["status"], checked["policy_check"]["route"]), ("allowed", "approver"))
+        self.assertIsNone(tools.gate.review("T1", args, checked["policy_check"]))
+        self.assertFalse(tools.writer.applied)   # deciding never writes
+        self.assertIsNone(tools.executor.replay("T1", args, checked["policy_check"]))
+        self.assertEqual(tools.executor.apply("T1", args, checked["policy_check"])["status"], "executed")
+        self.assertTrue(tools.executor.replay("T1", args, checked["policy_check"])["replayed"])
 
     def test_the_independent_review_decides_writes_requiring_review(self):
         verdicts = {"reject": {"decision": "reject", "issues": ["amount exceeds the item paid"]},

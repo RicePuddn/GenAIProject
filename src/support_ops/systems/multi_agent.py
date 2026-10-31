@@ -59,8 +59,6 @@ from support_ops.systems.tools import SupportTools
 SPECIALIST_TOOLS = {"orders_shipping": ORDERS_SHIPPING_TOOLS, "returns_refunds": RETURNS_REFUNDS_TOOLS}
 DEFAULTS = {
     "orchestration": None,          # react or plan_and_execute; None: the specialists' strategy
-    "max_reproposals": 1,           # approver rejections the specialist may fix
-    "max_reply_drafts": 2,          # drafts the approver may review before falling back
     "max_orchestration_steps": 4,   # react: orchestrator decisions per ticket (delegations + finish)
     "policy_sections": {"orders_shipping": ["Orders and shipping"], "returns_refunds": ["Returns and refunds"]},
     # skills mode: each specialist's skill folders under policy.skills_dir
@@ -107,6 +105,13 @@ class MultiAgentWorkflow:
                  cancellation: CancellationToken | None = None, writer: PostgresWriter | None = None):
         self.llm, self.cfg = llm, cfg
         self.settings = {**DEFAULTS, **cfg.get("multi_agent", {})}
+        if moved := {"max_reproposals", "max_reply_drafts"} & set(self.settings):
+            raise ValueError(f"multi_agent.{sorted(moved)} moved to review.max_rejections and "
+                             "review.max_reply_drafts, shared with the single agent")
+        # Shared with the single agent, so every arm gets the same second chances.
+        review = cfg.get("review", {})
+        self.settings["max_reproposals"] = review.get("max_rejections", 1)
+        self.settings["max_reply_drafts"] = review.get("max_reply_drafts", 2)
         for key in ("policy_sections", "policy_skills"):
             # Per specialist, so a config naming one specialist's scope keeps the other's default scope
             # instead of leaving it unscoped (None, the whole policy, stays available when set explicitly).

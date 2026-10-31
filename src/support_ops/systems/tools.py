@@ -2,28 +2,23 @@
 
 Read and ticket-state tools are identical in every architecture; the `policy` tool's arguments
 and description come from the plugged-in policy provider (RAG or skills). `backend_write` is for
-architectures with no gateway in front of their writes, so it runs the rules itself and, on the
-approver route, an independent review; the multi-agent specialists are never given it.
+architectures with no gateway in front of their writes: it runs the shared write gate (rules,
+citations and, on the approver route, an independent review) before the executor writes. The
+multi-agent specialists are never given it.
 """
 from __future__ import annotations
 
-from collections import defaultdict
-from typing import Any, Callable, Literal, Self
-
-import json
+from typing import Any, Literal, Self
 
 from pydantic import Field, model_validator
 
 from support_ops.backend.postgres import (PostgresReader, PostgresWriter, RECORD_KINDS, TicketCategory,
-                                          TicketPriority, TicketStatus, WriteRefused)
+                                          TicketPriority, TicketStatus)
 from support_ops.gateway.ticket_state import TicketState
+from support_ops.gateway.write_gate import Reviewer, WriteExecutor, WriteGate
 from support_ops.helpers.arguments import Amount, NonEmpty, ToolArguments
-from support_ops.policy.citations import unread_citations
 from support_ops.policy.provider import PolicyProvider
-from support_ops.policy.facts import WRITE_OPERATIONS, BackendFacts
-
-# Review rejections a ticket's agent may fix before the write goes to a human (as multi_agent.max_reproposals).
-MAX_REVIEW_REJECTIONS = 1
+from support_ops.policy.facts import BackendFacts
 
 
 class ReadArguments(ToolArguments):
@@ -108,8 +103,8 @@ class BackendWriteArguments(ToolArguments):
         "The order lines affected, from get_items_for_order. Required for a return_request."))
     reason: NonEmpty = Field(description="Why, in a short phrase such as damaged_item or order_cancellation.")
     cited_clauses: list[NonEmpty] = Field(default_factory=list, description=(
-        "Clause IDs or policy files you retrieved in this ticket that support the action. Required when "
-        "the write requires review; citing anything the policy tool did not return is refused."))
+        "Clause IDs or policy files you retrieved in this ticket that support the action. At least one is "
+        "required; citing anything the policy tool did not return is refused."))
     review_reason: NonEmpty | None = Field(default=None, description=(
         "For a write requiring review, explain how the retrieved policy and recorded facts support the "
         "action and amount; an independent reviewer checks it against the evidence. This cannot override "
@@ -144,17 +139,13 @@ def validate_arguments(models: dict[str, type[ToolArguments]], name: str, argume
 class SupportTools:
     def __init__(self, reader: PostgresReader, policy: PolicyProvider, ticket_state: TicketState,
                  writer: PostgresWriter | None = None,
-                 reviewer: Callable[[dict[str, Any]], dict[str, Any]] | None = None):
+                 reviewer: Reviewer | None = None, max_rejections: int = 1):
         self.reader, self.policy, self.ticket_state = reader, policy, ticket_state
         self.writer = writer or PostgresWriter()
         self.backend_facts = BackendFacts(reader, ticket_state.clock)
-        # Takes the proposed write, its rule check and the evidence; returns a decision (approve, reject or
-        # escalate), issues and reason. Without one, writes requiring review go to a human.
-        self.reviewer = reviewer
-        # Per ticket: successful read and policy results, what they let the agent cite, and review rejections.
-        self._evidence: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        self._citable: dict[str, set[str]] = defaultdict(set)
-        self._rejections: dict[str, int] = defaultdict(int)
+        # `backend_write` decides with the gate and writes with the executor; they never share a step.
+        self.gate = WriteGate(self.backend_facts, ticket_state, reviewer, max_rejections)
+        self.executor = WriteExecutor(self.writer, ticket_state)
         self.argument_models: dict[str, type[ToolArguments]] = {
             "read_record": ReadArguments,
             "get_shipments_for_order": OrderArguments,
@@ -193,9 +184,7 @@ class SupportTools:
     def execute(self, ticket_id: str, name: str, arguments: Any) -> dict[str, Any]:
         value = self._dispatch(ticket_id, name, arguments)
         if name not in {"backend_write", "update_ticket", "ticket_state"} and "error" not in value:
-            self._evidence[ticket_id].append({"tool": name, "result": value})
-            if name == "policy":
-                self._citable[ticket_id] |= self.policy.citable(value)
+            self.gate.record(ticket_id, name, value, self.policy.citable(value) if name == "policy" else set())
         return value
 
     def _dispatch(self, ticket_id: str, name: str, arguments: Any) -> dict[str, Any]:
@@ -231,61 +220,14 @@ class SupportTools:
         return self.ticket_state.run(ticket_id, args)
 
     def _backend_write(self, ticket_id: str, args: dict[str, Any]) -> dict[str, Any]:
-        """Check the recorded facts and the rules, then write. No gateway sits in front of this tool."""
-        operation, order_id, amount = args["operation"], args["order_id"], args.get("amount")
-        handoff = {"action": "handoff", "operation": operation, "order_id": order_id, "amount": amount}
-        if operation not in WRITE_OPERATIONS:
-            return self.ticket_state.run(ticket_id, {**handoff, "reason": "unsupported write operation"})
-        lines = sorted(args.get("items", []), key=lambda line: line["item_id"])
-        facts = self.backend_facts.read(operation, order_id, [line["item_id"] for line in lines])
-        decision = self.ticket_state.rules.check(operation, amount, facts)
-        if decision["requires_human"]:
-            return self.ticket_state.run(ticket_id, {**handoff, "reason": decision["reason"]})
-        if not decision["allowed"]:
-            return {"status": "blocked", "reason": decision["reason"], "policy_check": decision}
-        cited = args.get("cited_clauses", [])
-        if decision["route"] == "approver" and not (args.get("review_reason", "").strip() and cited):
-            return {"status": "review_required", "policy_check": decision,
-                    "reason": "This write goes to an independent reviewer: supply review_reason and the "
-                              "cited_clauses you retrieved that support it."}
-        if unread := unread_citations(cited, self._citable[ticket_id]):
-            raise ValueError(f"cited_clauses {unread} were not returned by the policy tool in this ticket; "
-                             "retrieve them first, or cite only the clause IDs or files you retrieved")
-        request = {"ticket_id": ticket_id, "operation": WRITE_OPERATIONS[operation], "order_id": order_id,
-                   "amount": amount, "items": lines}
-        # The amount is left out of the key, so one ticket cannot write the same action for two amounts.
-        key = f"{ticket_id}:{operation}:{order_id}:{','.join(line['item_id'] for line in lines)}"
-        if (previous := self.writer.replay(key)) is not None:
-            if json.dumps(previous["request"], sort_keys=True) != json.dumps(request, sort_keys=True):
-                raise ValueError("conflicting amount or items for an existing write")
-            return {**previous["result"], "replayed": True, "policy_check": decision}
-        if decision["route"] == "approver" and (refused := self._review(ticket_id, args, decision, handoff)):
+        """The agent chose to write, so the gate decides and the executor writes: check, then the first
+        result of a repeat, then the review if the route needs one, then the write."""
+        checked = self.gate.check(ticket_id, args)
+        if checked["status"] != "allowed":
+            return checked
+        decision = checked["policy_check"]
+        if (previous := self.executor.replay(ticket_id, args, decision)) is not None:
+            return previous   # already reviewed and written: no second review
+        if decision["route"] == "approver" and (refused := self.gate.review(ticket_id, args, decision)):
             return refused
-        try:
-            result = self.writer.apply(request, idempotency_key=key, reason=args["reason"],
-                                       at=self.ticket_state.clock.now(), payment_id=decision.get("payment_id"),
-                                       return_id=decision.get("return_id"))
-        except WriteRefused as exc:
-            return {"status": "blocked", "reason": str(exc), "policy_check": decision}
-        self.ticket_state.run(ticket_id, {"action": "audit", "type": "write", "operation": operation,
-                                          "order_id": order_id, "amount": amount, "write_id": result["write_id"],
-                                          "review_reason": args.get("review_reason"), "cited_clauses": cited})
-        return {**result, "policy_check": decision}
-
-    def _review(self, ticket_id: str, args: dict[str, Any], decision: dict[str, Any],
-                handoff: dict[str, Any]) -> dict[str, Any] | None:
-        """The independent review of a write on the approver route: None when it approves, else the
-        result to return. A rejection the agent can fix comes back as a block; an escalation, or a
-        rejection after MAX_REVIEW_REJECTIONS, goes to a human."""
-        if self.reviewer is None:
-            return self.ticket_state.run(ticket_id, {**handoff, "reason": "no reviewer for a write requiring review"})
-        verdict = self.reviewer({"proposal": args, "rule_engine_minimum": decision,
-                                 "evidence": self._evidence[ticket_id]})
-        if verdict["decision"] == "approve":
-            return None
-        issues = "; ".join(verdict.get("issues") or []) or verdict.get("reason", "")
-        self._rejections[ticket_id] += 1
-        if verdict["decision"] != "reject" or self._rejections[ticket_id] > MAX_REVIEW_REJECTIONS:
-            return self.ticket_state.run(ticket_id, {**handoff, "reason": f"reviewer {verdict['decision']}: {issues}"})
-        return {"status": "blocked", "reason": f"the independent review rejected this write: {issues}",
-                "review": verdict, "policy_check": decision}
+        return self.executor.apply(ticket_id, args, decision)

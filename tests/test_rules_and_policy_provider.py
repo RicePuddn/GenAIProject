@@ -10,7 +10,8 @@ from unittest.mock import Mock, patch
 from support_ops.backend.postgres import PostgresReader
 from support_ops.helpers.arguments import NonEmpty, ToolArguments
 from support_ops.helpers.config import load_config
-from support_ops.helpers.llm import ScriptedLLM, text, tool_call
+from support_ops.helpers.llm import text, tool_call
+from tests.scripted import ScriptedLLM
 from support_ops.policy.rules import Rules
 from support_ops.policy.rag.loader import load_corpus
 from support_ops.helpers.config import ROOT

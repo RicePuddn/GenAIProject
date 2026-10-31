@@ -9,7 +9,7 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from support_ops.agents.approver import Approver
-from support_ops.agents.runtime import AgentContext, Budget, Retries
+from support_ops.agents.runtime import AgentContext, Budget, BudgetExceeded, Retries
 from support_ops.backend.postgres import PostgresReader, PostgresWriter
 from support_ops.gateway.ticket_state import TicketState
 from support_ops.helpers.cancellation import CancellationToken
@@ -47,6 +47,7 @@ class SupportState(TypedDict, total=False):
     ticket_status: str
     handoff_packet: dict[str, Any] | None
     reply: str
+    reply_review: dict[str, Any] | None   # the independent check of the final reply
     guard_flag: str
     replans: int
     agent_steps: int
@@ -71,8 +72,11 @@ class SingleAgentWorkflow:
         self.tools = SupportTools(
             reader or PostgresReader(), policy or policy_from_config(cfg, rules),
             ticket_state or TicketState(self.clock, rules=rules), writer, reviewer=self._review,
+            max_rejections=cfg.get("review", {}).get("max_rejections", 1),
         )
         self._call_sequence = 0
+        self._brief: dict[str, Any] = {}   # the customer's request, as the independent checks read it
+        self._review_s = 0.0               # review time inside the tool call in progress
         graph = StateGraph(SupportState)
         for name in ("guard", "supervisor", "tools", "final_reply", "handoff_reply"):
             graph.add_node(name, getattr(self, f"_{name}"))
@@ -102,6 +106,7 @@ class SingleAgentWorkflow:
             raise ValueError("history roles must be customer or agent")
         self.tracer = tracer or self._provided_tracer or Tracer(ticket_id)
         self._call_sequence = 0
+        self._brief = {"message": customer_message, **({"history": history} if history else {})}
         self._event("workflow_start", strategy=selected, history_turns=len(history))
         # Explicit budgets terminate loops before LangGraph's recursion safeguard.
         recursion_limit = 2 * self.cfg["limits"]["max_agent_steps"] + 6
@@ -131,12 +136,23 @@ class SingleAgentWorkflow:
                     **({"reasoning": result.reasoning} if result.reasoning else {}))
         return result
 
+    def _checker(self) -> Approver:
+        """The independent checks: each a separate, stateless LLM call that sees the customer's request
+        and the evidence but none of the agent's messages or reasoning."""
+        return Approver(AgentContext(chat=self._chat, log=self._event, clock=self.clock,
+                                     budget=Budget(self.cfg["limits"], self.tracer),
+                                     retries=Retries.from_config(self.cfg)))
+
     def _review(self, request: dict[str, Any]) -> dict[str, Any]:
-        """`backend_write`'s independent review: a separate, stateless LLM call that sees the proposed
-        write and its evidence but none of the agent's conversation or reasoning."""
-        ctx = AgentContext(chat=self._chat, log=self._event, clock=self.clock,
-                           budget=Budget(self.cfg["limits"], self.tracer), retries=Retries.from_config(self.cfg))
-        return Approver(ctx).check_write(request).model_dump(mode="json")
+        """`backend_write`'s review of a write requiring review. Timed on its own, so the tool's
+        latency can be reported without the review LLM call inside it."""
+        started = time.perf_counter()
+        verdict = self._checker().check_proposal(self._brief, request["proposal"], request["rule_engine_minimum"],
+                                                 request["evidence"]).model_dump(mode="json")
+        elapsed = time.perf_counter() - started
+        self._review_s += elapsed
+        self._event("write_review", decision=verdict["decision"], elapsed_s=round(elapsed, 6))
+        return verdict
 
     def _guard(self, state: SupportState) -> dict[str, Any]:
         self._event("node_start", node="guard", ticket_id=state["ticket_id"])
@@ -197,7 +213,8 @@ class SingleAgentWorkflow:
             "support it; an independent reviewer checks the write before it runs. This never overrides a "
             "failed check or human requirement. "
             "Calculate return windows using the workflow date and delivery date. "
-            "Use backend_write to record an action once its check passes; it changes the database. No money "
+            "Use backend_write to record an action once its check passes, citing in cited_clauses the policy "
+            "clauses you retrieved that support it; it changes the database. No money "
             "moves: a refund is recorded as pending, so never describe it as paid. A cancelled order is owed "
             "its captured balance even if the customer did not ask: after a cancellation, check its payments "
             "and refund that balance with a separate backend_write, listing no items. "
@@ -316,7 +333,7 @@ class SingleAgentWorkflow:
         for call in state["planned_calls"]:
             if steps >= self.cfg["limits"]["max_steps_per_ticket"]:
                 return {"error": "tool execution limit reached", "evidence": evidence, "tool_steps": steps}
-            started = time.perf_counter()
+            started, self._review_s = time.perf_counter(), 0.0
             self._event("tool_start", call_id=call["id"], tool=call["name"], input=call["arguments"])
             recoverable = False
             try:
@@ -326,8 +343,10 @@ class SingleAgentWorkflow:
             except Exception as exc:
                 value = {"error": str(exc)}
             steps += 1
+            # elapsed_s is the whole call; review_elapsed_s is the independent review inside it, if any.
             self._event("tool_end", call_id=call["id"], tool=call["name"],
-                        elapsed_s=round(time.perf_counter() - started, 6), output=value)
+                        elapsed_s=round(time.perf_counter() - started, 6), output=value,
+                        **({"review_elapsed_s": round(self._review_s, 6)} if self._review_s else {}))
             evidence.append({"tool": call["name"], "result": value})
             if state["strategy"] == "react":
                 messages.append({"role": "tool", "tool_call_id": call["id"],
@@ -362,9 +381,32 @@ class SingleAgentWorkflow:
         return {"history": state["history"]} if state.get("history") else {}
 
     def _final_reply(self, state: SupportState) -> dict[str, Any]:
+        """Draft the reply, then have it checked independently, as the multi-agent approver checks
+        replies. A rejected draft is redrafted with the issues; if no draft passes within
+        review.max_reply_drafts, the customer gets the fixed hold reply and a human follows up."""
         self._event("node_start", node="final_reply")
         if self.tracer and self.tracer.cost_usd >= self.cfg["limits"]["max_cost_usd_per_ticket"]:
             return self._handoff_reply({**state, "error": "LLM cost budget reached"})
+        ticket = {"status": state["ticket_status"], "evidence": state["evidence"],
+                  "handoff_recorded": state.get("handoff_packet") is not None}
+        issues, review = None, None
+        try:
+            for _ in range(self.cfg.get("review", {}).get("max_reply_drafts", 2)):
+                reply = self._draft_reply(state, issues)
+                if not reply:
+                    issues = ["empty reply"]
+                    continue
+                review = self._checker().check_reply(self._brief, reply, ticket=ticket)
+                if review.decision == "approve":
+                    self._event("customer_reply", reply=reply)
+                    return {"reply": reply, "reply_review": review.model_dump(mode="json")}
+                issues = review.issues or [review.reason or "reply rejected"]
+        except BudgetExceeded:
+            pass
+        handoff = self._handoff_reply({**state, "error": "reply failed review"})
+        return {**handoff, **({"reply_review": review.model_dump(mode="json")} if review else {})}
+
+    def _draft_reply(self, state: SupportState, issues: list[str] | None) -> str:
         result = self._chat("supervisor", [
             {"role": "system", "content":
              f"You are the final-response writer for a customer support service. The only topics you may "
@@ -388,11 +430,11 @@ class SingleAgentWorkflow:
                 "message": state["customer_message"], "status": state["ticket_status"],
                 "evidence": state["evidence"],
                 "handoff_recorded": state.get("handoff_packet") is not None,
+                # Only on a redraft, so a first draft's prompt is unchanged.
+                **({"previous_draft_issues": issues} if issues else {}),
             }, default=str)},
         ])
-        reply = result.content or "I’m unable to complete that request right now."
-        self._event("customer_reply", reply=reply)
-        return {"reply": reply}
+        return (result.content or "").strip()
 
     def _handoff_reply(self, state: SupportState) -> dict[str, Any]:
         self._event("node_start", node="handoff_reply")
