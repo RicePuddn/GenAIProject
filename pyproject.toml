@@ -19,8 +19,15 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
 rag = [               
-    "sentence-transformers>=3.0",   # embeddings and cross-encoder reranker (Topic 8 labs)
+    "sentence-transformers>=5.3",   # native Nomic model support
+    "transformers>=5.5,<6",
+    "einops>=0.7",                 # Nomic embedding model
     "pypdf>=4.0",                   # PDF policy documents (Topic 8 Lab B)
+    "pinecone>=10.2,<11",          # cosine and full-text BM25 through the Documents API
+    "nbformat>=5.10",              # evaluation notebook
+    "ipykernel>=6.29",
+    "pandas>=2.2",                 # evaluation tables
+    "ranx>=0.3,<0.4",               # retrieval evaluation metrics
 ]
 demo = ["streamlit>=1.50"]   # scripts/demo_app.py, a chat page that shows each agent step
 

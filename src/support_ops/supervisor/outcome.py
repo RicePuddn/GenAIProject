@@ -27,7 +27,7 @@ def verified_facts(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def customer_outcome(*, status: str, evidence: list[dict[str, Any]], proposal: Proposal | None,
                      execution: dict[str, Any] | None, min_route: dict[str, Any] | None,
-                     customer_question: str | None, currency: str, off_topic: bool = False,
+                     customer_question: str | None, currency: str, redirect: bool = False,
                      unfound_record: str | None = None) -> dict[str, Any]:
     facts = verified_facts(evidence)
     names = {item["id"]: item.get("name") for fact in facts if fact["tool"] == "get_items_for_order"
@@ -63,7 +63,7 @@ def customer_outcome(*, status: str, evidence: list[dict[str, Any]], proposal: P
                         "them to check it again.")
     if problems:
         outcome["problems"] = problems
-    outcome["tell_customer"] = (OFF_TOPIC if off_topic else
+    outcome["tell_customer"] = (OFF_TOPIC if redirect else
                                 _tell_customer(outcome["status"], bool(facts), executed, proposal, customer_question,
                                                bool(problems)))
     return outcome
@@ -81,6 +81,13 @@ def _tell_customer(status: str, has_facts: bool, executed: bool, proposal: Propo
         return f"Acknowledge every item in problems and apologise. {hold}" if has_problems else hold
     if status == "awaiting_customer":
         return f"Ask: {customer_question}"
+    if executed and proposal.action == "refund":
+        return ("The refund request is recorded and pending, to go back to the original payment method. Say "
+                "that, with the amount. Do not say the money has been returned.")
+    if executed and proposal.action == "order_change":
+        return ("The cancellation is recorded. Confirm it. This does not mean any money has been returned, so "
+                "do not say so. Say nothing about payments or refunds unless the facts or another part of this "
+                "outcome show them.")
     if executed:
         return f"The {proposal.action} is recorded and complete; nothing is pending review. Say what was recorded."
     return ("Answer the question from the facts. If problems are listed, acknowledge each and apologise; "

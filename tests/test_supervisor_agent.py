@@ -7,6 +7,7 @@ from support_ops.helpers.llm import ScriptedLLM, text, tool_call
 from support_ops.policy.skills import SkillsPolicy
 from support_ops.systems.supervisor_agent import NODES, SupervisorAgentWorkflow
 from support_ops.systems.multi_agent import HOLD_REPLY
+from tests.fake_writer import FakeWriter
 from tests.test_multi_agent import NOW, Base, reader, route, verdict
 from tests.test_multi_agent_skills import skills_dir
 
@@ -17,14 +18,14 @@ class SupervisorBase(Base):
         self.llm = ScriptedLLM().push("guard", text("0.01"))
 
     def run_flow(self, message="My mug arrived broken, refund please. ORD-2026-00001", strategy="react", **backend):
-        self.workflow = SupervisorAgentWorkflow(self.llm, self.cfg, reader=reader(**backend),
+        self.workflow = SupervisorAgentWorkflow(self.llm, self.cfg, writer=FakeWriter(), reader=reader(**backend),
                                                 policy=SkillsPolicy(skills_dir()), clock=Clock(NOW))
         return self.workflow.invoke("T1", message, strategy)
 
 
 class SkeletonTests(SupervisorBase):
     def test_graph_has_the_supervisor_loop_and_no_fixed_triage(self):
-        nodes = set(SupervisorAgentWorkflow(self.llm, self.cfg, reader=reader(), policy=SkillsPolicy(skills_dir()),
+        nodes = set(SupervisorAgentWorkflow(self.llm, self.cfg, writer=FakeWriter(), reader=reader(), policy=SkillsPolicy(skills_dir()),
                                             clock=Clock(NOW)).graph.get_graph().nodes)
         self.assertTrue(set(NODES) <= nodes)
         self.assertNotIn("triage", nodes)
@@ -39,13 +40,12 @@ class SkeletonTests(SupervisorBase):
 
 class PromptTests(SupervisorBase):
     def test_prompt_covers_every_tool_and_uses_the_orchestrators_specialist_wording(self):
-        from support_ops.supervisor.supervisor import ORCHESTRATE_PROMPT
-        from support_ops.systems.supervisor_agent import SUPERVISOR_PROMPT, TOOLS
+        from support_ops.supervisor.supervisor import SPECIALIST_GUIDE, SUPERVISE_PROMPT
+        from support_ops.systems.supervisor_agent import PLAN_PROMPT, SUPERVISOR_PROMPT, TOOLS
         for name in TOOLS:
             self.assertIn(name, SUPERVISOR_PROMPT)
-        wording = "orders_shipping (an order itself: its items and status; tracking and delivery delays; order changes)"
-        self.assertIn(wording, " ".join(ORCHESTRATE_PROMPT.split()))
-        self.assertIn(wording, " ".join(SUPERVISOR_PROMPT.split()))
+        for prompt in (SUPERVISE_PROMPT, SUPERVISOR_PROMPT, PLAN_PROMPT):   # both designs, both strategies
+            self.assertIn(SPECIALIST_GUIDE, prompt)
 
     def test_prompt_says_to_check_the_records_before_asking_the_customer(self):
         # A real run asked the customer for a SKU the order already showed, without asking a specialist.
@@ -65,7 +65,7 @@ class PromptTests(SupervisorBase):
 
 class SpecialistToolTests(SupervisorBase):
     def node_state(self, **tool_args):
-        self.workflow = SupervisorAgentWorkflow(self.llm, self.cfg, reader=reader(), policy=SkillsPolicy(skills_dir()),
+        self.workflow = SupervisorAgentWorkflow(self.llm, self.cfg, writer=FakeWriter(), reader=reader(), policy=SkillsPolicy(skills_dir()),
                                                 clock=Clock(NOW))
         self.workflow._start_run("T1")
         return {"ticket_id": "T1", "customer_message": "My mug arrived broken, refund please. ORD-2026-00001",
@@ -113,7 +113,7 @@ class ApproverAndExecuteTests(SpecialistToolTests):
     def test_execute_without_approval_is_refused_then_allowed_after_approve(self):
         state, result = self.call(self.proposed(), "execute")
         self.assertIn("needs the approver's pre-execution approval", result["error"])
-        self.assertEqual(len(self.workflow.writes.executed), 0)
+        self.assertEqual(len(self.workflow.writes.writer.applied), 0)
         self.llm.push("approver", verdict())
         state, result = self.call(state, "ask_approver")
         self.assertEqual(result["decision"], "approve")
@@ -122,7 +122,7 @@ class ApproverAndExecuteTests(SpecialistToolTests):
         self.assertEqual(self.workflow.flow.status("T1"), "executed")
         state, result = self.call(state, "execute")   # a second write is refused
         self.assertIn("cannot approve a ticket in state executed", result["error"])
-        self.assertEqual(len(self.workflow.writes.executed), 1)
+        self.assertEqual(len(self.workflow.writes.writer.applied), 1)
         self.assertEqual([event["tool"] for event in self.refusals()], ["execute", "execute"])
 
     def test_rejected_or_human_proposals_never_execute(self):
@@ -133,7 +133,7 @@ class ApproverAndExecuteTests(SpecialistToolTests):
         self.assertIn("gateway refused", result["error"])
         state, result = self.call(self.proposed(70, "human"), "execute")
         self.assertIn("a human route is handed off", result["error"])
-        self.assertEqual(len(self.workflow.writes.executed), 0)
+        self.assertEqual(len(self.workflow.writes.writer.applied), 0)
 
     def test_tools_need_a_proposal_first(self):
         state = self.node_state(specialist="returns_refunds", request="x")
@@ -156,7 +156,7 @@ class EndToEndTests(SupervisorBase):
         result = self.run_flow()
         self.assertEqual((result["ticket_status"], result["execution"]["amount"]), ("resolved", 50))
         self.assertEqual(result["reply"], "Your refund of 50 SGD is recorded.")
-        self.assertEqual(len(self.workflow.writes.executed), 1)
+        self.assertEqual(len(self.workflow.writes.writer.applied), 1)
         self.assertEqual(len(result["trace"].of_kind("supervisor_refused")), 1)
         self.assertNotIn("triage", self.roles())
 
@@ -170,7 +170,7 @@ class EndToEndTests(SupervisorBase):
         self.assertIn("neither executed nor handed off", refused[0]["reason"])
         self.assertEqual(result["ticket_status"], "awaiting_human")
         self.assertIn("Customer disputes the amount", result["handoff_packet"]["reason"])
-        self.assertEqual(len(self.workflow.writes.executed), 0)
+        self.assertEqual(len(self.workflow.writes.writer.applied), 0)
 
     def test_step_limit_hands_off_with_the_hold_reply(self):
         self.cfg["multi_agent"]["max_supervisor_steps"] = 3
@@ -184,7 +184,7 @@ class EndToEndTests(SupervisorBase):
             "supervisor", text("I can help with orders, returns and refunds.")).push("approver", verdict())
         result = self.run_flow("What's the weather tomorrow?")
         self.assertEqual(result["ticket_status"], "awaiting_customer")
-        self.assertTrue(result["triage"]["off_topic"])   # the API and demo show it as off topic
+        self.assertTrue(result["redirect"])   # the API and demo show it as off topic
         self.assertNotIn("specialist", self.roles())
 
     def test_ask_customer_finishes_the_turn(self):
@@ -204,7 +204,7 @@ class EndToEndTests(SupervisorBase):
         result = self.run_flow("Refund the broken mug and tell me where ORD-2026-00001 is")
         self.assertEqual([part["status"] for part in result["parts"]], ["executed", "approved"])
         self.assertEqual(result["ticket_status"], "resolved")
-        self.assertEqual(len(self.workflow.writes.executed), 1)
+        self.assertEqual(len(self.workflow.writes.writer.applied), 1)
 
     def test_hand_off_after_an_execute_keeps_the_executed_part(self):
         self.llm.push("orchestrator",
@@ -215,7 +215,7 @@ class EndToEndTests(SupervisorBase):
         result = self.run_flow()
         self.assertEqual([part["status"] for part in result["parts"]], ["executed"])
         self.assertEqual(result["ticket_status"], "awaiting_human")
-        self.assertEqual(len(self.workflow.writes.executed), 1)
+        self.assertEqual(len(self.workflow.writes.writer.applied), 1)
 
     def test_reproposals_after_approver_rejections_are_limited(self):
         self.llm.push("orchestrator",
@@ -270,8 +270,7 @@ class EndToEndTests(SupervisorBase):
         result = self.run_flow()
         self.assertIn("has no proposal to reply with", result["trace"].of_kind("supervisor_refused")[0]["reason"])
         self.assertEqual(result["ticket_status"], "awaiting_human")
-        replies = json.dumps([messages for role, messages in self.llm.calls if role == "supervisor"])
-        self.assertNotIn("replied without asking a specialist", replies)   # the off-topic triage
+        self.assertFalse(result["redirect"])   # not treated as off topic
 
     def test_an_approved_write_that_did_not_execute_is_handed_off_not_approved(self):
         self.llm.push("orchestrator",
@@ -279,7 +278,7 @@ class EndToEndTests(SupervisorBase):
                       choose("execute"), choose("hand_off", reason="The refund could not be written")).push(
             "specialist", route(20)).push("supervisor", text("A specialist will review it.")).push(
             "approver", verdict())
-        self.workflow = SupervisorAgentWorkflow(self.llm, self.cfg, reader=reader(),
+        self.workflow = SupervisorAgentWorkflow(self.llm, self.cfg, writer=FakeWriter(), reader=reader(),
                                                 policy=SkillsPolicy(skills_dir()), clock=Clock(NOW))
         self.workflow.writes.execute = lambda *args, **kwargs: {"status": "refused", "reason": "duplicate"}
         result = self.workflow.invoke("T1", "My mug arrived broken, refund please. ORD-2026-00001", "react")
@@ -301,7 +300,7 @@ class ApiTests(SupervisorBase):
         self.llm.push("orchestrator", choose("ask_customer", question="Which order is it?")).push(
             "supervisor", text("Which order is it?")).push("approver", verdict())
         cfg = load_config("configs/experiments/multi_agent_skills.yaml")
-        workflow = partial(SupervisorAgentWorkflow, reader=reader(), policy=SkillsPolicy(skills_dir()))
+        workflow = partial(SupervisorAgentWorkflow, writer=FakeWriter(), reader=reader(), policy=SkillsPolicy(skills_dir()))
         with patch.dict("os.environ", {"SUPPORT_OPS_MULTI_CONFIG": "configs/experiments/multi_agent_skills.yaml"}), \
                 patch("support_ops.api_multi._runtime", return_value=(cfg, self.llm)), \
                 patch("support_ops.api_multi.SupervisorAgentWorkflow", workflow), TestClient(app) as client:
@@ -319,7 +318,7 @@ class PolicyModeTests(SupervisorBase):
                       choose("execute"), choose("reply")).push(
             "specialist", tool_call("policy", action="search", query="refund damaged item"), route(20)).push(
             "supervisor", text("Your refund of 20 SGD is recorded.")).push("approver", verdict())
-        self.workflow = SupervisorAgentWorkflow(self.llm, self.cfg, reader=reader(), policy=rag_policy(), clock=Clock(NOW))
+        self.workflow = SupervisorAgentWorkflow(self.llm, self.cfg, writer=FakeWriter(), reader=reader(), policy=rag_policy(), clock=Clock(NOW))
         result = self.workflow.invoke("T1", "My mug arrived broken, refund please. ORD-2026-00001", "react")
         self.assertEqual(result["ticket_status"], "resolved")
         self.assertEqual(result["evidence"][0]["result"]["clauses"][0]["id"], "REF-1")
@@ -345,7 +344,7 @@ class DemoPageTests(unittest.TestCase):
 
         class SupervisorApi(RealApi):
             def __call__(self, request, timeout=None):
-                workflow = partial(SupervisorAgentWorkflow, reader=demo_reader(), policy=self.workflow.keywords["policy"])
+                workflow = partial(SupervisorAgentWorkflow, writer=FakeWriter(), reader=demo_reader(), policy=self.workflow.keywords["policy"])
                 with patch("support_ops.api_multi._runtime", return_value=(self.cfg, self.llm)), \
                         patch("support_ops.api_multi.SupervisorAgentWorkflow", workflow):
                     client = TestClient(api)
@@ -382,12 +381,12 @@ class DemoPageTests(unittest.TestCase):
         self.assertEqual(fake.chat_payloads[0]["design"], "supervisor")
         texts = [element.value for element in app.markdown]
         for heading in ("#### Supervisor · ask specialist", "#### Specialist · returns refunds (react)",
-                        "#### Supervisor · execute", "#### Approver · proposal check", "#### Gateway · mock write"):
+                        "#### Supervisor · execute", "#### Approver · proposal check", "#### Gateway · write"):
             self.assertIn(heading, texts)
         self.assertTrue(any("needs the approver's pre-execution approval" in element.value for element in app.error))
         self.assertFalse(planned.exception)
         planned_texts = [element.value for element in planned.markdown]
-        for heading in ("#### Supervisor · plan", "#### Supervisor · plan again", "#### Gateway · mock write"):
+        for heading in ("#### Supervisor · plan", "#### Supervisor · plan again", "#### Gateway · write"):
             self.assertIn(heading, planned_texts)
         self.assertTrue(any(element.value.startswith("Planning again (1)") for element in planned.warning))
 
@@ -403,7 +402,7 @@ REFUND_PLAN = plan(("ask_specialist", {"specialist": "returns_refunds", "request
 
 class PlanAndExecuteTests(SupervisorBase):
     def run_planned(self, message="My mug arrived broken, refund please. ORD-2026-00001"):
-        self.workflow = SupervisorAgentWorkflow(self.llm, self.cfg, reader=reader(), policy=SkillsPolicy(skills_dir()),
+        self.workflow = SupervisorAgentWorkflow(self.llm, self.cfg, writer=FakeWriter(), reader=reader(), policy=SkillsPolicy(skills_dir()),
                                                 clock=Clock(NOW))
         return self.workflow.invoke("T1", message, "react", orchestration="plan_and_execute")
 
@@ -414,7 +413,7 @@ class PlanAndExecuteTests(SupervisorBase):
         self.assertEqual((result["ticket_status"], result["orchestration"]), ("resolved", "plan_and_execute"))
         self.assertEqual(self.roles().count("orchestrator"), 1)   # one plan, no LLM call per step
         self.assertEqual(result["trace"].of_kind("supervisor_replan"), [])
-        self.assertEqual(len(self.workflow.writes.executed), 1)
+        self.assertEqual(len(self.workflow.writes.writer.applied), 1)
 
     def test_a_planned_approver_is_skipped_on_an_auto_route(self):
         # The same plan, but the refund comes back route auto: no approver call before the write, as in react.
@@ -426,7 +425,7 @@ class PlanAndExecuteTests(SupervisorBase):
                          ["ask_approver"])
         self.assertEqual(self.roles().count("approver"), 1)   # only the reply review
         self.assertEqual(result["trace"].of_kind("supervisor_replan"), [])
-        self.assertEqual(len(self.workflow.writes.executed), 1)
+        self.assertEqual(len(self.workflow.writes.writer.applied), 1)
 
     def test_a_planned_approver_still_runs_on_the_approver_route(self):
         self.llm.push("orchestrator", REFUND_PLAN).push("specialist", route(50, "approver")).push(
@@ -445,7 +444,7 @@ class PlanAndExecuteTests(SupervisorBase):
         replanned = json.loads(next(messages for role, messages in reversed(self.llm.calls)
                                     if role == "orchestrator")[1]["content"])
         self.assertEqual(replanned["steps_done"][0]["tool"], "ask_specialist")   # it sees what was done
-        self.assertEqual(len(self.workflow.writes.executed), 0)
+        self.assertEqual(len(self.workflow.writes.writer.applied), 0)
 
     def test_a_refused_step_makes_it_plan_again(self):
         no_approver = plan(("ask_specialist", {"specialist": "returns_refunds", "request": "Refund the mug"}),

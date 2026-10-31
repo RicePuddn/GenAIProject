@@ -24,11 +24,9 @@ The tool also accepts a skill directory as `file` when reading an entrypoint.
 skill. Unknown clause filenames return an error listing available files so the
 agent can correct its call. Paths must stay inside the selected skill directory.
 
-`{"action":"check","operation":"refund","amount":50}` uses the same mock
-approval rule as `ticket_state`, defined in [`../rules.yaml`](../rules.yaml):
-positive SGD refunds up to 100 can be simulated;
-higher amounts and unsupported operations require human review. The approval
-rule checks an amount limit, not full return eligibility or payment ownership.
+The `check` action uses the same deterministic rules as `ticket_state`, defined in
+[`rules.json`](../../src/support_ops/policy/rules/rules.json). Supply recorded facts
+with the operation and amount; missing facts or mandatory-review cases need a human.
 
 Configure `policy.skills_dir` to select another skill set. Relative paths resolve
 from the repository root. For future RAG/skills comparisons, keep the same policy

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Literal, Self
@@ -12,9 +13,11 @@ from pydantic import model_validator
 from support_ops.helpers.arguments import NonEmpty, ToolArguments
 from support_ops.helpers.config import ROOT
 from support_ops.policy.provider import ScopedPolicyTool
-from support_ops.policy.rag.loader import MARKDOWN_CLAUSE
 from support_ops.policy.rules import Rules
 from support_ops.systems.tools import PolicyArguments
+
+# Clause headings belong to skills Markdown; the RAG loader reads numbered PDF sections.
+MARKDOWN_CLAUSE = re.compile(r"^#{1,6}\s+([A-Z]+(?:-[A-Za-z0-9]+)+(?:\.[0-9]+)*)\s+\S.*$", re.MULTILINE)
 
 
 class PolicySkillsArguments(ToolArguments):
@@ -102,7 +105,7 @@ class SkillsPolicy:
     def run(self, args: dict[str, Any]) -> dict[str, Any]:
         action = args.get("action")
         if action == "check":
-            return self.rules.check(args.get("operation", ""), args.get("amount"))
+            return self.rules.check(args.get("operation", ""), args.get("amount"), args.get("facts"))
         if action == "list":
             catalog = self.catalog()
             return {"skills": [item["skill"] for item in catalog], "catalog": catalog}

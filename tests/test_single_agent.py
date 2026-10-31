@@ -13,9 +13,11 @@ from fastapi.testclient import TestClient
 from support_ops.api import app
 from support_ops.backend.postgres import PostgresReader
 from support_ops.gateway.ticket_state import TicketState
+from tests.fake_writer import FakeWriter
 from support_ops.helpers.clock import Clock
 from support_ops.helpers.config import load_config
-from support_ops.helpers.llm import ChatResult, OpenAICompatLLM, ScriptedLLM, ToolCall, text, tool_call
+from support_ops.helpers.llm import ChatResult, OpenAICompatLLM, ToolCall, text, tool_call
+from tests.scripted import ScriptedLLM
 from support_ops.policy.rules import Rules
 from support_ops.policy.skills import SkillsPolicy
 from support_ops.systems.single_agent import SingleAgentWorkflow
@@ -51,6 +53,66 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(result["trace"].tool_call_count, 1)
         self.assertIsNotNone(result["trace"].tool_calls[0]["execution"])
         self.assertGreater(result["trace"].tool_calls[0]["execution"]["elapsed_s"], 0)
+
+    def test_a_write_requiring_review_gets_a_separate_stateless_review_call(self):
+        facts = {"payment_id": "PAY-1", "payment_status": "captured", "currency": "SGD", "captured_amount": 100,
+                 "refunded_amount": 0, "pending_refund_amount": 0, "approved_refund_amount": 100,
+                 "request_accepted": True, "inspection_or_waiver": True}
+        write = {"operation": "refund", "order_id": "ORD-2026-00001", "amount": 50, "reason": "damaged_item",
+                 "review_reason": "Accepted return; 50 is within the captured balance.",
+                 "cited_clauses": ["refunds.md"]}
+        llm = ScriptedLLM().push("guard", text("0.01")).push(
+            "supervisor",
+            tool_call("policy", action="read", skill="returns-and-refunds", file="refunds.md"),
+            tool_call("backend_write", **write), text("ready"), text("Your refund is recorded."),
+        ).push("approver", text(json.dumps({"decision": "approve", "issues": [], "reason": "Supported."})))
+        writer = FakeWriter()
+        workflow = SingleAgentWorkflow(llm, self.cfg, reader=self.reader, writer=writer)
+        with patch.object(workflow.tools.backend_facts, "read", return_value=facts):
+            result = workflow.invoke("TKT-TEST", "Please refund my damaged item.", "react")
+        self.assertEqual(result["evidence"][-1]["result"]["status"], "executed")
+        self.assertEqual(len(writer.applied), 1)
+        write_review, reply_check = [messages for role, messages in llm.calls if role == "approver"]
+        for messages in (write_review, reply_check):
+            self.assertEqual([message["role"] for message in messages], ["system", "user"])
+            # The customer's request, as the multi-agent approver gets it, but none of the agent's messages.
+            self.assertEqual(json.loads(messages[1]["content"])["case"], {"message": "Please refund my damaged item."})
+            self.assertNotIn("policy-bound customer support agent", messages[1]["content"])
+        request = json.loads(write_review[1]["content"])
+        self.assertEqual(set(request), {"case", "proposal", "rule_engine_minimum", "evidence"})
+        self.assertEqual(request["proposal"]["cited_clauses"], ["refunds.md"])
+        self.assertEqual(request["rule_engine_minimum"]["route"], "approver")
+        checked = json.loads(reply_check[1]["content"])
+        self.assertEqual(checked["reply"], "Your refund is recorded.")
+        self.assertEqual(checked["ticket"]["evidence"][-1]["result"]["status"], "executed")
+        self.assertEqual(result["reply_review"]["decision"], "approve")
+        trace = result["trace"]
+        self.assertEqual([event["decision"] for event in trace.of_kind("write_review")], ["approve"])
+        write_end = [event for event in trace.of_kind("tool_end") if event["tool"] == "backend_write"][-1]
+        self.assertGreaterEqual(write_end["elapsed_s"], write_end["review_elapsed_s"])   # timed apart
+        read_end = [event for event in trace.of_kind("tool_end") if event["tool"] == "policy"][-1]
+        self.assertNotIn("review_elapsed_s", read_end)
+
+    def test_a_reply_that_fails_its_check_is_redrafted_then_held_for_a_human(self):
+        reject = text(json.dumps({"decision": "reject", "issues": ["claims the refund was paid"], "reason": "x"}))
+        llm = ScriptedLLM().push("guard", text("0.01")).push(
+            "supervisor", text("ready"), text("Your refund has been paid."), text("Your refund is pending."),
+        ).push("approver", reject, text(json.dumps({"decision": "approve", "issues": [], "reason": "ok"})))
+        result = self.run_flow(llm)
+        self.assertEqual(result["reply"], "Your refund is pending.")
+        redraft = json.loads([m for role, m in llm.calls if role == "supervisor"][-1][1]["content"])
+        self.assertEqual(redraft["previous_draft_issues"], ["claims the refund was paid"])
+        first_draft = json.loads([m for role, m in llm.calls if role == "supervisor"][-2][1]["content"])
+        self.assertNotIn("previous_draft_issues", first_draft)
+
+        llm = ScriptedLLM().push("guard", text("0.01")).push(
+            "supervisor", text("ready"), text("Paid."), text("Paid again."),
+        ).push("approver", reject, reject)
+        result = self.run_flow(llm)
+        self.assertEqual(result["reply"], "I’ve referred your request to a support specialist for review.")
+        self.assertEqual(result["ticket_status"], "awaiting_human")
+        self.assertEqual(result["handoff_packet"]["reason"], "reply failed review")
+        self.assertEqual(result["reply_review"]["decision"], "reject")
 
     def test_invalid_plan_retries_without_executing_unknown_tools(self):
         llm = ScriptedLLM().push("guard", text("safe")).push(
@@ -144,7 +206,10 @@ class WorkflowTests(unittest.TestCase):
         llm = ScriptedLLM().push("guard", text("0.01")).push("supervisor", text("ready"), text("Hello."))
         self.run_flow(llm)
         self.assertIn("check the order's items and any existing returns or refunds", llm.calls[1][1][0]["content"])
-        self.assertIn("never address the customer by an internal ID", llm.calls[2][1][0]["content"])
+        # The reply prompt was reworded in 0709674; it still forbids internal IDs, e.g. as a greeting.
+        reply_prompt = llm.calls[2][1][0]["content"]
+        self.assertIn("Do not expose internal IDs", reply_prompt)
+        self.assertIn("use a neutral greeting", reply_prompt)
 
     def test_reasoning_is_traced_but_never_sent_back_to_the_model(self):
         thought = ChatResult(None, [ToolCall("a", "policy", {"action": "list"})], reasoning="I should list skills.")
@@ -187,6 +252,13 @@ class WorkflowTests(unittest.TestCase):
         tracer.record_llm("supervisor", "m", 10, 2, 0.0, 0.1, False)
         self.assertEqual([event["kind"] for event in seen], ["step", "llm_call"])
         self.assertIs(seen[0], tracer.events[0])
+
+    def test_server_startup_prepares_policy_once_before_requests(self):
+        with patch("support_ops.api.policy_from_config") as build:
+            with TestClient(app) as client:
+                self.assertEqual(client.get("/health").status_code, 200)
+                build.return_value.warm_up.assert_called_once()
+            build.assert_called_once()
 
     def test_info_reports_the_configured_policy_mode(self):
         body = TestClient(app).get("/info").json()
@@ -251,24 +323,44 @@ class ToolTests(unittest.TestCase):
 
     def test_refund_limit_shared_and_above_limit_handoff_does_not_recurse(self):
         gateway = TicketState(self.clock)
-        self.assertTrue(Rules.load().check("refund", 100)["allowed"])
-        args = {"action": "write", "operation": "refund", "record_id": "O1", "amount": 100.01}
-        result = gateway.run("T1", args)
+        writer = FakeWriter()
+        self.assertFalse(Rules.load().check("refund", 100)["allowed"])
+        tools = SupportTools(Mock(spec=PostgresReader), SkillsPolicy(), gateway, writer)
+        result = tools.execute("T1", "backend_write", {"operation": "refund", "order_id": "O1", "amount": 100.01,
+                                                       "reason": "damaged_item"})
         self.assertEqual(result["status"], "awaiting_human")
         self.assertEqual(result["handoff_packet"]["action"], "handoff")
         self.assertEqual(len(gateway.handoffs), 1)
-        self.assertEqual(gateway.writes, {})
+        self.assertEqual(writer.applied, {})
 
-    def test_mock_write_is_idempotent_and_rejects_conflicting_amount(self):
+    def test_backend_write_is_idempotent_and_rejects_a_conflicting_amount(self):
         gateway = TicketState(self.clock)
-        args = {"action": "write", "operation": "refund", "record_id": "O1", "amount": 50}
-        first = gateway.run("T1", args)
-        self.assertEqual(first, gateway.run("T1", args))
-        self.assertEqual(len(gateway.audit_log), 1)
-        self.assertTrue(first["mock"])
+        tools = SupportTools(Mock(spec=PostgresReader), SkillsPolicy(), gateway, FakeWriter(),
+                             reviewer=lambda request: {"decision": "approve", "issues": []})
+        tools.execute("T1", "policy", {"action": "read", "skill": "returns-and-refunds", "file": "refunds.md"})
+        args = {"operation": "refund", "order_id": "O1", "amount": 50, "reason": "damaged_item",
+                "review_reason": "Verified the payment, approval and original destination.",
+                "cited_clauses": ["refunds.md"]}
+        facts = {"payment_id": "PAY-1", "payment_status": "captured", "currency": "SGD", "captured_amount": 100,
+                 "refunded_amount": 0, "pending_refund_amount": 0, "approved_refund_amount": 100,
+                 "request_accepted": True, "inspection_or_waiver": True}
+        with patch.object(tools.backend_facts, "read", return_value=facts):
+            first = tools.execute("T1", "backend_write", args)
+            self.assertEqual(first["status"], "executed")
+            self.assertEqual(first["operation"], "refund")
+            self.assertTrue(tools.execute("T1", "backend_write", args)["replayed"])
+            self.assertEqual(len(tools.writer.applied), 1)
+            self.assertEqual([event["type"] for event in gateway.audit_log], ["write"])
+            with self.assertRaisesRegex(ValueError, "conflicting amount"):
+                tools.execute("T1", "backend_write", {**args, "amount": 60})
+        result = tools.execute("T2", "backend_write", {**args, "operation": "exchange"})
+        self.assertEqual((result["status"], result["handoff_packet"]["reason"]),
+                         ("awaiting_human", "unsupported write operation"))
+
+    def test_ticket_state_has_no_write_action_left(self):
+        tools = SupportTools(Mock(spec=PostgresReader), SkillsPolicy(), TicketState(self.clock), FakeWriter())
         with self.assertRaises(ValueError):
-            gateway.run("T1", {**args, "amount": 60})
-        self.assertEqual(gateway.run("T2", {**args, "operation": "cancel"})["status"], "awaiting_human")
+            tools.validate("ticket_state", {"action": "write", "operation": "refund", "record_id": "O1"})
 
     def test_order_lookup_tools_read_items_payments_and_returns_by_order_id(self):
         reader = Mock(spec=PostgresReader)
@@ -292,8 +384,9 @@ class ToolTests(unittest.TestCase):
             ("policy", {"action": "guess"}), ("policy", {"action": "read"}),
             ("read_record", {"kind": "shipments", "record_id": "O1"}),
             ("read_record", {"kind": "orders", "record_id": 5}),
-            ("ticket_state", {"action": "write", "operation": "refund", "record_id": "O1"}),
-            ("ticket_state", {"action": "write", "operation": "refund", "record_id": "O1", "amount": float("nan")}),
+            ("backend_write", {"operation": "refund", "order_id": "O1", "reason": "r"}),
+            ("backend_write", {"operation": "refund", "order_id": "O1", "reason": "r", "amount": float("nan")}),
+            ("backend_write", {"operation": "return_request", "order_id": "O1", "reason": "r"}),
             ("policy", {"action": "check", "operation": "refund", "amount": -1}),
         ):
             with self.subTest(name=name, args=args), self.assertRaises(ValueError):
@@ -320,7 +413,7 @@ class ToolTests(unittest.TestCase):
 
 
 class SeedTests(unittest.TestCase):
-    def test_generated_totals_fulfillment_and_tracking_are_consistent(self):
+    def test_seed_totals_fulfillment_and_tracking_are_consistent(self):
         from scripts import seed_backend
 
         records = defaultdict(list)
@@ -329,16 +422,15 @@ class SeedTests(unittest.TestCase):
             records[table].append(record)
 
         with patch.object(seed_backend, "insert_record", side_effect=collect):
-            seed_backend.seed_orders(Mock())
-            seed_backend.seed_tickets(Mock())
+            seed_backend.seed_records(Mock())
         items = defaultdict(list)
         for item in records["order_items"]:
             items[item["order_id"]].append(item)
         shipments = {shipment["order_id"]: shipment for shipment in records["shipments"]}
         for order in records["orders"]:
             expected = sum(Decimal(item["unit_price"]) * item["quantity"] for item in items[order["id"]])
-            self.assertEqual(order["subtotal"], expected)
-            self.assertEqual(order["total"], expected + order["shipping_fee"] + order["tax"])
+            self.assertEqual(Decimal(order["subtotal"]), expected)
+            self.assertEqual(Decimal(order["total"]), expected + Decimal(order["shipping_fee"]) + Decimal(order["tax"]))
             shipment = shipments[order["id"]]
             events = [event for event in records["shipment_events"] if event["shipment_id"] == shipment["id"]]
             if order["status"] in {"processing", "cancelled"}:
@@ -347,14 +439,16 @@ class SeedTests(unittest.TestCase):
             if shipment["delivered_at"]:
                 self.assertEqual(events[-1]["occurred_at"], shipment["delivered_at"])
             if order["status"] == "partially_fulfilled":
-                self.assertEqual({item["item_status"] for item in items[order["id"]]}, {"fulfilled", "open"})
+                states = {item["item_status"] for item in items[order["id"]]}
+                self.assertIn("fulfilled", states)
+                self.assertTrue(states.intersection({"open", "packing", "packed"}))
         self.assertEqual({refund["status"] for refund in records["refunds"]}, {"processed", "pending"})
         for payment in records["payments"]:
             if payment["status"] == "failed":
                 self.assertIsNone(payment["paid_at"])
-        self.assertEqual(len(records["orders"]), 60)
-        self.assertEqual(len(records["returns"]), 12)
-        self.assertEqual(len(records["support_tickets"]), 20)
+        self.assertEqual(len(records["orders"]), 70)
+        self.assertEqual(len(records["returns"]), 20)
+        self.assertEqual(len(records["support_tickets"]), 30)
 
     def test_fixture_inserts_name_columns_and_preserve_existing_ids(self):
         from scripts.seed_backend import insert_record
@@ -363,7 +457,7 @@ class SeedTests(unittest.TestCase):
         insert_record(cursor, "products", id="P1", name="Bottle")
         query, values = cursor.execute.call_args.args
         self.assertIn('("id", "name") VALUES (%s, %s)', query.as_string())
-        self.assertIn("ON CONFLICT (id) DO NOTHING", query.as_string())
+        self.assertIn("ON CONFLICT DO NOTHING", query.as_string())
         self.assertEqual(values, ("P1", "Bottle"))
 
 

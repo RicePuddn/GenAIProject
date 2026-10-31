@@ -1,7 +1,7 @@
 """Demo page for the multi-agent arms (S3 rag, S4 skills): chat as the customer and watch each agent work.
 
 A client of the stateless multi-agent API (`support_ops.api_multi`): it keeps the conversation and
-sends earlier turns as `history`, and reads /chat/stream so triage, specialist tool calls,
+sends earlier turns as `history`, and reads /chat/stream so the supervisor's decisions, specialist tool calls,
 approvals, the write and any handoff appear while the ticket runs. Start the API
 first, then from the repo root:
 
@@ -29,9 +29,9 @@ STATUS_LABELS = {
     "awaiting_human": ("warning", "Awaiting a human operator"),
 }
 NODE_TITLES = {
-    "triage": "Supervisor · triage",
+    "supervise": "Supervisor · decide",
     "decide": "Gateway · route decision",
-    "execute": "Gateway · mock write",
+    "execute": "Gateway · write",
     "handoff": "Handoff to a human",
     "draft_reply": "Supervisor · drafting the reply",
 }
@@ -118,12 +118,18 @@ def show_event(event: dict[str, Any]) -> None:
         st.markdown(f"#### Approver · {stage}")
     elif kind == "node_start" and event.get("node") in NODE_TITLES:
         st.markdown(f"#### {NODE_TITLES[event['node']]}")
-    elif kind == "triage":
-        specialists = " + ".join(task["specialist"].replace("_", " ") for task in event.get("tasks") or []) \
-            or (event["specialist"] or "none")
-        st.markdown(f"**Intent:** {event['intent']} · **specialist:** {specialists} · "
-                    f"**urgency:** {event['urgency']} · **confidence:** {event['confidence']:.2f}"
-                    + (" · **wants a human**" if event.get("wants_human") else ""))
+    elif kind == "supervisor_decision":
+        case = event.get("case")
+        if case:
+            st.markdown(f"**Issue:** {case['issue']} · **intent:** {case['intent']} · **urgency:** {case['urgency']}")
+        with st.expander("Supervisor's thought"):
+            st.write(event["thought"])
+        if event["action"] == "delegate":
+            for task in event["tasks"]:
+                st.markdown(f"**Next:** {task['specialist'].replace('_', ' ')}")
+                st.caption(task["request"])
+        else:
+            st.markdown(f"**Next:** {event['action']} · {event['reason']}")
     elif kind == "llm_response" and event.get("reasoning"):
         with st.expander(f"Thought ({event['role']})"):
             st.write(event["reasoning"])
@@ -149,18 +155,11 @@ def show_event(event: dict[str, Any]) -> None:
         result = event["result"]
         if result["status"] == "executed":
             amount = f" {result['amount']} {result['currency']}" if result.get("amount") else ""
-            st.success(f"Mock {result['operation']}{amount} on {result['order_id']} executed ({result['write_id']})")
+            st.success(f"Recorded {result['operation']}{amount} on {result['order_id']} executed ({result['write_id']})")
         else:
             st.error(f"Write refused: {result.get('reason')}")
     elif kind == "order_id_filled":
         st.caption(f"The proposal named no order, so the one looked up ({event['order_id']}) was checked")
-    elif kind == "orchestrator_step":
-        if event["action"] == "delegate":
-            st.markdown(f"#### Supervisor · next step: {event['specialist'].replace('_', ' ')}")
-            st.caption(f"{event['request']} ({event['reason']})")
-        else:
-            st.markdown("#### Supervisor · finish")
-            st.caption(event["reason"])
     elif kind == "supervisor_step":
         arguments = ", ".join(f"{key}: {value}" for key, value in event["arguments"].items())
         st.markdown(f"#### Supervisor · {event['tool'].replace('_', ' ')}")
@@ -173,20 +172,20 @@ def show_event(event: dict[str, Any]) -> None:
         st.caption(f"Skipped {event['tool'].replace('_', ' ')}: {event['reason']}")
     elif kind == "supervisor_replan":
         st.warning(f"Planning again ({event['replans']}): {event['reason']}")
-    elif kind == "supervisor_refused":
-        st.error(f"Refused {'`' + event['tool'] + '`' if event.get('tool') else 'the step'}: {event['reason']}")
     elif kind == "supervisor_limit":
         st.warning(f"The supervisor stopped after {event['steps']} steps")
-    elif kind == "orchestrator_refused":
+    elif kind == "supervisor_refused" and "tool" in event:   # pure supervisor: a step the code would not run
+        st.error(f"Refused {'`' + event['tool'] + '`' if event.get('tool') else 'the step'}: {event['reason']}")
+    elif kind == "supervisor_refused":
         st.warning(f"Delegation refused: {event['reason']}")
     elif kind == "orchestration_limit":
-        st.warning(f"Orchestration stopped after {event['steps']} steps")
+        st.warning(f"Stopped after {event['steps']} supervisor decisions")
     elif kind == "part_start":
         st.markdown(f"### Part {event['part']} of {event['of']}: {event['request'] or 'the whole message'}")
     elif kind == "part_done":
         st.caption(f"Part {event['part']} ({event['specialist'].replace('_', ' ')}) ended: {event['status']}; "
                    "on to the next part")
-    elif kind == "off_topic":
+    elif kind == "redirect":
         st.info("Not a support request: replying with what we can help with (no specialist, no handoff)")
     elif kind == "missing_record":
         st.info(f"Not found: {', '.join(event['records'])}. Asking the customer to check: {event['question']}")
@@ -304,8 +303,8 @@ with st.sidebar:
     orchestration = st.radio("Supervisor strategy", STRATEGIES,
                              index=STRATEGIES.index(default_orchestration) if default_orchestration in STRATEGIES else 0,
                              help="react: decides each step after seeing the last result. plan_and_execute: "
-                                  "plans the steps first (fixed workflow: the parts at triage) and plans again "
-                                  "when a step goes differently.")
+                                  "plans up front (fixed workflow: every part; pure supervisor: every step, "
+                                  "planning again when a step goes differently).")
     strategy = st.radio("Specialists", STRATEGIES, index=STRATEGIES.index(default) if default in STRATEGIES else 0,
                         help="react: one tool call per turn. plan_and_execute: plan the calls, then run them.")
     st.button("New ticket", on_click=new_ticket, width="stretch")

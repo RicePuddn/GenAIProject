@@ -1,46 +1,61 @@
-"""Score clauses against a question (BM25 + embeddings, fused), rerank the
-best few, and add the exceptions of whatever is returned.
+"""Shared policy retrieval: cosine, hybrid RRF, or hybrid with BGE reranking.
+
+Three approaches:
+1. vector: vector search using cosine similarity.
+2. hybrid: BM25 + cosine vector search, combined using RRF.
+3. hybrid_rerank: the same hybrid search, followed by BGE reranking.
+
+Agents/tools call retrieve(query) using the organisation configuration.
+Evaluation compares all three approaches through the same PineconeRetriever.
 """
 from __future__ import annotations
 
-import math
-import re
-from collections import Counter, defaultdict
+import os
+from concurrent.futures import ThreadPoolExecutor
+from collections import defaultdict
 from dataclasses import dataclass, fields
 from functools import lru_cache
-from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
-from support_ops.policy.rag.loader import Clause, load_corpus
+from support_ops.policy.rag.models import EMBEDDING_MODEL, RERANK_MODEL, load_embedder, load_reranker
 
-TOKEN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+# search_text is the existing index's BM25 field and the only stored copy of chunk text.
+FIELDS = ["source", "domain", "category", "section_id", "section_title", "search_text", "references"]
+APPROACHES = {
+    # Approach 1: Vector search using cosine similarity.
+    "vector": {"dense": True, "bm25": False, "rerank": False},
+    # Approach 2: BM25 + vector search using cosine similarity, combined with RRF.
+    "hybrid": {"dense": True, "bm25": True, "rerank": False},
+    # Approach 3: The same hybrid search + BGE reranking.
+    "hybrid_rerank": {"dense": True, "bm25": True, "rerank": True},
+}
 
 
 @dataclass(frozen=True)
 class RagSettings:
-    chunking: str = "clause"       
-    window_words: int = 180
-    window_overlap: int = 30
     dense: bool = True               # embedding search
     bm25: bool = True                # keyword search; with dense, fused by RRF
     rrf_k: int = 60
     n_prime: int = 20                # candidates kept for the reranker
     rerank: bool = True              # cross-encoder over the N' candidates
     contextual: bool = True          # prepend the section name to each chunk before indexing
-    k: int = 4                       # clauses returned to the agent
-    expand_exceptions: bool = True   # also return exceptions of the returned clauses
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
-    rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    k: int = 4                       # ranked clauses, before adding direct references
+    expand_references: bool = True   # include directly referenced sections after top K
+    embedding_model: str = EMBEDDING_MODEL
+    rerank_model: str = RERANK_MODEL
 
     def __post_init__(self) -> None:
-        if self.chunking not in {"clause", "window"}:
-            raise ValueError("policy.rag.chunking must be clause or window")
-        if not (self.dense or self.bm25):
-            raise ValueError("policy.rag needs dense or bm25 search")
-        if not 1 <= self.k <= self.n_prime:
+        if any(type(value) is not bool for value in (
+            self.dense, self.bm25, self.rerank, self.contextual, self.expand_references,
+        )):
+            raise ValueError("policy.rag flags must be booleans")
+        flags = {"dense": self.dense, "bm25": self.bm25, "rerank": self.rerank}
+        if flags not in APPROACHES.values():
+            raise ValueError("policy.rag must select vector, hybrid, or hybrid_rerank settings")
+        if any(type(value) is not int for value in (self.k, self.n_prime)) or not 1 <= self.k <= self.n_prime:
             raise ValueError("policy.rag needs 1 <= k <= n_prime")
-        if not 0 <= self.window_overlap < self.window_words:
-            raise ValueError("policy.rag needs 0 <= window_overlap < window_words")
+        if type(self.rrf_k) is not int or self.rrf_k < 0:
+            raise ValueError("policy.rag.rrf_k must be a non-negative integer")
 
     @classmethod
     def from_config(cls, rag: dict[str, Any]) -> RagSettings:
@@ -52,175 +67,148 @@ class RagSettings:
 
 # ---------------------------------------------------------------- scoring
 
-def tokenize(text: str) -> list[str]:
-    """Lower-case words; hyphenated terms such as RET-1 or final-sale count whole and in parts."""
-    tokens = []
-    for token in TOKEN.findall(text.lower()):
-        tokens.append(token)
-        if "-" in token:
-            tokens += token.split("-")
-    return tokens
-
-
-class BM25:
-    """Okapi BM25: TF-IDF with saturating term frequency (k1) and
-    document-length normalisation (b)."""
-
-    def __init__(self, documents: list[str], k1: float = 1.5, b: float = 0.75):
-        self.counts = [Counter(tokenize(document)) for document in documents]
-        self.lengths = [sum(count.values()) for count in self.counts]
-        self.average = sum(self.lengths) / len(self.lengths) or 1.0
-        frequency = Counter(term for count in self.counts for term in count)
-        self.idf = {term: math.log(1 + (len(documents) - n + 0.5) / (n + 0.5)) for term, n in frequency.items()}
-        self.k1, self.b = k1, b
-
-    def scores(self, query: str) -> list[float]:
-        terms = tokenize(query)
-        return [
-            sum(self.idf[term] * count[term] * (self.k1 + 1)
-                / (count[term] + self.k1 * (1 - self.b + self.b * length / self.average))
-                for term in terms if term in count)
-            for count, length in zip(self.counts, self.lengths)
-        ]
-
-
-def cosine(a: list[float], b: list[float]) -> float:
-    norm = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
-    return sum(x * y for x, y in zip(a, b)) / norm if norm else 0.0
-
-
-def ranked(scores: dict[int, float]) -> list[int]:
-    """Indices by descending score; ties keep corpus order so results are reproducible."""
+def ranked(scores: dict[str, float]) -> list[str]:
+    """Chunk IDs by descending score, with reproducible ties."""
     return sorted(scores, key=lambda index: (-scores[index], index))
 
 
-def reciprocal_rank_fusion(rankings: list[list[int]], k: int) -> dict[int, float]:
+def reciprocal_rank_fusion(rankings: list[list[str]], k: int) -> dict[str, float]:
     """RRF: each list adds 1 / (k + rank). Uses ranks only, so BM25 scores and
     cosine similarities never need to be put on the same scale."""
-    fused: dict[int, float] = defaultdict(float)
+    fused: dict[str, float] = defaultdict(float)
     for ranking in rankings:
         for rank, index in enumerate(ranking, 1):
             fused[index] += 1 / (k + rank)
     return fused
 
 
-# ---------------------------------------------------------------- models
-
-class Embedder(Protocol):
-    def encode(self, texts: list[str]) -> list[list[float]]: ...
-
-
-class Reranker(Protocol):
-    def score(self, query: str, passages: list[str]) -> list[float]: ...
-
-
-def _sentence_transformers():
-    try:
-        import sentence_transformers
-    except ImportError as exc:
-        raise RuntimeError("RAG search needs the rag extra: pip install -e '.[rag]'") from exc
-    return sentence_transformers
-
-
-class SentenceTransformerEmbedder:
-    def __init__(self, name: str):
-        self.model = _sentence_transformers().SentenceTransformer(name)
-
-    def encode(self, texts: list[str]) -> list[list[float]]:
-        return self.model.encode(texts).tolist()
-
-
-class CrossEncoderReranker:
-    def __init__(self, name: str):
-        self.model = _sentence_transformers().CrossEncoder(name)
-
-    def score(self, query: str, passages: list[str]) -> list[float]:
-        return [float(score) for score in self.model.predict([[query, passage] for passage in passages])]
-
-
-@lru_cache(maxsize=4)
-def load_embedder(name: str) -> Embedder:
-    return SentenceTransformerEmbedder(name)
-
-
-@lru_cache(maxsize=4)
-def load_reranker(name: str) -> Reranker:
-    return CrossEncoderReranker(name)
-
-
 # ---------------------------------------------------------------- retrieval
 
-class PolicyRetriever:
-    def __init__(self, clauses: list[Clause], settings: RagSettings,
-                 embedder: Embedder | None = None, reranker: Reranker | None = None):
-        self.clauses, self.settings = clauses, settings
-        self.texts = [clause.indexed_text(settings.contextual) for clause in clauses]
-        self.bm25 = BM25(self.texts) if settings.bm25 else None
-        self._embedder, self._reranker, self._vectors = embedder, reranker, None
-        self.exceptions: dict[str, list[int]] = defaultdict(list)
-        for index, clause in enumerate(clauses):
-            for parent in clause.exception_of:
-                self.exceptions[parent].append(index)
+# Convert Pinecone documents into the existing agent policy-tool result format.
+def document_hit(document, score=None, via: str = "search") -> dict:
+    hit = {field: document.get(field) for field in FIELDS if field != "search_text"}
+    hit.update(
+        id=document.id,
+        title=document.get("section_title"),
+        section=document.get("domain"),
+        score=score,
+        via=via,
+        text=document.get("search_text"),
+        references=document.get("references", []),
+    )
+    return hit
 
+
+class PineconeRetriever:
+    # Connect to an existing index. This class never creates an index or uploads data.
+    def __init__(self, settings: RagSettings, *, index=None):
+        self.settings = settings
+        from support_ops.policy.rag.embeddings import read_embeddings
+        from support_ops.policy.rag.pinecone_store import pinecone_client, verify_upload
+
+        self.manifest, documents = read_embeddings()
+        if settings.embedding_model != self.manifest["embedding_model"] or not settings.contextual:
+            raise ValueError("query model/context settings must match the saved document embedding recipe")
+        self.index = index if index is not None else pinecone_client().index(
+            os.environ.get("PINECONE_INDEX", "support-policies"))
+        self.namespace = os.environ.get("PINECONE_NAMESPACE", "policies")
+        verify_upload(self.index, self.namespace, self.manifest, documents)
+        self._embedder, self._reranker = None, None
+
+    # Give the planner only the domains available in this fixed policy corpus.
     def sections(self) -> list[str]:
-        return list(dict.fromkeys(clause.section for clause in self.clauses))
+        return ["Orders and Shipping Policy", "Returns and Refunds Policy"]
 
-    def _dense_scores(self, query: str) -> dict[int, float]:
-        if self._embedder is None:
-            self._embedder = load_embedder(self.settings.embedding_model)
-        if self._vectors is None:
-            self._vectors = self._embedder.encode(self.texts)   # offline phase, done once
-        query_vector = self._embedder.encode([query])[0]
-        return {index: cosine(query_vector, vector) for index, vector in enumerate(self._vectors)}
-
-    def _rerank_scores(self, query: str, candidates: list[int]) -> dict[int, float]:
-        if self._reranker is None:
-            self._reranker = load_reranker(self.settings.rerank_model)
-        return dict(zip(candidates, self._reranker.score(query, [self.texts[i] for i in candidates])))
-
+    # Load and exercise the selected models before the server starts timing tickets.
     def warm_up(self) -> None:
-        """Load the models and embed the corpus now, so the first search is as fast as the rest
-        and model loading never counts towards a ticket's latency."""
-        if self.settings.dense:
-            self._dense_scores("warm-up")
-        if self.settings.rerank and self.texts:
-            self._rerank_scores("warm-up", [0])
+        self._embedder = load_embedder(self.settings.embedding_model)
+        self._embedder.encode(["search_query: warm-up"])
+        if self.settings.rerank:
+            self._reranker = load_reranker(self.settings.rerank_model)
+            self._reranker.score("warm-up", ["Policy retrieval warm-up."])
 
-    def search(self, query: str) -> list[dict[str, Any]]:
-        settings = self.settings
-        stages: list[dict[int, float]] = []
-        if settings.dense:
-            stages.append(self._dense_scores(query))
-        if settings.bm25:
-            # Clauses sharing no term with the query are not keyword matches, so they get no rank.
-            stages.append({index: score for index, score in enumerate(self.bm25.scores(query)) if score > 0})
-        scores = (reciprocal_rank_fusion([ranked(stage) for stage in stages], settings.rrf_k)
-                  if len(stages) == 2 else stages[0])
-        candidates = ranked(scores)[:settings.n_prime]
-        if settings.rerank and candidates:
-            scores = self._rerank_scores(query, candidates)
-            candidates = ranked(scores)
-        top = candidates[:settings.k]
-        hits = [self._hit(index, scores[index], "search") for index in top]
-        if settings.expand_exceptions:
-            returned = set(top)
-            for index in top:
-                for exception in self.exceptions[self.clauses[index].id]:
-                    if exception not in returned:
-                        returned.add(exception)
-                        hits.append(self._hit(exception, None, f"exception_of:{self.clauses[index].id}"))
+    # Ask the existing index for cosine matches or BM25 keyword matches.
+    def _search(self, scoring: dict) -> list[dict]:
+        response = self.index.documents.search(
+            namespace=self.namespace, top_k=self.settings.n_prime, score_by=[scoring],
+            include_fields=FIELDS,
+        )
+        return [document_hit(doc, float(doc.score)) for doc in response.matches]
+
+    # Approach 1: Embed the query; Pinecone ranks matches using the index's cosine metric.
+    def _vector_search(self, query: str) -> list[dict]:
+        self._embedder = self._embedder or load_embedder(self.settings.embedding_model)
+        vector = self._embedder.encode([f"search_query: {query}"])[0]
+        hits = self._search({"type": "dense_vector", "field": "embedding", "values": vector})
+        return sorted(hits, key=lambda hit: (-hit["score"], hit["id"]))
+
+    # Get BM25 keyword matches from Pinecone for the hybrid approaches.
+    def _bm25_search(self, query: str) -> list[dict]:
+        return self._search({"type": "text", "fields": ["search_text"], "query": query})
+
+    # Approach 2: Run cosine and BM25 searches, then combine their rankings using RRF.
+    def _hybrid_search(self, query: str) -> list[dict]:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            vector = pool.submit(self._vector_search, query)
+            keyword = pool.submit(self._bm25_search, query)
+            lists = [vector.result(), keyword.result()]
+        documents = {hit["id"]: hit for matches in lists for hit in matches}
+        scores = reciprocal_rank_fusion(
+            [[hit["id"] for hit in matches] for matches in lists], self.settings.rrf_k,
+        )
+        return [{**documents[key], "score": float(scores[key])}
+                for key in ranked(scores)[:self.settings.n_prime]]
+
+    # Approach 3: Take the hybrid candidates and rank them again with the BGE reranker.
+    def _hybrid_rerank_search(self, query: str) -> list[dict]:
+        candidates = self._hybrid_search(query)
+        if not candidates:
+            return []
+        self._reranker = self._reranker or load_reranker(self.settings.rerank_model)
+        values = self._reranker.score(query, [hit["text"] for hit in candidates])
+        scores = dict(zip([hit["id"] for hit in candidates], values))
+        documents = {hit["id"]: hit for hit in candidates}
+        return [{**documents[key], "score": float(scores[key])} for key in ranked(scores)]
+
+    # Select one of the three approaches, keep the top K, then include direct references.
+    def search(self, query: str) -> list[dict]:
+        if not query.strip():
+            raise ValueError("policy query must not be empty")
+
+        # Step 1: Run the selected retrieval approach.
+        if self.settings.rerank:
+            candidates = self._hybrid_rerank_search(query)  # Approach 3
+        elif self.settings.bm25:
+            candidates = self._hybrid_search(query)         # Approach 2
+        else:
+            candidates = self._vector_search(query)         # Approach 1
+
+        # Step 2: Keep the final top K ranked search results.
+        hits = candidates[:self.settings.k]
+
+        # Step 3: Fetch missing direct references in one batch; do not recursively expand them.
+        if self.settings.expand_references:
+            returned = {hit["id"] for hit in hits}
+            references = dict.fromkeys(ref for hit in hits for ref in hit["references"] if ref not in returned)
+            if references:
+                response = self.index.documents.fetch(namespace=self.namespace, ids=list(references), include_fields=FIELDS)
+                if set(references) - set(response.documents):
+                    raise ValueError("Pinecone is missing referenced policy sections; upload the complete snapshot")
+                for key in references:
+                    doc = response.documents[key]
+                    hits.append(document_hit(doc, via="reference"))
         return hits
 
-    def _hit(self, index: int, score: float | None, via: str) -> dict[str, Any]:
-        clause = self.clauses[index]
-        return {
-            "id": clause.id, "title": clause.title, "section": clause.section, "source": clause.source,
-            "text": clause.text, "score": None if score is None else round(score, 4), "via": via,
-        }
 
-
+# Reuse the configured retriever between tool calls; no repeated model or client setup.
 @lru_cache(maxsize=8)
-def shared_retriever(folder: str, settings: RagSettings) -> PolicyRetriever:
-    """One retriever per corpus and settings per process, so the API reuses the embedded index."""
-    clauses = load_corpus(Path(folder), settings.chunking, settings.window_words, settings.window_overlap)
-    return PolicyRetriever(clauses, settings)
+def shared_retriever(settings: RagSettings) -> PineconeRetriever:
+    return PineconeRetriever(settings)
+
+
+# Public entry point: use the organisation's selected retrieval settings from base.yaml.
+def retrieve(query: str) -> list[dict]:
+    from support_ops.helpers.config import load_config
+
+    settings = RagSettings.from_config(load_config()["policy"]["rag"])
+    return shared_retriever(settings).search(query)

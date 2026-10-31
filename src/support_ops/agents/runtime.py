@@ -58,7 +58,7 @@ class Budget:
 class Retries:
     """`multi_agent.retries` in config."""
     tool_errors: int = 1     # automatic re-runs of a tool that failed for a reason the model can't fix
-    invalid_json: int = 1    # extra tries for a malformed JSON reply (triage, approver)
+    invalid_json: int = 1    # extra tries for a malformed JSON reply (supervisor, approver)
     backoff_s: float = 0.5   # wait before re-running a tool, times the attempt number
 
     @classmethod

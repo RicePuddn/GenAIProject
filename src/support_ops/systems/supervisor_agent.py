@@ -3,7 +3,7 @@
     guard → supervise ⇄ [specialist | approver | execute] → reply
                      └→ handoff → reply
 
-Unlike `MultiAgentWorkflow`, there is no fixed triage → specialist → decide → execute order: after
+Unlike `MultiAgentWorkflow`, there is no fixed supervise → specialist → decide → execute order: after
 each tool result the supervisor picks the next tool (ReAct). The guard still runs first and every
 reply is still checked, and the route tool, `TicketFlow` and `MockWrites` still decide what may
 execute, so a wrong choice is refused rather than carried out.
@@ -20,12 +20,12 @@ from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from support_ops.agents.approver import Approver
-from support_ops.agents.models import WRITE_ACTIONS, Specialist, Triage
+from support_ops.agents.models import WRITE_ACTIONS, Specialist
 from support_ops.agents.runtime import AgentContext, Budget, chat_json
 from support_ops.agents.specialist import STRATEGIES
 from support_ops.helpers.arguments import NonEmpty, ToolArguments
 from support_ops.helpers.tracing import Tracer
-from support_ops.supervisor.supervisor import Supervisor
+from support_ops.supervisor.supervisor import SPECIALIST_GUIDE, Supervisor
 from support_ops.systems.multi_agent import HISTORY_ROLES, MultiAgentState, MultiAgentWorkflow
 
 NODES = ("guard", "supervise", "specialist", "approver", "execute", "handoff", "reply")
@@ -67,16 +67,11 @@ NODE_FOR = {"ask_specialist": "specialist", "ask_approver": "approver", "execute
 TOOL_SCHEMAS = [{"type": "function", "function": {"name": name, "description": " ".join(description.split()),
                                                   "parameters": model.model_json_schema()}}
                 for name, (model, description) in TOOLS.items()]
-# What the reply writer is told when the supervisor answers without involving a specialist.
-OFF_TOPIC = Triage(intent="off_topic", urgency="low", language="en", specialist=None, off_topic=True,
-                   confidence=1.0, reason="The supervisor replied without asking a specialist.")
 
-# The specialist descriptions match MultiAgentWorkflow's orchestrator prompt, so both supervisors are told
+# The specialist descriptions are MultiAgentWorkflow's own (SPECIALIST_GUIDE), so both supervisors are told
 # the same about who handles what; this one also describes the steps that code fixes in that workflow.
 SUPERVISOR_RULES = (
-    "Specialists: orders_shipping (an order itself: its items and status; tracking and "
-    "delivery delays; order changes) and returns_refunds (return eligibility, exchanges, refunds, payments "
-    "and charges). Use ask_specialist for one request at a time, naming the order IDs; a message with two requests "
+    SPECIALIST_GUIDE + "Use ask_specialist for one request at a time, naming the order IDs; a message with two requests "
     "needs two asks. Act on each proposal; rules_minimum is the strictest route the rules allow: "
     "route auto: execute. Route approver: ask_approver; if it approves, execute; if it rejects, ask the "
     "specialist again once with the issues, otherwise hand_off. Route human: hand_off. Action none with a "
@@ -166,21 +161,24 @@ class SupervisorAgentWorkflow(MultiAgentWorkflow):
                     history_turns=len(history))
         state = self.graph.invoke({
             "ticket_id": ticket_id, "customer_message": customer_message, "history": history,
-            "strategy": selected, "orchestration": orchestration, "triage": None, "proposal": None,
+            "strategy": selected, "orchestration": orchestration, "case": None, "thoughts": [],
+            "redirect": False, "proposal": None,
             "min_route": None, "approval": None, "feedback": [], "reproposals": 0, "evidence": [],
             "execution": None, "customer_question": None, "unfound_record": None, "handoff_reason": None,
             "handoff_packet": None, "tasks": [], "part": 0, "part_start": 0, "parts": [],
+            "orchestration_steps": 0, "supervisor_note": None,
             "supervisor_messages": [], "supervisor_steps": 0, "pending_tool": None, "part_request": None,
             "plan": None, "replans": 0,
         }, {"recursion_limit": 60})
         status = self.flow.status(ticket_id)
+        self._save_ticket(state)
         self._event("workflow_end", status=status, llm_calls=self.tracer.llm_calls,
                     elapsed_s=round(self.tracer.elapsed_s, 4))
         dump = lambda value: value.model_dump(mode="json") if value is not None else None
         return {
             "ticket_id": ticket_id, "strategy": selected, "orchestration": orchestration, "design": "supervisor",
             "reply": state.get("reply", ""), "ticket_status": status, "handoff_packet": state.get("handoff_packet"),
-            "triage": dump(state.get("triage")), "proposal": dump(state.get("proposal")),
+            "case": dump(state.get("case")), "redirect": bool(state.get("redirect")), "proposal": dump(state.get("proposal")),
             "min_route": state.get("min_route"),
             "approval": dump(state.get("approval")), "reply_review": dump(state.get("reply_review")),
             "execution": state.get("execution"), "evidence": state.get("evidence", []),
@@ -205,10 +203,6 @@ class SupervisorAgentWorkflow(MultiAgentWorkflow):
         self.supervisor, self.approver = Supervisor(self.ctx), Approver(self.ctx)
 
     # ------------------------------------------------------------- nodes
-
-    def _guard(self, state: SupervisorAgentState) -> dict[str, Any]:
-        update = super()._guard(state)
-        return {**update, "next": "supervise"} if update["next"] == "triage" else update
 
     def _supervise(self, state: SupervisorAgentState) -> dict[str, Any]:
         """One ReAct step: the supervisor sees everything so far and calls exactly one tool."""
@@ -332,7 +326,8 @@ class SupervisorAgentWorkflow(MultiAgentWorkflow):
                                             "customer or hand off")
             # Nothing support-related was looked up: the reply redirects, as for an off-topic message.
             self.flow.transition(ticket_id, "awaiting_customer", reason="off topic")
-            return {"triage": OFF_TOPIC, "next": "reply"}
+            self._event("redirect", reason="the supervisor replied without asking a specialist")
+            return {"redirect": True, "next": "reply"}
         if proposal is not None and proposal.action in WRITE_ACTIONS and status != "executed":
             return self._refused(state, f"the {proposal.action} proposal is neither executed nor handed off: "
                                         "execute it, ask the approver, ask the customer or hand off")
@@ -458,9 +453,12 @@ class SupervisorAgentWorkflow(MultiAgentWorkflow):
             return self._refused(state, f"gateway refused: {exc}")
         if not granted["approval_token"]:   # information only
             return self._tool_result(state, {"status": "approved", "note": "nothing to execute; reply to the customer"})
+        lines = sorted(f"{line.item_id}x{line.quantity}" for line in proposal.items)
         result = self.writes.execute(
             ticket_id, token=granted["approval_token"], operation=proposal.action, order_id=proposal.order_id,
-            amount=proposal.amount, idempotency_key=f"{ticket_id}:{proposal.action}:{proposal.order_id}:{proposal.amount}")
+            amount=proposal.amount, items=[line.model_dump() for line in proposal.items],
+            reason=proposal.reason_code or proposal.reason,
+            idempotency_key=f"{ticket_id}:{proposal.action}:{proposal.order_id}:{proposal.amount}:{','.join(lines)}")
         self._event("write_result", result=result)
         if result["status"] != "executed":
             return self._refused(state, f"write refused: {result.get('reason')}")

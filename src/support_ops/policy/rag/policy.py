@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Sequence
-from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from support_ops.helpers.arguments import NonEmpty, ToolArguments
-from support_ops.helpers.config import ROOT
 from support_ops.policy.provider import ScopedPolicyTool
 from support_ops.policy.rag.retriever import RagSettings, shared_retriever
 from support_ops.policy.rules import Rules
@@ -25,7 +24,7 @@ class Retriever(Protocol):
         ...
 
     def warm_up(self) -> None:
-        """Load models and build the index now rather than on the first search."""
+        """Load and exercise models before serving tickets."""
         ...
 
 
@@ -37,14 +36,20 @@ class PolicySearchArguments(ToolArguments):
     scope: Literal["own", "all"] = "own"
 
 
+# Compare policy titles and stored domain names using the same format.
+def section_key(section: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", section.casefold()).strip("-").removesuffix("-policy")
+
+
 def own_sections(result: dict[str, Any], sections: Sequence[str]) -> dict[str, Any]:
-    """Keep the clauses from `sections`, plus the exceptions of the clauses kept, whatever their section."""
-    wanted = {section.casefold() for section in sections}
+    """Keep search hits in the specialist's scope and their direct references."""
+    wanted = {section_key(section) for section in sections}
     clauses = result.get("clauses", [])
     kept_ids = {clause["id"] for clause in clauses
-                if clause["via"] == "search" and clause["section"].casefold() in wanted}
+                if clause["via"] == "search" and section_key(clause["section"]) in wanted}
+    references = {ref for clause in clauses if clause["id"] in kept_ids for ref in clause.get("references", [])}
     kept = [clause for clause in clauses if clause["id"] in kept_ids
-            or (clause["via"].startswith("exception_of:") and clause["via"].split(":", 1)[1] in kept_ids)]
+            or clause["id"] in references]
     filtered = {**result, "clauses": kept, "scope": "own", "sections": list(sections)}
     if dropped := len(clauses) - len(kept):
         filtered["filtered_out"] = dropped
@@ -71,10 +76,10 @@ class RagPolicy:
     @classmethod
     def from_config(cls, cfg: dict[str, Any], rules: Rules) -> RagPolicy:
         policy = cfg["policy"]
-        folder = Path(policy["corpus_dir"]) / policy["corpus_size"]
-        folder = (folder if folder.is_absolute() else ROOT / folder).resolve()
-        return cls(shared_retriever(str(folder), RagSettings.from_config(policy.get("rag", {}))), rules)
+        settings = RagSettings.from_config(policy.get("rag", {}))
+        return cls(shared_retriever(settings), rules)
 
+    # Preload the same cached retriever later used by the agent tool.
     def warm_up(self) -> None:
         self.retriever.warm_up()
 
@@ -84,10 +89,15 @@ class RagPolicy:
 
     def run(self, args: dict[str, Any]) -> dict[str, Any]:
         if args.get("action") == "check":
-            return self.rules.check(args.get("operation", ""), args.get("amount"))
+            return self.rules.check(args.get("operation", ""), args.get("amount"), args.get("facts"))
         if args.get("action") == "search":
             return {"query": args["query"], "clauses": self.retriever.search(args["query"])}
         raise ValueError("unsupported policy action")
+
+    @staticmethod
+    def citable(result: dict[str, Any]) -> set[str]:
+        """A search can be cited by the IDs of the clauses it returned, references included."""
+        return {clause["id"] for clause in result.get("clauses", [])}
 
     def scoped_tool(self, scope: Sequence[str] | None) -> ScopedPolicyTool:
         """Search only, limited by default to the specialist's `scope` sections. The retriever's top-k is
@@ -100,12 +110,11 @@ class RagPolicy:
             return own_sections(result, scope)
 
         return ScopedPolicyTool(PolicySearchArguments, PolicySearchArguments.__doc__, run,
-                                self.prompt_hint, self.scope_hint, self.planner_context,
-                                lambda result: {clause["id"] for clause in result.get("clauses", [])})
+                                self.prompt_hint, self.scope_hint, self.planner_context, self.citable)
 
     def check_scope(self, scope: Sequence[str] | None) -> list[str]:
         try:
-            known = {section.casefold() for section in self.retriever.sections()}
+            known = {section_key(section) for section in self.retriever.sections()}
         except Exception:   # the corpus cannot be read: nothing to compare with
             return []
-        return [section for section in scope or [] if known and section.casefold() not in known]
+        return [section for section in scope or [] if known and section_key(section) not in known]

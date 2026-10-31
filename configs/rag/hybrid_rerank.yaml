@@ -1,0 +1,6 @@
+# The same hybrid candidates, then BGE reranking.
+policy:
+  rag:
+    dense: true
+    bm25: true
+    rerank: true

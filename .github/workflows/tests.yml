@@ -1,0 +1,45 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:   # a new push to the same PR or branch cancels the run it replaces
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: support_ops
+          POSTGRES_USER: support_ops
+          POSTGRES_PASSWORD: support_ops_local
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U support_ops"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SUPPORT_OPS_TEST_DATABASE_URL: postgresql://support_ops:support_ops_local@127.0.0.1:5432/support_ops
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      # Retrieval tests use mocked models and Pinecone; no model downloads or API keys are needed.
+      - name: Install
+        run: uv sync --locked --python 3.12 --extra dev --extra demo --extra rag
+      - name: Seed the test database
+        run: uv run --no-sync python scripts/seed_backend.py
+        env:
+          SUPPORT_OPS_DATABASE_URL: ${{ env.SUPPORT_OPS_TEST_DATABASE_URL }}
+      - name: Run pytest
+        run: uv run --no-sync pytest -q

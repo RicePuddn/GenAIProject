@@ -5,24 +5,18 @@ extends: base.yaml
 # overridden per request.
 
 system: multi_agent
-llm:
-  models:
-    orchestrator: openai/gpt-oss-120b   # the supervisor's react orchestration steps
 policy:
   mode: rag
 multi_agent:
   design: workflow              # workflow: fixed steps; supervisor: the supervisor chooses every step
-  orchestration: null           # the supervisor's react or plan_and_execute (null: same as agent.strategy)
-  triage_confidence_min: 0.5   # below this, hand off rather than guess the specialist
-  max_reproposals: 1           # approver rejections the specialist may fix
+  orchestration: null           # react: pick each part after seeing the last; plan_and_execute: plan all parts first
   check_citations: true        # a proposal may cite only clauses or files its policy tool returned
-  max_reply_drafts: 2          # reply drafts the approver reviews before the hold reply
-  max_orchestration_steps: 4   # react: orchestrator decisions per ticket (delegations + finish)
+  max_orchestration_steps: 4   # supervisor decisions per ticket (delegations + finish)
   max_supervisor_steps: 12     # design supervisor: tool calls per ticket (refused ones too) before it is handed off
   policy_sections:              # each specialist's policy search scope: section names in the corpus
     orders_shipping: [Orders and shipping]
     returns_refunds: [Returns and refunds]
   retries:
     tool_errors: 1             # re-runs of a tool that failed for a reason the model can't fix (e.g. DB timeout)
-    invalid_json: 1            # extra tries after a malformed JSON reply from triage or the approver
+    invalid_json: 1            # extra tries after a malformed JSON reply from the supervisor or the approver
     backoff_s: 0.5             # wait before a tool re-run, times the attempt number

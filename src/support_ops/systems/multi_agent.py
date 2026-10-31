@@ -3,10 +3,10 @@
 Two independent settings, each react or plan_and_execute:
 
 orchestration (supervisor)
-  plan_and_execute  guard → triage (plans one task per specialist) → [specialist → decide → execute]
+  plan_and_execute  guard → supervise (plans one task per specialist) → [specialist → decide → execute]
                     per task, in order → reply.
-  react             guard → triage → orchestrate ⇄ [specialist → decide → execute]: after each part
-                    the supervisor sees the result and delegates the next part or finishes → reply.
+  react             guard → supervise ⇄ [specialist → decide → execute]: after each part the
+                    supervisor sees the result and delegates the next part or finishes → reply.
 strategy (specialists)
   plan_and_execute  plan the read and policy calls, run them, then propose.
   react             one tool call per turn, observing each result.
@@ -17,29 +17,31 @@ which writes the packet and then goes to reply (hold reply). A part that needs a
 customer does not stop the other parts; at the end the strictest outcome decides the ticket
 (human, then customer, then resolved).
 
-LLMs only classify, propose, review and write. The route tool, `TicketFlow` and `MockWrites`
+LLMs decide what the customer needs, propose, review and write. The route tool, `TicketFlow` and `BackendWrites`
 decide what executes: no token without a route at least as strict as the rule engine's
-minimum, and no write without a token bound to that ticket, order and amount.
+minimum, and no write without a token bound to that ticket, order, amount and items.
 """
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Callable, TypedDict
 
+import psycopg
 from langgraph.graph import END, START, StateGraph
 
 from support_ops.agents.approver import Approver
 from support_ops.agents.guard import screen
-from support_ops.agents.models import ApprovalResult, Proposal, SupervisorStep, Task, Triage
+from support_ops.agents.models import ApprovalResult, Case, Proposal, Task
 from support_ops.agents.runtime import AgentContext, Budget, BudgetExceeded, Retries, llm_from_config
 from support_ops.agents.specialist import STRATEGIES, Specialist
 from support_ops.agents.toolbox import (ORDERS_SHIPPING_TOOLS, RETURNS_REFUNDS_TOOLS, Toolbox,
                                         returns_lookup_tool)
-from support_ops.backend.postgres import PostgresReader
+from support_ops.backend.postgres import PostgresReader, PostgresWriter
 from support_ops.gateway.approvals import TicketFlow
 from support_ops.gateway.route import RouteTool
+from support_ops.gateway.tickets import ticket_fields
 from support_ops.gateway.ticket_state import TicketState
-from support_ops.gateway.writes import MockWrites
+from support_ops.gateway.writes import BackendWrites
 from support_ops.helpers.cancellation import CancellationToken
 from support_ops.helpers.clock import Clock
 from support_ops.helpers.llm import ChatResult, LLM
@@ -48,8 +50,7 @@ from support_ops.policy.provider import PolicyProvider
 from support_ops.policy.routing import RoutingRules
 from support_ops.policy.rules import Rules
 from support_ops.supervisor.escalation import (FIXED_REPLY_TRIGGERS, HOLD_REPLY, confirm_question, customer_insists,
-                                              handoff_packet, missing_records, plain_dashes,
-                                              triage_escalation)
+                                              handoff_packet, missing_records, plain_dashes)
 from support_ops.supervisor.outcome import combined_outcome, customer_outcome
 from support_ops.supervisor.supervisor import Supervisor
 from support_ops.systems.single_agent import policy_from_config
@@ -58,9 +59,6 @@ from support_ops.systems.tools import SupportTools
 SPECIALIST_TOOLS = {"orders_shipping": ORDERS_SHIPPING_TOOLS, "returns_refunds": RETURNS_REFUNDS_TOOLS}
 DEFAULTS = {
     "orchestration": None,          # react or plan_and_execute; None: the specialists' strategy
-    "triage_confidence_min": 0.5,   # below this, hand off rather than guess the specialist
-    "max_reproposals": 1,           # approver rejections the specialist may fix
-    "max_reply_drafts": 2,          # drafts the approver may review before falling back
     "max_orchestration_steps": 4,   # react: orchestrator decisions per ticket (delegations + finish)
     "policy_sections": {"orders_shipping": ["Orders and shipping"], "returns_refunds": ["Returns and refunds"]},
     # skills mode: each specialist's skill folders under policy.skills_dir
@@ -77,13 +75,15 @@ class MultiAgentState(TypedDict, total=False):
     strategy: str                   # the specialists' strategy
     orchestration: str              # the supervisor's: react or plan_and_execute
     next: str
-    triage: Triage | None
-    tasks: list[Task]               # from triage: one per specialist, run in order
+    case: Case | None               # the supervisor's reading of the message: claims, not facts
+    thoughts: list[str]             # the supervisor's reasoning at each decision
+    redirect: bool                  # unrelated to the store: reply with what we can help with
+    tasks: list[Task]               # from the supervisor: one per specialist, run in order
     part: int                       # index of the task in progress
     part_start: int                 # where the part's evidence starts
     parts: list[dict[str, Any]]     # finished parts: what each specialist proposed and how it ended
-    orchestration_steps: int        # react: orchestrator decisions made so far
-    orchestrator_note: str | None   # react: why code refused the last delegation
+    orchestration_steps: int        # supervisor decisions made so far
+    supervisor_note: str | None     # react: why code refused the last delegation
     proposal: Proposal | None
     min_route: dict[str, Any] | None
     approval: ApprovalResult | None
@@ -102,9 +102,16 @@ class MultiAgentState(TypedDict, total=False):
 class MultiAgentWorkflow:
     def __init__(self, llm: LLM, cfg: dict[str, Any], *, reader: PostgresReader | None = None,
                  policy: PolicyProvider | None = None, clock: Clock | None = None, tracer: Tracer | None = None,
-                 cancellation: CancellationToken | None = None):
+                 cancellation: CancellationToken | None = None, writer: PostgresWriter | None = None):
         self.llm, self.cfg = llm, cfg
         self.settings = {**DEFAULTS, **cfg.get("multi_agent", {})}
+        if moved := {"max_reproposals", "max_reply_drafts"} & set(self.settings):
+            raise ValueError(f"multi_agent.{sorted(moved)} moved to review.max_rejections and "
+                             "review.max_reply_drafts, shared with the single agent")
+        # Shared with the single agent, so every arm gets the same second chances.
+        review = cfg.get("review", {})
+        self.settings["max_reproposals"] = review.get("max_rejections", 1)
+        self.settings["max_reply_drafts"] = review.get("max_reply_drafts", 2)
         for key in ("policy_sections", "policy_skills"):
             # Per specialist, so a config naming one specialist's scope keeps the other's default scope
             # instead of leaving it unscoped (None, the whole policy, stays available when set explicitly).
@@ -118,7 +125,8 @@ class MultiAgentWorkflow:
         self.routing = RoutingRules.load(cfg["policy"]["rules_file"])
         self.reader = reader or PostgresReader()
         self.ticket_state = TicketState(self.clock, rules=rules)
-        self.tools = SupportTools(self.reader, policy or policy_from_config(cfg, rules), self.ticket_state)
+        self.writer = writer = writer or PostgresWriter()
+        self.tools = SupportTools(self.reader, policy or policy_from_config(cfg, rules), self.ticket_state, writer)
         policy = self.tools.policy
         if policy.strict_scope:   # e.g. a mistyped skill folder: fail now, not as empty lists mid-ticket
             for specialist, scope in self.settings[policy.scope_setting].items():
@@ -126,10 +134,10 @@ class MultiAgentWorkflow:
                     raise ValueError(f"multi_agent.{policy.scope_setting} for {specialist} names parts the "
                                      f"policy does not have: {missing}")
         self.flow = TicketFlow(self.ticket_state, self.clock)
-        self.writes = MockWrites(self.flow, self.routing.currency)
+        self.writes = BackendWrites(self.flow, writer)
         self._tokens: dict[str, str | None] = {}   # kept out of graph state, so never returned
         graph = StateGraph(MultiAgentState)
-        nodes = ("guard", "triage", "orchestrate", "specialist", "decide", "execute", "handoff", "reply")
+        nodes = ("guard", "supervise", "specialist", "decide", "execute", "handoff", "reply")
         for name in nodes:
             graph.add_node(name, self._guarded(name, getattr(self, f"_{name}")))
             if name != "reply":
@@ -163,20 +171,21 @@ class MultiAgentWorkflow:
                     history_turns=len(history))
         state = self.graph.invoke({
             "ticket_id": ticket_id, "customer_message": customer_message, "history": history,
-            "strategy": selected, "orchestration": orchestration, "triage": None, "proposal": None, "min_route": None, "approval": None,
+            "strategy": selected, "orchestration": orchestration, "case": None, "thoughts": [], "redirect": False, "proposal": None, "min_route": None, "approval": None,
             "feedback": [], "reproposals": 0, "evidence": [], "execution": None,
             "customer_question": None, "unfound_record": None, "handoff_reason": None, "handoff_packet": None,
             "tasks": [], "part": 0, "part_start": 0, "parts": [], "orchestration_steps": 0,
-            "orchestrator_note": None,
+            "supervisor_note": None,
         }, {"recursion_limit": 40})
         status = self.flow.status(ticket_id)
+        self._save_ticket(state)
         self._event("workflow_end", status=status, llm_calls=self.tracer.llm_calls,
                     elapsed_s=round(self.tracer.elapsed_s, 4))
         dump = lambda value: value.model_dump(mode="json") if value is not None else None
         return {
             "ticket_id": ticket_id, "strategy": selected, "orchestration": orchestration, "reply": state.get("reply", ""),
             "ticket_status": status, "handoff_packet": state.get("handoff_packet"),
-            "triage": dump(state.get("triage")), "proposal": dump(state.get("proposal")),
+            "case": dump(state.get("case")), "proposal": dump(state.get("proposal")),
             "min_route": state.get("min_route"), "approval": dump(state.get("approval")),
             "reply_review": dump(state.get("reply_review")), "execution": state.get("execution"),
             "evidence": state.get("evidence", []),
@@ -211,12 +220,11 @@ class MultiAgentWorkflow:
         brief: dict[str, Any] = {"message": plain_dashes(state["customer_message"])}
         tasks = state.get("tasks") or []
         if part and tasks and (len(tasks) > 1 or state.get("orchestration") == "react"):
-            task = tasks[state["part"]]
-            brief["your_task"] = plain_dashes(task.request) if task.request else "the whole message"
+            brief["your_task"] = plain_dashes(tasks[state["part"]].request)
         if state.get("history"):
             brief["history"] = [{**turn, "content": plain_dashes(turn["content"])} for turn in state["history"]]
-        if state.get("triage"):
-            brief["triage"] = state["triage"].model_dump(mode="json")
+        if state.get("case"):
+            brief["case"] = state["case"].model_dump(mode="json")
         if state.get("feedback"):
             brief["approver_feedback"] = state["feedback"]
         return brief
@@ -230,65 +238,57 @@ class MultiAgentWorkflow:
     def _guard(self, state: MultiAgentState) -> dict[str, Any]:
         self._event("node_start", node="guard", ticket_id=state["ticket_id"])
         flag = screen(self._chat, self.cfg, state["history"], state["customer_message"], self._event)
-        return {"next": "triage"} if flag == "benign" else self._to_handoff(f"guard: {flag}")
+        return {"next": "supervise"} if flag == "benign" else self._to_handoff(f"guard: {flag}")
 
-    def _triage(self, state: MultiAgentState) -> dict[str, Any]:
-        try:
-            triage = self.supervisor.triage(self._brief(state))
-        except ValueError as exc:
-            return self._to_handoff(f"triage failed: {exc}")
-        self.flow.transition(state["ticket_id"], "triaged", intent=triage.intent, specialist=triage.specialist)
-        update: dict[str, Any] = {"triage": triage, "tasks": triage.tasks}
-        if reason := triage_escalation(triage, self.settings["triage_confidence_min"]):
-            return {**update, **self._to_handoff(reason)}
-        if triage.off_topic:
-            # Unrelated to support: no specialist and no person; the reply says what we can help with.
-            self._event("off_topic", intent=triage.intent)
-            self.flow.transition(state["ticket_id"], "awaiting_customer", reason="off topic")
-            return {**update, "next": "reply"}
-        if state["orchestration"] == "react":
-            return {**update, "tasks": [], "next": "orchestrate"}   # the orchestrator picks each part
-        return {**update, "next": "specialist"}
-
-    def _orchestrate(self, state: MultiAgentState) -> dict[str, Any]:
-        """ReAct orchestration: see the parts done so far, then delegate the next part or finish."""
-        parts, steps = state["parts"], state["orchestration_steps"]
-        limit = self.settings["max_orchestration_steps"]
+    def _supervise(self, state: MultiAgentState) -> dict[str, Any]:
+        """The supervisor LLM decides what happens next; this only carries out its decision."""
+        parts, steps, ticket_id = state["parts"], state["orchestration_steps"], state["ticket_id"]
+        react, limit = state["orchestration"] == "react", self.settings["max_orchestration_steps"]
         if steps >= limit:
             self._event("orchestration_limit", steps=steps)
             return self._settle(state, {}) if parts else self._to_handoff(
-                f"budget: the orchestrator made {steps} steps without a specialist result")
-        triage = {key: value for key, value in state["triage"].model_dump(mode="json").items() if key != "tasks"}
-        brief = {**self._brief(state), "triage": triage, "steps_left": limit - steps,
-                 "parts_done": [self._step_result(part) for part in parts]}
-        if state.get("orchestrator_note"):
-            brief["refused_last_step"] = state["orchestrator_note"]
-        update: dict[str, Any] = {"orchestration_steps": steps + 1, "orchestrator_note": None}
+                f"budget: the supervisor made {steps} decisions without a specialist result")
+        brief = self._brief(state)
+        if react:
+            brief.update(steps_left=limit - steps, parts_done=[self._step_result(part) for part in parts],
+                         earlier_thoughts=state["thoughts"])
+        if state.get("supervisor_note"):
+            brief["refused_last_step"] = state["supervisor_note"]
+        update: dict[str, Any] = {"orchestration_steps": steps + 1, "supervisor_note": None}
         try:
-            step: SupervisorStep = self.supervisor.next_step(brief)
+            decision = self.supervisor.decide(brief, react=react, first=steps == 0)
         except ValueError as exc:
-            if parts:
-                return self._settle(state, update)
-            return {**update, **self._to_handoff(f"orchestrator failed: {exc}")}
-        if step.action == "finish":
+            return self._settle(state, update) if parts else {
+                **update, **self._to_handoff(f"supervisor failed: {exc}")}
+        update["thoughts"] = [*state["thoughts"], decision.thought]
+        if decision.case:
+            update["case"] = decision.case
+        if decision.action == "handoff":
+            # Parts already done stay in the packet and the reply.
+            return {**update, **(self._last_part(parts) if parts else {}), **self._to_handoff(decision.reason)}
+        if decision.action == "redirect" and not parts:
+            # Unrelated to support: no specialist and no person; the reply says what we can help with.
+            self._event("redirect", reason=decision.reason)
+            self.flow.transition(ticket_id, "awaiting_customer", reason="off topic")
+            return {**update, "redirect": True, "next": "reply"}
+        if decision.action in {"finish", "redirect"}:
             if not parts:
-                return {**update, **self._to_handoff("the orchestrator finished before any specialist ran")}
+                return {**update, **self._to_handoff("the supervisor finished before any specialist ran")}
             return self._settle(state, update)
-        if any(part["specialist"] == step.specialist and (part["execution"] or {}).get("status") == "executed"
+        tasks = decision.tasks[:1] if react else decision.tasks
+        if any(part["specialist"] == tasks[0].specialist and (part["execution"] or {}).get("status") == "executed"
                for part in parts):
-            # Mock writes do not reach the database, so a second write by the same specialist could, for
-            # example, refund an order twice against the same facts.
-            note = f"{step.specialist} already executed a write on this ticket; it cannot be delegated again"
-            self._event("orchestrator_refused", specialist=step.specialist, reason=note)
-            return {**update, "orchestrator_note": note, "next": "orchestrate"}
-        task = Task(specialist=step.specialist, request=step.request)
-        if self.flow.status(state["ticket_id"]) != "triaged":
-            self.flow.transition(state["ticket_id"], "triaged", reason="next part")
-        return {**update, "tasks": [*state["tasks"], task], "next": "specialist"}
+            # One ticket needs one write per specialist; a second is more likely a repeat than a new need.
+            note = f"{tasks[0].specialist} already executed a write on this ticket; it cannot be delegated again"
+            self._event("supervisor_refused", specialist=tasks[0].specialist, reason=note)
+            return {**update, "supervisor_note": note, "next": "supervise"}
+        if self.flow.status(ticket_id) != "triaged":
+            self.flow.transition(ticket_id, "triaged", reason="next part" if parts else decision.reason)
+        return {**update, "tasks": [*state["tasks"], *tasks], "next": "specialist"}
 
     @staticmethod
     def _step_result(part: dict[str, Any]) -> dict[str, Any]:
-        """What the orchestrator sees of a finished part: enough to decide the next step."""
+        """What the supervisor sees of a finished part: enough to decide the next step."""
         proposal = part.get("proposal")
         return {"specialist": part["specialist"], "request": part["request"],
                 "ended": {"approved": "resolved", "executed": "resolved"}.get(part["status"], part["status"]),
@@ -376,24 +376,24 @@ class MultiAgentWorkflow:
                 "unfound_record": unfound_record, "evidence": merged["evidence"][state["part_start"]:]}
         parts = [*state["parts"], part]
         update = {**update, "parts": parts}
+        self._save_ticket({**merged, "parts": parts})
         react = state["orchestration"] == "react"
         if react or state["part"] + 1 < len(state["tasks"]):
             self._event("part_done", part=state["part"] + 1, specialist=task.specialist, status=status)
-            # Under react the orchestrator may finish instead, so the ticket keeps this part's state
+            # Under react the supervisor may finish instead, so the ticket keeps this part's state
             # until it delegates again.
             if not react and self.flow.status(ticket_id) != "triaged":
                 self.flow.transition(ticket_id, "triaged", reason="next part")
             return {**update, "part": state["part"] + 1, "part_start": len(merged["evidence"]),
                     "proposal": None, "min_route": None, "approval": None, "execution": None,
-                    "feedback": [], "reproposals": 0, "next": "orchestrate" if react else "specialist"}
+                    "feedback": [], "reproposals": 0, "next": "supervise" if react else "specialist"}
         return self._settle(state, update)
 
     def _settle(self, state: MultiAgentState, update: dict[str, Any]) -> dict[str, Any]:
         """All parts are done: the strictest outcome decides the ticket (human, customer, resolved).
         Under react the last part's proposal and results are restored from its record."""
         parts, ticket_id = update.get("parts", state["parts"]), state["ticket_id"]
-        last = parts[-1]
-        update = {**update, **{key: last[key] for key in ("proposal", "min_route", "approval", "execution")}}
+        update = {**update, **self._last_part(parts)}
         if humans := [done for done in parts if done["status"] == "awaiting_human"]:
             reason = humans[0]["handoff_reason"] if len(parts) == 1 else "; ".join(
                 f"{done['specialist']}: {done['handoff_reason']}" for done in humans)
@@ -404,6 +404,22 @@ class MultiAgentWorkflow:
             return {**update, "customer_question": " ".join(done["customer_question"] for done in asking),
                     "next": "reply"}
         return {**update, "next": "reply"}
+
+    def _save_ticket(self, state: MultiAgentState) -> None:
+        """Keep `support_tickets` current. A failed save is logged: it must not cost the customer their reply."""
+        ticket_id = state["ticket_id"]
+        try:
+            self.writer.save_ticket(ticket_id=ticket_id, at=self.clock.now(), **ticket_fields(
+                flow_status=self.flow.status(ticket_id), case=state.get("case"),
+                customer_message=state["customer_message"], parts=state.get("parts", []),
+                proposal=state.get("proposal"), evidence=state.get("evidence", []), reply=state.get("reply"),
+                handoff_packet=state.get("handoff_packet")))
+        except (psycopg.Error, RuntimeError) as exc:
+            self.tracer.log("ticket_save_failed", ticket_id=ticket_id, error=str(exc)[:300])
+
+    @staticmethod
+    def _last_part(parts: list[dict[str, Any]]) -> dict[str, Any]:
+        return {key: parts[-1][key] for key in ("proposal", "min_route", "approval", "execution")}
 
     @staticmethod
     def _part_summary(part: dict[str, Any]) -> dict[str, Any]:
@@ -442,10 +458,12 @@ class MultiAgentWorkflow:
     def _execute(self, state: MultiAgentState) -> dict[str, Any]:
         self._event("node_start", node="execute")
         ticket_id, proposal = state["ticket_id"], state["proposal"]
+        lines = sorted(f"{line.item_id}x{line.quantity}" for line in proposal.items)
         result = self.writes.execute(
             ticket_id, token=self._tokens.pop(ticket_id, None) or "", operation=proposal.action,
-            order_id=proposal.order_id, amount=proposal.amount,
-            idempotency_key=f"{ticket_id}:{proposal.action}:{proposal.order_id}:{proposal.amount}")
+            order_id=proposal.order_id, amount=proposal.amount, items=[line.model_dump() for line in proposal.items],
+            reason=proposal.reason_code or proposal.reason,
+            idempotency_key=f"{ticket_id}:{proposal.action}:{proposal.order_id}:{proposal.amount}:{','.join(lines)}")
         self._event("write_result", result=result)
         if result["status"] != "executed":
             return self._end_part(state, {"execution": result}, "awaiting_human",
@@ -456,7 +474,7 @@ class MultiAgentWorkflow:
         self._event("node_start", node="handoff", reason=state["handoff_reason"])
         packet = handoff_packet(
             ticket_id=state["ticket_id"], reason=state["handoff_reason"], customer_message=state["customer_message"],
-            triage=state.get("triage"), proposal=state.get("proposal"), min_route=state.get("min_route"),
+            case=state.get("case"), proposal=state.get("proposal"), min_route=state.get("min_route"),
             evidence=state["evidence"], execution=state.get("execution"),
             parts=[self._part_summary(part) for part in state.get("parts", [])] if len(state.get("parts", [])) > 1 else [])
         if self.flow.status(state["ticket_id"]) != "awaiting_human":
@@ -484,7 +502,7 @@ class MultiAgentWorkflow:
                 status=status, evidence=state["evidence"], proposal=state.get("proposal"),
                 execution=state.get("execution"), min_route=state.get("min_route"),
                 customer_question=state.get("customer_question"), currency=self.routing.currency,
-                off_topic=bool(state.get("triage") and state["triage"].off_topic),
+                redirect=bool(state.get("redirect")),
                 unfound_record=state.get("unfound_record"))
         brief, issues, review = self._brief(state), None, None
         try:

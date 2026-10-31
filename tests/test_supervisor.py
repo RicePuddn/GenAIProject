@@ -1,12 +1,11 @@
 """The supervisor's deterministic parts: handoff triggers, the handoff packet and the reply outcome."""
 import unittest
 
-from support_ops.agents.models import Proposal, Triage
-from support_ops.supervisor.escalation import handoff_packet, triage_escalation
+from support_ops.agents.models import Case, Proposal
+from support_ops.supervisor.escalation import handoff_packet
 from support_ops.supervisor.outcome import customer_outcome, verified_facts
 
-TRIAGE = {"intent": "refund_request", "urgency": "normal", "language": "en",
-          "specialist": "returns_refunds", "confidence": 0.9, "reason": "Refund."}
+CASE = Case(issue="Refund.", intent="refund_request", category="refund", urgency="normal", language="en")
 RETURN = Proposal(specialist="returns_refunds", action="return", order_id="ORD-1", cited_clauses=["RET-1"],
                   items=[{"item_id": "ITM-1-2", "quantity": 1}], route="approver", reason="Dented on arrival.")
 ITEMS = {"agent": "returns_refunds", "tool": "get_items_for_order",
@@ -23,21 +22,9 @@ def outcome(**overrides):
 
 
 class EscalationTests(unittest.TestCase):
-    def test_triage_triggers_in_order_and_none_when_clear(self):
-        self.assertIsNone(triage_escalation(Triage(**TRIAGE), 0.5))
-        # Off topic is not a handoff, even with no specialist; asking for a person still is.
-        self.assertIsNone(triage_escalation(Triage(**{**TRIAGE, "specialist": None, "off_topic": True}), 0.5))
-        cases = {"customer asked for a human": {"wants_human": True, "duplicate_of": "T0"},
-                 "duplicate of open ticket T0": {"duplicate_of": "T0"},
-                 "no specialist covers this request": {"specialist": None},
-                 "low triage confidence (0.30)": {"confidence": 0.3}}
-        for reason, overrides in cases.items():
-            with self.subTest(reason):
-                self.assertEqual(triage_escalation(Triage(**{**TRIAGE, **overrides}), 0.5), reason)
-
     def test_packet_lists_actions_citations_and_the_recommendation(self):
         packet = handoff_packet(ticket_id="T1", reason="route: human", customer_message="Bottle dented",
-                                triage=Triage(**TRIAGE), proposal=RETURN, min_route={"route": "approver"},
+                                case=CASE, proposal=RETURN, min_route={"route": "approver"},
                                 evidence=[ITEMS, FAILED], execution={"status": "refused", "operation": "return"})
         self.assertEqual(packet.actions_taken, ["returns_refunds: get_items_for_order",
                                                 "returns_refunds: get_payments_for_order (error)",
@@ -46,7 +33,7 @@ class EscalationTests(unittest.TestCase):
         self.assertIn("return via approver", packet.recommendation)
 
     def test_packet_before_any_proposal(self):
-        packet = handoff_packet(ticket_id="T1", reason="guard: malicious", customer_message="x", triage=None,
+        packet = handoff_packet(ticket_id="T1", reason="guard: malicious", customer_message="x", case=None,
                                 proposal=None, min_route=None, evidence=[], execution=None)
         self.assertEqual(packet.summary, "request: x")
         self.assertIn("stopped before a proposal", packet.recommendation)
@@ -99,12 +86,21 @@ class OutcomeTests(unittest.TestCase):
             "Promise nothing else": dict(status="awaiting_human", execution=None, evidence=[ROUTE]),
             "Ask: Which bottle?": dict(status="awaiting_customer", execution=None, customer_question="Which bottle?"),
             "invite a question about those": dict(status="awaiting_customer", execution=None, proposal=None,
-                                                  evidence=[], off_topic=True),
+                                                  evidence=[], redirect=True),
             "if none are listed, do not apologise": dict(status="approved", execution=None),
         }
         for phrase, overrides in cases.items():
             with self.subTest(phrase):
                 self.assertIn(phrase.lower(), outcome(**overrides)["tell_customer"].lower())
+
+    def test_a_recorded_refund_or_cancellation_never_claims_money_moved(self):
+        refund = Proposal(specialist="returns_refunds", action="refund", order_id="ORD-1", amount=20, route="auto",
+                          cited_clauses=["REF-1"], reason="Accepted return.")
+        cancel = Proposal(specialist="orders_shipping", action="order_change", order_id="ORD-1", route="auto",
+                          reason_code="cancel", cited_clauses=["ODR-1"], reason="Still processing.")
+        self.assertIn("pending", outcome(proposal=refund)["tell_customer"])
+        self.assertIn("Do not say the money has been returned", outcome(proposal=refund)["tell_customer"])
+        self.assertIn("Say nothing about payments", outcome(proposal=cancel)["tell_customer"])
 
     def test_a_late_shipment_becomes_a_problem_to_apologise_for(self):
         result = outcome(status="awaiting_human", execution=None, min_route={"overdue_shipment": True})

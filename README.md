@@ -3,11 +3,9 @@
 IS469 Generative and Agentic AI group project comparing single-agent and multi-agent
 customer support systems with RAG or skills-style policy retrieval.
 
-The implemented application is a **single-agent LangGraph flow with skills-style or RAG policies**.
-Skills is the default and works with the base installation below.
+The application supports **single-agent and multi-agent LangGraph flows with RAG or skills-style policies**.
 It supports ReAct and plan-and-execute using Groq's `openai/gpt-oss-120b`, with
 `meta-llama/llama-prompt-guard-2-86m` screening incoming messages for prompt attacks.
-Other system variants and the evaluation harness are still in progress.
 
 ## Install and configure
 
@@ -16,7 +14,7 @@ with Docker Compose. Start Docker Desktop before starting PostgreSQL.
 
 ```bash
 uv venv --python 3.12 .venv
-uv pip install --python .venv/bin/python -e ".[dev]"
+uv pip install --python .venv/bin/python -e ".[dev,rag]"
 cp .env.example .env
 ```
 
@@ -32,21 +30,28 @@ SUPPORT_OPS_DATABASE_URL=postgresql://support_ops:support_ops_local@127.0.0.1:54
 If you change the password or host port, update the database URL to match.
 Changing the password in `.env` does not reset the password in an existing database volume.
 
-### Optional RAG setup
+## RAG
 
-To use embedding search and reranking instead of skills, install the RAG extra:
+RAG uses the PDFs in `policy/raw_policy/pdf/`. Set `PINECONE_API_KEY` in `.env`.
+Default models and parameters are in
+`configs/base.yaml`; evaluation profiles are in `configs/rag/`.
+The API preloads models at startup and verifies the uploaded corpus.
 
-```bash
-uv pip install --python .venv/bin/python -e ".[dev,rag]"
+```python
+from support_ops.policy.rag import retrieve
+
+chunks = retrieve("Can I return a damaged final-sale item?")
 ```
 
-Set `policy.mode: rag` in `configs/base.yaml`, then restart Uvicorn. RAG loads its
-embedding/reranking models and builds the corpus index before accepting requests;
-the first startup may download the configured models. Wait for `Application startup
-complete` before opening the demo. Set `policy.mode: skills` to switch back.
+After changing policies, regenerate embeddings and upload to the existing index:
 
-`uv.lock` includes the `dev`, `rag`, and `demo` extras. For a locked installation,
-use `uv sync --locked --extra dev`, adding `--extra rag` or `--extra demo` as needed.
+```bash
+.venv/bin/python -m support_ops.policy.rag.embeddings
+.venv/bin/python -m support_ops.policy.rag.pinecone_store
+```
+
+`src/support_ops/eval/` is the shared folder for the team's evaluations.
+The RAG notebook is `rag_evaluation.ipynb`; its results go to `results/rag/`.
 
 ## Start the database and application
 
@@ -60,6 +65,8 @@ Seeding creates any missing tables and inserts fictional ecommerce records with
 product names, customers, payments, tracking events, returns, refunds, and support tickets.
 It preserves existing rows. See [database details](data/backend_seed/README.md) for
 sample IDs and how to reset the local fixtures.
+Schema changes require a fresh database; seeding does not alter existing tables.
+The [10 gold cases](data/cases/agents/README.md) reference the seeded evaluation orders.
 
 For subsequent runs, start PostgreSQL and Uvicorn again; reseeding is optional.
 Use `Ctrl+C` to stop the API and `docker compose stop postgres` to stop the database.
@@ -97,8 +104,9 @@ For policy discovery and clause reading:
 ```
 
 The policy example should retrieve order/delivery facts and the returns policy.
-Inspect `tool_calls` for `policy` inputs and outputs, including `SKILL.md` and
-`eligibility.md`. Tool order can vary with the model. Return eligibility depends
+Inspect `tool_calls` for `policy` inputs and outputs. RAG mode returns retrieved
+section IDs and evidence; skills mode reads `SKILL.md` and supporting files.
+Tool order can vary with the model. Return eligibility depends
 on the workflow date: the API uses the current UTC date, while programmatic workflows
 use `run.clock_start` unless a clock is injected. This order was delivered on
 5 September 2026, so its eligibility changes with the date you run it.
@@ -176,7 +184,7 @@ uv pip install --python .venv/bin/python -e ".[demo]"
 | `react` | The supervisor selects one tool, executes it, receives the result, then chooses the next step. |
 | `plan_and_execute` | The supervisor produces an ordered plan using the shared tool schemas and available policy filenames. The workflow validates the entire plan and executes its calls sequentially. Invalid plans or recoverable tool errors trigger a bounded correction using completed results. |
 
-Both strategies use the same model wrapper, tool contracts, policy files, mock approval
+Both strategies use the same model wrapper, tool contracts, policy files, write
 rule, tracing, and final response node. A successful plan executes without supervisor
 calls between its tools. Plans use known literal arguments; they cannot substitute an
 unknown result from a previous call into a later call.
@@ -227,27 +235,45 @@ Cost estimates depend on configured prices; unpriced models contribute zero.
 The workflow bounds supervisor turns, tool executions, replans, and accumulated
 LLM cost between calls. A single call can exceed the remaining cost budget.
 
-## Policies and mock operations
+## Policies and write operations
 
 The current tools are `read_record`, the order lookups `get_shipments_for_order`,
 `get_shipment_events_for_order`, `get_items_for_order` (with product details),
-`get_payments_for_order` and `get_returns_for_order` (returns and refunds), then `policy`
-and `ticket_state`.
+`get_payments_for_order` and `get_returns_for_order` (returns and refunds), then `policy`,
+`ticket_state`, `backend_write` and `update_ticket`.
 A dedicated final response node generates the customer reply through the shared LLM wrapper after operational tool work completes.
 
-Policy retrieval follows `list` → `open` a skill's `SKILL.md` → `read` a relevant
-clause. Available skills are `orders-and-shipping` and `returns-and-refunds`.
-Policy checks and the ticket tool share the same mock SGD 100 refund limit, read from
-[policy/rules.yaml](policy/rules.yaml). `policy.mode` in `configs/base.yaml` selects the
+RAG searches return ranked clauses and their direct references. Skills retrieval
+uses `open` on a skill's `SKILL.md`, then `read` on a relevant clause file;
+`list` discovers skills. Available skills are `orders-and-shipping` and `returns-and-refunds`.
+Policy checks and the ticket tool share [rules.json](src/support_ops/policy/rules/rules.json):
+refund limits, return deadlines, cancellation conditions and human-review routes.
+Eligible refunds ≤ SGD 30 can proceed automatically; > SGD 30–100 need automated
+review; > SGD 100 need a human. Business checks run first in every design.
+Checks use existing backend records; unavailable facts require human review
+(see [backend data](data/backend_seed/README.md)). PDF fingerprints
+flag policy changes that require a rules review. `policy.mode` in `configs/base.yaml` selects the
 policy provider plugged into the `policy` tool.
 
 Unsupported write operations and above-limit refunds require a human handoff.
 
-PostgreSQL tools only read data. Approval tokens, mock writes, audits, and handoff
-packets are held in memory for each request. A mock approval does not issue a
-real refund or update PostgreSQL. Tokens are opaque simulation artifacts; signed
-token validation and durable ticket state are future work. Conversation history
-travels with each request (see above), but approvals from earlier requests are not restored.
+A write requiring review needs a `review_reason` and `cited_clauses`. Every citation must be a clause
+or file the `policy` tool returned in this ticket (the same check as the multi-agent specialists, in
+`policy/citations.py`). The write then goes to an independent review: a separate, stateless
+`approver` call that sees the customer's request, the proposed write, the rule check and the tool
+evidence, but none of the agent's own messages or reasoning. It holds the write to the same criteria
+as the multi-agent approver. The agent may fix `review.max_rejections` rejections (shared with the
+multi-agent approver); the next rejection, or an escalation, goes to a human.
+
+Every final reply is checked the same way before it is sent, by a separate `approver` call against
+the ticket's evidence. A rejected draft is redrafted with the issues; if none passes within
+`review.max_reply_drafts`, the customer gets the fixed hold reply and the ticket goes to a human.
+
+The read tools only read data. The `backend_write` tool changes the database after checking
+the recorded facts and the rules: a refund is recorded as `pending` and no money moves, a
+return as `requested`, and a cancellation updates the order. Applied writes are kept in
+`backend_writes`; a repeated write returns the first result. Audits and handoff packets are
+held in memory for each request. Conversation history travels with each request (see above).
 Prompt Guard screens prompt attacks; it does not provide a complete abuse or
 out-of-scope classification system. This local experiment API has no customer
 authentication or order ownership checks.
@@ -268,9 +294,10 @@ UI or curl as described above.
 
 ```text
 configs/                      models, strategy, simulation clock and limits
-policy/rules.yaml             hard limits shared by every arhitecture
 policy/skills/                policy entrypoints and clause files
-policy/corpus/                clause-level policy for the RAG variants (mini/ mirrors skills)
+policy/raw_policy/            source policy PDFs
+policy/chunk_policy/          section chunks with reference IDs
+policy/embed_chunk/           saved vectors and upload manifest
 data/backend_seed/schema.sql  PostgreSQL schema
 scripts/seed_backend.py       deterministic ecommerce fixtures
 src/support_ops/
@@ -278,14 +305,14 @@ src/support_ops/
   helpers/                    shared LLM wrapper, clock, config and tracing
   backend/postgres.py         allowlisted database reads
   policy/provider.py          contract each policy provider implements (RAG/skills)
-  policy/rules.py             hard-limit checks from policy/rules.yaml
+  policy/rules/               grouped JSON rules and deterministic checks
   policy/skills.py            skill navigation (the skills provider)
-  policy/rag/                 loader.py (files -> clauses), retriever.py (search),
-                              policy.py (the RAG provider)
-  gateway/ticket_state.py     request-local approvals, audit and handoff
+  policy/rag/                 policy chunking, embeddings and retrieval
+  gateway/ticket_state.py     request-local audit and handoff
   systems/tools.py            shared tool schemas, validation and dispatcher
   systems/single_agent.py     LangGraph nodes and strategy routing
-  agents/, supervisor/, eval/ reserved for other variants and evaluation
+  eval/                       shared evaluation notebooks
+  agents/, supervisor/        multi-agent roles and coordination
 results/                      local traces and response cache
 tests/                       helper and workflow regression tests
 ```

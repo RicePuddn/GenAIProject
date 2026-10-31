@@ -61,14 +61,14 @@ class MultiChatResponse(BaseModel):
     design: str = "workflow"
     reply: str
     ticket_status: str
-    triage: dict[str, Any] | None = None
+    case: dict[str, Any] | None = None
     proposal: dict[str, Any] | None = None
     min_route: dict[str, Any] | None = None
     approval: dict[str, Any] | None = None
     reply_review: dict[str, Any] | None = None
     execution: dict[str, Any] | None = None
     handoff_packet: dict[str, Any] | None = None
-    # One per specialist when triage split the message; proposal etc. above are the last part's.
+    # One per specialist when the supervisor split the message; proposal etc. above are the last part's.
     parts: list[dict[str, Any]] = Field(default_factory=list)
     evidence: list[dict[str, Any]] = Field(default_factory=list)
     audit_log: list[dict[str, Any]] = Field(default_factory=list)
@@ -124,7 +124,7 @@ def info() -> dict[str, Any]:
     policy = cfg["policy"]
     return {
         "system": "multi_agent", "config": config_path(), "policy_mode": policy["mode"],
-        "corpus": policy["skills_dir"] if policy["mode"] == "skills" else policy["corpus_size"],
+        "corpus": policy["skills_dir"] if policy["mode"] == "skills" else policy["corpus_dir"],
         "default_strategy": cfg.get("agent", {}).get("strategy", "react"),
         "default_orchestration": cfg.get("multi_agent", {}).get("orchestration")
         or cfg.get("agent", {}).get("strategy", "react"),
