@@ -260,8 +260,9 @@ class Specialist:
                     failed = (f"planned call {name} failed: {value['error']}; plan again using the evidence, "
                               "without repeating calls whose results are already in it")
                     break
-                if value.get("status") in {"review_required", "blocked"}:
-                    # A write that needs a review first, or that the gate refused, changes what comes next.
+                if value.get("status") in {"review_required", "blocked", "awaiting_human"}:
+                    # A write that needs a review first, that the gate refused or that it handed to a person
+                    # changes what comes next: no later planned call runs on it.
                     failed = (f"planned {name} returned {value['status']}: {value.get('reason')}; plan again "
                               "using the evidence, without repeating calls whose results are already in it")
                     break

@@ -130,7 +130,8 @@ class MultiAgentWorkflow:
         self.reader, writer = for_account(reader or PostgresReader(), writer or PostgresWriter(), customer_id)
         self.ticket_state = TicketState(self.clock, rules=rules)
         self.writer = writer
-        self.tools = SupportTools(self.reader, policy or policy_from_config(cfg, rules), self.ticket_state, writer)
+        self.tools = SupportTools(self.reader, policy or policy_from_config(cfg, rules), self.ticket_state, writer,
+                                  **self._write_settings())
         policy = self.tools.policy
         if policy.strict_scope:   # e.g. a mistyped skill folder: fail now, not as empty lists mid-ticket
             for specialist, scope in self.settings[policy.scope_setting].items():
@@ -327,12 +328,23 @@ class MultiAgentWorkflow:
         self.flow.transition(state["ticket_id"], "proposed", route=proposal.route, operation=proposal.action)
         return {**update, "next": "decide"}
 
+    def _write_settings(self) -> dict[str, Any]:
+        """Extra settings for the shared tools' write gate. The fixed workflow writes through its own gateway
+        (route → decide → execute), so it needs none; the pure supervisor's specialists write through the gate."""
+        return {}
+
     def _run_specialist(self, name: str, ticket_id: str, brief: dict[str, Any], strategy: str):
-        """Build the specialist's toolbox (its reads, its policy scope and the route tool) and run it.
-        Shared with the pure-supervisor workflow so both arms' specialists are identical."""
+        """Build the specialist's toolbox (its reads, its policy scope and the route tool) and run it."""
         returns_checked: set[str] = set()
         orders_seen: list[str] = []
         route = RouteTool(self.reader, self.routing, self.clock, name, returns_checked, orders_seen)
+        reads, extra = self._specialist_tools(name, returns_checked)
+        toolbox = Toolbox(self.tools, reads, {**extra, "route": route.as_tool()})
+        return Specialist(name, toolbox, self.ctx, self.cfg, orders_seen).run(ticket_id, brief, strategy)
+
+    def _specialist_tools(self, name: str, returns_checked: set[str]) -> tuple[list[str], dict[str, Any]]:
+        """A specialist's reads and policy scope. Shared with the pure-supervisor workflow, which adds its own
+        finishing and write tools, so both designs' specialists read alike."""
         wrapped = {"policy", "get_returns_for_order"}
         reads = [tool for tool in SPECIALIST_TOOLS[name] if tool not in wrapped]
         policy = self.tools.policy
@@ -344,8 +356,7 @@ class MultiAgentWorkflow:
         extra: dict[str, Any] = {"policy": policy.scoped_tool(scope)}
         if "get_returns_for_order" in SPECIALIST_TOOLS[name]:
             extra["get_returns_for_order"] = returns_lookup_tool(self.tools, returns_checked)
-        toolbox = Toolbox(self.tools, reads, {**extra, "route": route.as_tool()})
-        return Specialist(name, toolbox, self.ctx, self.cfg, orders_seen).run(ticket_id, brief, strategy)
+        return reads, extra
 
     def _missing_record_decision(self, state: MultiAgentState, result) -> dict[str, Any] | None:
         """A record the customer named was not found and the specialist has nothing else to do: ask the
@@ -482,7 +493,8 @@ class MultiAgentWorkflow:
             ticket_id=state["ticket_id"], reason=state["handoff_reason"], customer_message=state["customer_message"],
             case=state.get("case"), proposal=state.get("proposal"), min_route=state.get("min_route"),
             evidence=state["evidence"], execution=state.get("execution"),
-            parts=[self._part_summary(part) for part in state.get("parts", [])] if len(state.get("parts", [])) > 1 else [])
+            parts=[self._part_summary(part) for part in state.get("parts", [])] if len(state.get("parts", [])) > 1 else [],
+            other_writes=state.get("other_writes"))
         if self.flow.status(state["ticket_id"]) != "awaiting_human":
             self.flow.handoff(packet)
         self._event("handoff_created", packet=packet.model_dump(mode="json"))
@@ -501,7 +513,7 @@ class MultiAgentWorkflow:
                     status=part["status"], evidence=part["evidence"], proposal=part["proposal"],
                     execution=part["execution"], min_route=part["min_route"],
                     customer_question=part["customer_question"], currency=self.routing.currency,
-                    unfound_record=part["unfound_record"])}
+                    unfound_record=part["unfound_record"], other_writes=part.get("other_writes"))}
                 for part in parts])
         else:
             outcome = customer_outcome(
@@ -509,7 +521,7 @@ class MultiAgentWorkflow:
                 execution=state.get("execution"), min_route=state.get("min_route"),
                 customer_question=state.get("customer_question"), currency=self.routing.currency,
                 redirect=bool(state.get("redirect")),
-                unfound_record=state.get("unfound_record"))
+                unfound_record=state.get("unfound_record"), other_writes=state.get("other_writes"))
         brief, issues, review = self._brief(state), None, None
         try:
             for _ in range(self.settings["max_reply_drafts"]):

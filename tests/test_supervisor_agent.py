@@ -74,6 +74,12 @@ def write(amount=20, tool="backend_write", cited=CITED, **extra):
                      items=[{"item_id": "ITM-0031-2", "quantity": 2}], cited_clauses=cited, **extra)
 
 
+def balance(amount=10):
+    """A second refund of the order's remaining balance, listing no items."""
+    return tool_call("backend_write", operation="refund", order_id=ORDER, amount=amount, reason="damaged_item",
+                     cited_clauses=CITED)
+
+
 def review(amount=50, **extra):
     return write(amount, "request_review", review_reason="The approved return arrived damaged.", **extra)
 
@@ -149,6 +155,7 @@ class SpecialistWriteTests(SupervisorBase):
         self.assertEqual(len(self.workflow.writes.writer.applied), 1)
         self.assertEqual(result["trace"].of_kind("write_review"), [])
         self.assertEqual(self.roles().count("approver"), 1)   # only the reply check
+        self.assertEqual([event["result"]["amount"] for event in result["trace"].of_kind("write_result")], [20])
 
     def test_an_approver_route_write_waits_for_the_review_the_specialist_asks_for(self):
         self.llm.push("orchestrator", ASK_REFUND, choose("reply")).push(
@@ -161,6 +168,9 @@ class SpecialistWriteTests(SupervisorBase):
         self.assertEqual([event["decision"] for event in result["trace"].of_kind("write_review")], ["approve"])
         self.assertEqual((result["ticket_status"], len(self.workflow.writes.writer.applied)), ("resolved", 1))
         self.assertNotIn("ask_approver", [event["tool"] for event in result["trace"].of_kind("supervisor_step")])
+        # The reviewer reads this ticket's part.
+        review_call = next(messages for role, messages in self.llm.calls if role == "approver")
+        self.assertIn("Refund the mug", review_call[-1]["content"])
 
     def test_a_rejected_review_blocks_the_write(self):
         self.llm.push("orchestrator", ASK_REFUND, choose("hand_off", reason="The review rejected the refund")).push(
@@ -187,6 +197,96 @@ class SpecialistWriteTests(SupervisorBase):
         result = self.run_flow()
         self.assertIn("refund is not yours to write", self.tool_results(result, "backend_write")[0]["error"])
         self.assertEqual(self.workflow.writes.writer.applied, {})
+
+
+class WritesThatRanTests(SupervisorBase):
+    """The ticket follows the writes that ran, not only what the report says."""
+
+    def reply_outcome(self):
+        return json.dumps([messages for role, messages in self.llm.calls if role == "supervisor"])
+
+    def test_a_write_counts_even_when_the_report_says_nothing_was_done(self):
+        question = tool_call("report", action="none", order_id=ORDER, route="auto", reason="Need details.",
+                             customer_question="Was the box damaged too?")
+        self.llm.push("orchestrator", ASK_REFUND, choose("ask_customer", question="Was the box damaged too?")).push(
+            "specialist", REFUNDS, write(20), question).push(
+            "supervisor", text("Refund recorded; was the box damaged?")).push("approver", verdict())
+        result = self.run_flow()
+        part = result["parts"][0]
+        self.assertEqual((part["status"], [write["amount"] for write in part["other_writes"]]),
+                         ("awaiting_customer", [20]))
+        self.assertIn("also_recorded", self.reply_outcome())   # the reply mentions the refund
+
+    def test_moving_on_keeps_a_part_whose_write_ran(self):
+        info = tool_call("report", action="none", order_id=ORDER, route="auto", reason="Refund recorded.")
+        self.llm.push("orchestrator", ASK_REFUND,
+                      choose("ask_specialist", specialist="orders_shipping", request="Where is ORD-2026-00001?"),
+                      choose("reply")).push(
+            "specialist", REFUNDS, write(20), info, INFO).push("supervisor", text("Done.")).push("approver", verdict())
+        result = self.run_flow("Refund the broken mug and tell me where ORD-2026-00001 is")
+        self.assertEqual([part["specialist"] for part in result["parts"]], ["returns_refunds", "orders_shipping"])
+        self.assertEqual([write["amount"] for write in result["parts"][0]["other_writes"]], [20])
+
+    def test_a_report_that_needs_a_person_does_not_mark_its_write_done(self):
+        self.llm.push("orchestrator", ASK_REFUND, choose("hand_off", reason="The rest needs a person")).push(
+            "specialist", REFUNDS, write(20), report(50, "human")).push(
+            "supervisor", text("A specialist will review it.")).push("approver", verdict())
+        result = self.run_flow()
+        self.assertIsNone(result["execution"])
+        self.assertEqual([write["amount"] for write in result["parts"][0]["other_writes"]], [20])
+        self.assertEqual(result["ticket_status"], "awaiting_human")
+        self.assertIn("write executed: refund 20.00", result["handoff_packet"]["actions_taken"])
+
+    def test_a_report_names_the_write_of_its_own_amount(self):
+        self.llm.push("orchestrator", ASK_REFUND, choose("reply")).push(
+            "specialist", REFUNDS, write(20), report(50), report(20)).push("supervisor", text("Done.")).push(
+            "approver", verdict())
+        result = self.run_flow()
+        errors = [item["result"].get("error") for item in result["evidence"] if item["tool"] == "report"]
+        self.assertIn("no refund of that amount", errors[0])
+        self.assertEqual((result["execution"]["amount"], result["ticket_status"]), (20, "resolved"))
+
+    def test_every_write_of_a_part_is_kept(self):
+        self.llm.push("orchestrator", ASK_REFUND, choose("reply")).push(
+            "specialist", REFUNDS, write(20), balance(10), report(20)).push("supervisor", text("Done.")).push(
+            "approver", verdict())
+        result = self.run_flow()
+        self.assertEqual(len(self.workflow.writes.writer.applied), 2)
+        self.assertEqual((result["execution"]["amount"],
+                          [write["amount"] for write in result["parts"][0]["other_writes"]]), (20, [10]))
+        self.assertIn("10.00 SGD", self.reply_outcome())
+
+    def test_a_planned_write_after_a_handoff_never_runs(self):
+        plan_calls = {"calls": [
+            {"name": "policy", "arguments": {"action": "read", "skill": "returns-and-refunds", "file": "refunds.md"}},
+            {"name": "backend_write", "arguments": {"operation": "refund", "order_id": ORDER, "amount": 150,
+                                                    "reason": "damaged_item", "cited_clauses": CITED,
+                                                    "items": [{"item_id": "ITM-0031-2", "quantity": 2}]}},
+            {"name": "backend_write", "arguments": {"operation": "refund", "order_id": ORDER, "amount": 10,
+                                                    "reason": "damaged_item", "cited_clauses": CITED}}]}
+        handed_off = {"action": "refund", "order_id": ORDER, "amount": 150, "reason_code": "damaged_item",
+                      "cited_clauses": CITED, "route": "human", "reason": "Above the refund limit."}
+        self.llm.push("orchestrator", ASK_REFUND, choose("hand_off", reason="Above the refund limit")).push(
+            "specialist", text(json.dumps(plan_calls)), text(json.dumps({"calls": []})),
+            text(json.dumps(handed_off))).push("supervisor", text("A specialist will review it.")).push(
+            "approver", verdict())
+        self.workflow = SupervisorAgentWorkflow(self.llm, self.cfg, writer=FakeWriter(), reader=reader(total=300),
+                                                policy=SkillsPolicy(skills_dir()), clock=Clock(NOW))
+        # The specialist plans; the supervisor still picks one step at a time.
+        result = self.workflow.invoke("T1", "My mug arrived broken, refund please. ORD-2026-00001",
+                                      "plan_and_execute", orchestration="react")
+        self.assertEqual(self.workflow.writes.writer.applied, {})   # the 10 SGD write never ran
+        self.assertIn("returned awaiting_human", result["trace"].of_kind("plan_rejected")[0]["reason"])
+        self.assertEqual(result["ticket_status"], "awaiting_human")
+
+    def test_re_asking_an_unfinished_specialist_is_limited(self):
+        self.llm.push("orchestrator", ASK_REFUND, ASK_REFUND, ASK_REFUND,
+                      choose("hand_off", reason="It cannot finish")).push(
+            "specialist", *[text("Thinking.")] * 4).push("supervisor", text("A specialist will review it.")).push(
+            "approver", verdict())
+        result = self.run_flow()
+        self.assertIn("already asked again 1 time(s)", result["trace"].of_kind("supervisor_refused")[-1]["reason"])
+        self.assertEqual(self.roles().count("specialist"), 4)   # two runs; the third ask was refused
 
 
 class EndToEndTests(SupervisorBase):
@@ -374,6 +474,7 @@ class DemoPageTests(unittest.TestCase):
         for heading in ("#### Supervisor · ask specialist", "#### Specialist · returns refunds (react)",
                         "#### Approver · write review: approve"):
             self.assertIn(heading, texts)
+        self.assertTrue(any(element.value.startswith("Recorded refund 32") for element in app.success))   # the write
         self.assertTrue(any("unknown tool 'execute'" in element.value for element in app.error))
         self.assertFalse(planned.exception)
         planned_texts = [element.value for element in planned.markdown]

@@ -24,7 +24,7 @@ from support_ops.gateway.ticket_state import TicketState
 from support_ops.policy.citations import unread_citations
 from support_ops.policy.facts import WRITE_OPERATIONS, BackendFacts
 
-# Takes {"proposal", "rule_engine_minimum", "evidence"}; returns a decision (approve, reject or
+# Takes {"ticket_id", "proposal", "rule_engine_minimum", "evidence"}; returns a decision (approve, reject or
 # escalate), issues and reason.
 Reviewer = Callable[[dict[str, Any]], dict[str, Any]]
 TRIGGERS = ("automatic", "agent")   # review.trigger: who starts the review of a write requiring one
@@ -127,7 +127,7 @@ class WriteGate:
         a rejection after max_rejections, goes to a human."""
         if self.reviewer is None:
             return self.ticket_state.run(ticket_id, handoff_args(args, "no reviewer for a write requiring review"))
-        verdict = self.reviewer({"proposal": args, "rule_engine_minimum": decision,
+        verdict = self.reviewer({"ticket_id": ticket_id, "proposal": args, "rule_engine_minimum": decision,
                                  "evidence": self.evidence[ticket_id]})
         if verdict["decision"] == "approve":
             return None

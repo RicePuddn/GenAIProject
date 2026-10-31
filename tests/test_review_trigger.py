@@ -39,6 +39,7 @@ class WriteGateTriggerTests(unittest.TestCase):
         tools.execute("T1", "request_review", {**REFUND, "amount": 50, "review_reason": "Damaged."})
         self.assertEqual(tools.execute("T1", "backend_write", {**REFUND, "amount": 50})["status"], "executed")
         self.assertEqual(len(self.reviews), 2)
+        self.assertEqual({review["ticket_id"] for review in self.reviews}, {"T1"})   # the reviewer knows the ticket
 
     def test_a_write_that_needs_no_review_is_said_so(self):
         tools = self.tools("agent")

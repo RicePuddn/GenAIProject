@@ -28,7 +28,8 @@ def verified_facts(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def customer_outcome(*, status: str, evidence: list[dict[str, Any]], proposal: Proposal | None,
                      execution: dict[str, Any] | None, min_route: dict[str, Any] | None,
                      customer_question: str | None, currency: str, redirect: bool = False,
-                     unfound_record: str | None = None) -> dict[str, Any]:
+                     unfound_record: str | None = None,
+                     other_writes: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     facts = verified_facts(evidence)
     names = {item["id"]: item.get("name") for fact in facts if fact["tool"] == "get_items_for_order"
              for item in fact["result"].get("items", [])}
@@ -45,6 +46,9 @@ def customer_outcome(*, status: str, evidence: list[dict[str, Any]], proposal: P
     if proposal:
         # What the specialist found, e.g. that a shipment is past its estimated date.
         outcome["specialist_finding"] = proposal.reason
+    if other_writes:
+        # Writes made besides the one the request describes (pure supervisor: a specialist writes for itself).
+        outcome["also_recorded"] = [_recorded(write, names, currency) for write in other_writes]
     if existing := (min_route or {}).get("existing_requests"):
         # Earlier returns and refunds on this order, in customer terms (no internal IDs).
         outcome["existing_requests"] = [{key: value for key, value in request.items() if key != "id" and value}
@@ -66,7 +70,21 @@ def customer_outcome(*, status: str, evidence: list[dict[str, Any]], proposal: P
     outcome["tell_customer"] = (OFF_TOPIC if redirect else
                                 _tell_customer(outcome["status"], bool(facts), executed, proposal, customer_question,
                                                bool(problems)))
+    if other_writes and not redirect:
+        outcome["tell_customer"] += (" Also say what also_recorded lists was recorded; a refund there is pending "
+                                     "to the original payment method, not paid.")
     return outcome
+
+
+def _recorded(write: dict[str, Any], names: dict[str, Any], currency: str) -> dict[str, Any]:
+    """A write that ran, in customer terms."""
+    recorded: dict[str, Any] = {"action": write.get("operation"), "order_id": write.get("order_id")}
+    if write.get("amount") is not None:
+        recorded["amount"] = f"{float(write['amount']):.2f} {currency}"
+    if write.get("items"):
+        recorded["items"] = [{"product": names.get(line["item_id"]) or "the item", "quantity": line.get("quantity", 1)}
+                             for line in write["items"]]
+    return recorded
 
 
 def _tell_customer(status: str, has_facts: bool, executed: bool, proposal: Proposal | None,

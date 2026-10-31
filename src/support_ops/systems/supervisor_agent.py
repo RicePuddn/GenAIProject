@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from decimal import Decimal
 from typing import Any, Self
 
 from langgraph.graph import END, START, StateGraph
@@ -27,12 +28,11 @@ from support_ops.agents.approver import Approver
 from support_ops.agents.models import SPECIALIST_ACTIONS, WRITE_ACTIONS, Proposal, ProposalDraft, Specialist
 from support_ops.agents.runtime import AgentContext, Budget, chat_json
 from support_ops.agents.specialist import STRATEGIES, Specialist as SpecialistAgent
-from support_ops.agents.toolbox import ExtraTool, Toolbox, returns_lookup_tool
+from support_ops.agents.toolbox import ExtraTool, Toolbox
 from support_ops.helpers.arguments import NonEmpty, ToolArguments
 from support_ops.helpers.tracing import Tracer
 from support_ops.supervisor.supervisor import SPECIALIST_GUIDE, Supervisor
-from support_ops.systems.multi_agent import HISTORY_ROLES, SPECIALIST_TOOLS, MultiAgentState, MultiAgentWorkflow
-from support_ops.systems.tools import SupportTools
+from support_ops.systems.multi_agent import HISTORY_ROLES, MultiAgentState, MultiAgentWorkflow
 
 NODES = ("guard", "supervise", "specialist", "handoff", "reply")
 # The backend_write operations each specialist may make itself, within its own actions.
@@ -135,17 +135,15 @@ class SupervisorAgentState(MultiAgentState, total=False):
     part_request: str | None                    # what the supervisor asked the current proposal's specialist
     plan: list[PlannedStep] | None              # plan_and_execute: the steps still to run; None before the first plan
     replans: int                                # plan_and_execute: plans made after the first
+    other_writes: list[dict[str, Any]]          # writes the part made besides the one its report describes
+    asked: str | None                           # the specialist asked last, for the limit on asking it again
 
 
 class SupervisorAgentWorkflow(MultiAgentWorkflow):
     def __init__(self, *args: Any, **kwargs: Any):
+        # Per ticket: the part under way, as the write reviewer reads it.
+        self._review_briefs: dict[str, dict[str, Any]] = {}
         super().__init__(*args, **kwargs)
-        # The specialists write through the single agent's write gate, with the same review settings.
-        review = self.cfg.get("review", {})
-        self.tools = SupportTools(self.reader, self.tools.policy, self.ticket_state, self.writer,
-                                  reviewer=self._review, max_rejections=review.get("max_rejections", 1),
-                                  review_trigger=review.get("trigger", "automatic"))
-        self._review_brief: dict[str, Any] = {}   # the part under way, as the write reviewer reads it
         graph = StateGraph(SupervisorAgentState)
         for name in NODES:
             graph.add_node(name, self._guarded(name, getattr(self, f"_{name}")))
@@ -177,7 +175,7 @@ class SupervisorAgentWorkflow(MultiAgentWorkflow):
             "ticket_id": ticket_id, "customer_message": customer_message, "history": history,
             "strategy": selected, "orchestration": orchestration, "case": None, "thoughts": [],
             "redirect": False, "proposal": None,
-            "min_route": None, "approval": None, "feedback": [], "reproposals": 0, "evidence": [],
+            "min_route": None, "approval": None, "reproposals": 0, "evidence": [], "other_writes": [], "asked": None,
             "execution": None, "customer_question": None, "unfound_record": None, "handoff_reason": None,
             "handoff_packet": None, "tasks": [], "part": 0, "part_start": 0, "parts": [],
             "orchestration_steps": 0, "supervisor_note": None,
@@ -208,6 +206,12 @@ class SupervisorAgentWorkflow(MultiAgentWorkflow):
         def guarded(state: SupervisorAgentState) -> dict[str, Any]:
             return run(state)
         return guarded
+
+    def _write_settings(self) -> dict[str, Any]:
+        """The specialists write through the single agent's write gate, with the same review settings."""
+        review = self.cfg.get("review", {})
+        return {"reviewer": self._review, "max_rejections": review.get("max_rejections", 1),
+                "review_trigger": review.get("trigger", "automatic")}
 
     def _start_run(self, ticket_id: str, tracer: Tracer | None = None) -> None:
         """Per-ticket tracer, budget and agents."""
@@ -367,6 +371,7 @@ class SupervisorAgentWorkflow(MultiAgentWorkflow):
             return {}
         part = {"specialist": state["proposal"].specialist, "request": state.get("part_request"),
                 "status": status, **{key: state.get(key) for key in ("proposal", "min_route", "approval", "execution")},
+                "other_writes": state.get("other_writes") or [],
                 "customer_question": customer_question, "handoff_reason": handoff_reason, "unfound_record": None,
                 "evidence": state["evidence"][state["part_start"]:]}
         return {"parts": [*state["parts"], part], "part_start": len(state["evidence"])}
@@ -394,32 +399,42 @@ class SupervisorAgentWorkflow(MultiAgentWorkflow):
                 status = "approved"
             except ValueError:
                 pass
-        # A finished part (a write made, or information approved) becomes a part of its own; an unfinished
-        # one is replaced.
-        update: dict[str, Any] = self._close_part(state, status) if self._finished(proposal, status) else {}
+        wrote = bool(state.get("execution") or state.get("other_writes"))
+        finished = self._finished(proposal, status) or wrote
+        # Asking the same specialist again before its part is finished is a re-ask, limited as the fixed
+        # workflow limits reproposals.
+        again = state.get("asked") == name and not finished
+        if again and state["reproposals"] >= self.settings["max_reproposals"]:
+            return self._refused(state, f"{name} was already asked again {state['reproposals']} time(s) without "
+                                        "finishing: hand off")
+        # A finished part (a write made, or information approved) becomes a part of its own, even one whose
+        # report needs a person: its writes ran. An unfinished one is replaced.
+        label = status if self._finished(proposal, status) else (
+            "awaiting_human" if proposal is not None and proposal.route == "human" else status)
+        update: dict[str, Any] = self._close_part(state, label) if finished else {}
         state = {**state, **update}
         if status != "triaged":
             self.flow.transition(ticket_id, "triaged", specialist=name, reason="supervisor asked a specialist")
         brief = {**self._brief(state), "your_task": args["request"]}
-        self._review_brief = brief
+        self._review_briefs[ticket_id] = brief
         result = self._run_specialist(name, ticket_id, brief, state["strategy"])
-        written = [item["result"] for item in result.evidence
-                   if item["tool"] == "backend_write" and item["result"].get("status") == "executed"]
+        execution, other_writes = self._writes_made(result)
         update = {**update, "evidence": [*state["evidence"], *result.evidence], "proposal": result.proposal,
-                  "min_route": result.min_route, "approval": None, "execution": written[-1] if written else None,
-                  "part_request": args["request"]}
+                  "min_route": result.min_route, "approval": None, "execution": execution,
+                  "other_writes": other_writes, "part_request": args["request"], "asked": name,
+                  "reproposals": state["reproposals"] + 1 if again else 0}
         writes = [{key: write.get(key) for key in ("operation", "order_id", "amount", "items", "write_id")}
-                  for write in written]
+                  for write in ([execution] if execution else []) + other_writes]
         if result.error or result.proposal is None:
             return {**update, **self._tool_result(state, {
                 "specialist": name, "error": result.error or "no report", **({"writes": writes} if writes else {})})}
         proposal = result.proposal
         self.flow.transition(ticket_id, "proposed", route=proposal.route, operation=proposal.action)
-        if proposal.action in WRITE_ACTIONS and written:
-            # The write gate allowed the write and the specialist made it; the ticket records that.
+        if writes and proposal.route != "human":
+            # What ran decides, not the report: the write gate allowed these writes and they were made.
             self.flow.transition(ticket_id, "approved", route=proposal.route, operation=proposal.action,
                                  reason="written through the write gate")
-            self.flow.transition(ticket_id, "executed", write_id=written[-1].get("write_id"))
+            self.flow.transition(ticket_id, "executed", write_ids=[write["write_id"] for write in writes])
         minimum = result.min_route or {}
         return {**update, **self._tool_result(state, {
             "specialist": name, "report": proposal.model_dump(mode="json", exclude_none=True),
@@ -427,18 +442,26 @@ class SupervisorAgentWorkflow(MultiAgentWorkflow):
             **({"writes": writes} if writes else {}),
         })}
 
+    @staticmethod
+    def _writes_made(result: Any) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+        """The writes the specialist made: the one its report describes (its execution), unless the report hands
+        the case to a person, and the others."""
+        written = [item["result"] for item in result.evidence
+                   if item["tool"] == "backend_write" and item["result"].get("status") == "executed"]
+        report = next((item["result"] for item in reversed(result.evidence)
+                       if item["tool"] == "report" and item["result"].get("status") == "recorded"), None)
+        matched_id = (report or {}).get("write_id")
+        human = result.proposal is not None and result.proposal.route == "human"
+        execution = next((write for write in written if matched_id and write.get("write_id") == matched_id
+                          and not human), None)
+        return execution, [write for write in written if write is not execution]
+
     def _run_specialist(self, name: str, ticket_id: str, brief: dict[str, Any], strategy: str):
         """The specialist in write mode: its reads and policy scope as in the fixed workflow, plus the
         write gate's tools for its own operations, and `report` in place of the route tool."""
-        returns_checked: set[str] = set()
         orders_seen: list[str] = []
-        wrapped = {"policy", "get_returns_for_order"}
-        reads = [tool for tool in SPECIALIST_TOOLS[name] if tool not in wrapped]
-        policy = self.tools.policy
-        scope = self.settings[policy.scope_setting].get(name)
-        if not policy.strict_scope and (missing := policy.check_scope(scope)):
-            self._event(f"{policy.scope_setting}_missing", specialist=name, missing=missing)
-        scoped = policy.scoped_tool(scope)
+        reads, extra = self._specialist_tools(name, set())
+        scoped = extra["policy"]
 
         def read_policy(ticket: str, args: dict[str, Any]) -> dict[str, Any]:
             # Recorded in the write gate too, which checks a write's citations and shows the reviewer the evidence.
@@ -446,9 +469,7 @@ class SupervisorAgentWorkflow(MultiAgentWorkflow):
             self.tools.gate.record(ticket, "policy", value, scoped.citable(value))
             return value
 
-        extra: dict[str, Any] = {"policy": replace(scoped, run=read_policy)}
-        if "get_returns_for_order" in SPECIALIST_TOOLS[name]:
-            extra["get_returns_for_order"] = returns_lookup_tool(self.tools, returns_checked)
+        extra["policy"] = replace(scoped, run=read_policy)
         written: list[dict[str, Any]] = []
         for tool in ("backend_write", "request_review"):
             if tool in self.tools.argument_models:
@@ -470,6 +491,7 @@ class SupervisorAgentWorkflow(MultiAgentWorkflow):
             value = self.tools.execute(ticket_id, tool, args)
             if tool == "backend_write" and value.get("status") == "executed":
                 written.append(value)
+                self._event("write_result", result=value)
             return value
 
         return ExtraTool(self.tools.argument_models[tool], description, run)
@@ -485,24 +507,28 @@ class SupervisorAgentWorkflow(MultiAgentWorkflow):
             if route == "approver":
                 raise ValueError("there is no approver route to report: a write that needs a review gets it before "
                                  "it is written. Report auto once the write is made, or human")
+            amount = args.get("amount")
             write = next((item for item in reversed(written)
-                          if item.get("operation") == action and item.get("order_id") == args.get("order_id")), None)
+                          if item.get("operation") == action and item.get("order_id") == args.get("order_id")
+                          and (amount is None or item.get("amount") is None
+                               or Decimal(str(item["amount"])) == Decimal(str(amount)))), None)
             if action in WRITE_ACTIONS and route != "human" and write is None:
-                raise ValueError(f"no {action} on {args.get('order_id')} was written in this case: make it with "
-                                 "backend_write first, or report route human")
+                raise ValueError(f"no {action} of that amount on {args.get('order_id')} was written in this case: "
+                                 "make it with backend_write first, or report route human")
             check = (write or {}).get("policy_check") or {}
             minimum = ({"route": check.get("route", route), "allowed": check.get("allowed", True),
                         "reasons": [check["reason"]] if check.get("reason") else []} if write
                        else {"route": "human" if route == "human" else "auto", "allowed": True, "reasons": []})
             proposal = Proposal.model_validate({**args, "specialist": name})
-            return {"status": "recorded", "proposal": proposal.model_dump(mode="json"), "min_route": minimum}
+            return {"status": "recorded", "proposal": proposal.model_dump(mode="json"), "min_route": minimum,
+                    "write_id": (write or {}).get("write_id")}
 
         return ExtraTool(ProposalDraft, REPORT_DESCRIPTION, run)
 
     def _review(self, request: dict[str, Any]) -> dict[str, Any]:
         """The write gate's independent review of a write on the approver route: the approver, with the single
         agent's write-review prompt, seeing the request, the rules' result and the recorded evidence."""
-        verdict = self.approver.check_proposal(self._review_brief, request["proposal"],
+        verdict = self.approver.check_proposal(self._review_briefs.get(request.get("ticket_id"), {}), request["proposal"],
                                                request["rule_engine_minimum"], request["evidence"])
         self._event("write_review", decision=verdict.decision, issues=verdict.issues)
         return verdict.model_dump(mode="json")
