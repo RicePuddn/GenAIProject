@@ -27,6 +27,11 @@ class ReadArguments(ToolArguments):
     record_id: NonEmpty
 
 
+class CustomerOrdersArguments(ToolArguments):
+    """List the signed-in customer's latest orders, newest first: order ID, date, status, total and product
+    names. Use it when the customer has not given an order number, to find the order they mean."""
+
+
 class OrderArguments(ToolArguments):
     order_id: NonEmpty
 
@@ -148,6 +153,7 @@ class SupportTools:
         self.executor = WriteExecutor(self.writer, ticket_state)
         self.argument_models: dict[str, type[ToolArguments]] = {
             "read_record": ReadArguments,
+            "get_orders_for_customer": CustomerOrdersArguments,
             "get_shipments_for_order": OrderArguments,
             "get_shipment_events_for_order": OrderArguments,
             "get_items_for_order": OrderArguments,
@@ -160,6 +166,7 @@ class SupportTools:
         }
         descriptions = {
             "read_record": ReadArguments.__doc__,
+            "get_orders_for_customer": CustomerOrdersArguments.__doc__,
             "get_shipments_for_order": "Get all shipments for an order ID, not a shipment ID.",
             "get_shipment_events_for_order": "Get chronological carrier tracking events for an order ID.",
             "get_items_for_order": "Get the items in an order ID: product name, SKU, category, quantity, "
@@ -189,6 +196,12 @@ class SupportTools:
 
     def _dispatch(self, ticket_id: str, name: str, arguments: Any) -> dict[str, Any]:
         args = self.validate(name, arguments)
+        if name == "get_orders_for_customer":
+            # Only an account-scoped reader can list orders, and only its own customer's.
+            if not hasattr(self.reader, "own_orders"):
+                raise ValueError("no customer is signed in, so their orders cannot be listed: "
+                                 "ask the customer for the order number")
+            return {"orders": self.reader.own_orders()}
         if name == "read_record":
             return self.reader.read(**args)
         if name == "get_shipments_for_order":

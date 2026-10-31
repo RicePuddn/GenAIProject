@@ -250,7 +250,8 @@ LLM cost between calls. A single call can exceed the remaining cost budget.
 
 ## Policies and write operations
 
-The current tools are `read_record`, the order lookups `get_shipments_for_order`,
+The current tools are `read_record`, `get_orders_for_customer` (the signed-in customer's
+orders, for when they give no order number; it errors when no one is signed in), the order lookups `get_shipments_for_order`,
 `get_shipment_events_for_order`, `get_items_for_order` (with product details),
 `get_payments_for_order` and `get_returns_for_order` (returns and refunds), then `policy`,
 `ticket_state`, `backend_write` and `update_ticket`.

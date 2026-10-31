@@ -67,6 +67,8 @@ class Specialist:
             "Use the read tools for account facts; read an order by its own ID and use the order lookup "
             "tools for its items, payments, returns and shipments. Before advising on a return or refund, "
             "check the order's items and any existing returns or refunds. "
+            "If the customer gave no order number, use get_orders_for_customer to find the order they mean "
+            "from its products or date; ask the customer only if it is still unclear. "
             f"{self.toolbox.policy.prompt_hint} "
             "Calculate return windows from the workflow date and the delivery date. "
             "You only propose: finish by calling the route tool once with your proposal, citing the "

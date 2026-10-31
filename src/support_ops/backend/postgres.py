@@ -97,6 +97,19 @@ class PostgresReader:
         return {"returns": returns, "refunds": self._select(
             "SELECT * FROM refunds WHERE lower(order_id) = lower(%s) ORDER BY requested_at, id", order_id)}
 
+    def orders_for_customer(self, customer_id: str) -> list[dict[str, Any]]:
+        """A customer's latest orders, newest first, each with its product names, so an agent can find the
+        order a customer means."""
+        return self._select(
+            """SELECT o.id, o.placed_at, o.status, o.total, o.currency,
+                      string_agg(p.name, ', ' ORDER BY i.id) AS items
+               FROM orders o
+               LEFT JOIN order_items i ON i.order_id = o.id LEFT JOIN products p ON p.id = i.product_id
+               WHERE o.customer_id = %s
+               GROUP BY o.id ORDER BY o.placed_at DESC, o.id LIMIT 20""",
+            customer_id,
+        )
+
     def customers(self) -> list[dict[str, Any]]:
         """The accounts a demo can sign in as, without the placeholder customer."""
         return self._select("SELECT id, first_name, last_name, email, loyalty_tier FROM customers "

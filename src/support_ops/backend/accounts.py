@@ -41,6 +41,10 @@ class AccountReader:
             visible = False
         return row if visible else {"not_found": True, "kind": kind, "id": record_id}
 
+    def own_orders(self) -> list[dict[str, Any]]:
+        """The signed-in customer's own orders."""
+        return self.reader.orders_for_customer(self.customer_id)
+
     # Lookups by order: another customer's order has nothing, as a missing order has nothing.
     def shipments_for_order(self, order_id: str) -> list[dict[str, Any]]:
         return self.reader.shipments_for_order(order_id) if self.owns_order(order_id) else []
