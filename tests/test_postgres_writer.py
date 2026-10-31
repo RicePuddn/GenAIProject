@@ -175,6 +175,15 @@ class WriterTests(unittest.TestCase):
         self.assertEqual(self.reader.read("orders", CANCELLABLE)["status"], "processing")
         self.assertEqual(self.apply("order_change", CANCELLABLE, customer_id="CUS-EVAL-001")["status"], "executed")
 
+    def test_a_customers_orders_are_theirs_only_newest_first_with_product_names(self):
+        orders = self.reader.orders_for_customer("CUS-EVAL-001")
+        ids = [row["id"] for row in orders]
+        self.assertIn(ACCEPTED, ids)
+        self.assertIn(CANCELLABLE, ids)
+        self.assertEqual([row["placed_at"] for row in orders], sorted((row["placed_at"] for row in orders), reverse=True))
+        self.assertTrue(next(row for row in orders if row["id"] == ACCEPTED)["items"])
+        self.assertNotIn(ACCEPTED, [row["id"] for row in self.reader.orders_for_customer("CUS-1001")])
+
     def test_the_customer_list_leaves_out_the_placeholder(self):
         ids = [row["id"] for row in self.reader.customers()]
         self.assertIn("CUS-EVAL-001", ids)

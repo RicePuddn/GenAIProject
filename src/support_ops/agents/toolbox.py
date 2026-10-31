@@ -13,12 +13,12 @@ from support_ops.policy.provider import ScopedPolicyTool
 from support_ops.systems.tools import SupportTools, validate_arguments
 
 ORDERS_SHIPPING_TOOLS = (
-    "read_record", "get_shipments_for_order", "get_shipment_events_for_order",
+    "read_record", "get_orders_for_customer", "get_shipments_for_order", "get_shipment_events_for_order",
     "get_items_for_order", "policy",
 )
 # Shipments are included for the delivery date the return window is counted from.
 RETURNS_REFUNDS_TOOLS = (
-    "read_record", "get_items_for_order", "get_payments_for_order", "get_returns_for_order",
+    "read_record", "get_orders_for_customer", "get_items_for_order", "get_payments_for_order", "get_returns_for_order",
     "get_shipments_for_order", "policy",
 )
 

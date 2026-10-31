@@ -211,6 +211,8 @@ class SingleAgentWorkflow:
             "Use read tools for account facts. Read the order by its own ID; use the order lookup tools "
             "with the order ID for its items, payments, returns and tracking. Before advising on a return "
             "or refund, check the order's items and any existing returns or refunds. "
+            "If the customer gave no order number, use get_orders_for_customer to find the order they mean "
+            "from its products or date; ask the customer only if it is still unclear. "
             f"{self.tools.policy.prompt_hint} "
             "Use policy check with order_id and the affected item_ids; the tool loads verified facts itself. "
             "A blocked result means correct the action or explain the policy, not automatic human escalation. "

@@ -75,6 +75,42 @@ class AccountReaderTests(unittest.TestCase):
             signed_in("CUS-Z", reader())
 
 
+class CustomerOrdersToolTests(unittest.TestCase):
+    def tools(self, backend, customer_id=None):
+        from support_ops.gateway.ticket_state import TicketState
+        from support_ops.helpers.clock import Clock
+        from support_ops.policy.skills import SkillsPolicy
+        from support_ops.systems.tools import SupportTools
+        from datetime import datetime, timezone
+
+        scoped, writer = for_account(backend, FakeWriter(), customer_id)
+        return SupportTools(scoped, SkillsPolicy(), TicketState(Clock(datetime(2026, 10, 31, tzinfo=timezone.utc))),
+                            writer)
+
+    def test_it_lists_only_the_signed_in_customers_orders_and_takes_no_customer_argument(self):
+        backend = reader()
+        backend.orders_for_customer.return_value = [{"id": MINE, "items": "Mug"}]
+        result = self.tools(backend, "CUS-A").execute("T1", "get_orders_for_customer", {})
+        self.assertEqual(result, {"orders": [{"id": MINE, "items": "Mug"}]})
+        backend.orders_for_customer.assert_called_once_with("CUS-A")
+        with self.assertRaises(ValueError):   # the model cannot name another customer
+            self.tools(backend, "CUS-A").execute("T1", "get_orders_for_customer", {"customer_id": "CUS-B"})
+
+    def test_signed_out_it_asks_for_the_order_number_instead(self):
+        backend = reader()
+        with self.assertRaisesRegex(ValueError, "no customer is signed in"):
+            self.tools(backend).execute("T1", "get_orders_for_customer", {})
+        backend.orders_for_customer.assert_not_called()
+
+    def test_both_specialists_and_the_single_agent_have_it(self):
+        from support_ops.agents.toolbox import ORDERS_SHIPPING_TOOLS, RETURNS_REFUNDS_TOOLS
+
+        self.assertIn("get_orders_for_customer", ORDERS_SHIPPING_TOOLS)
+        self.assertIn("get_orders_for_customer", RETURNS_REFUNDS_TOOLS)
+        names = [schema["function"]["name"] for schema in self.tools(reader()).schemas]
+        self.assertIn("get_orders_for_customer", names)
+
+
 class SignedInWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.cfg = load_config()
