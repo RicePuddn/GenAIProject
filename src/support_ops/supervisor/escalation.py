@@ -18,13 +18,15 @@ FIXED_REPLY_TRIGGERS = ("guard", "budget")
 def handoff_packet(*, ticket_id: str, reason: str, customer_message: str, case: Case | None,
                    proposal: Proposal | None, min_route: dict[str, Any] | None,
                    evidence: list[dict[str, Any]], execution: dict[str, Any] | None,
-                   parts: list[dict[str, Any]] | None = None) -> HandoffPacket:
+                   parts: list[dict[str, Any]] | None = None,
+                   other_writes: list[dict[str, Any]] | None = None) -> HandoffPacket:
     """Summary, actions taken, cited clauses and a recommendation for the operator. A multi-part
     ticket lists every part, so the operator sees what was already done for the others."""
     actions = [f"{item['agent']}: {item['tool']}" + (" (error)" if "error" in item["result"] else "")
                for item in evidence]
-    if execution:
-        actions.append(f"write {execution['status']}: {execution.get('operation')}")
+    for write in ([execution] if execution else []) + list(other_writes or []):
+        actions.append(f"write {write['status']}: {write.get('operation')}"
+                       + (f" {float(write['amount']):.2f}" if other_writes and write.get("amount") is not None else ""))
     if parts:
         clauses = list(dict.fromkeys(clause for part in parts for clause in
                                      ((part.get("proposal") or {}).get("cited_clauses") or [])))

@@ -1,5 +1,9 @@
 """Specialist agents: gather facts, read policy, and finish by calling `route` with a proposal.
 
+In write mode (the pure-supervisor design, S3/S4) a specialist instead makes its own writes through the
+shared write gate (`backend_write`, and `request_review` when the agent starts the review), then finishes
+by calling `report` with what it did, as the single agent writes for itself.
+
 One class serves both domains; the domain sets the toolbox and the scope in the prompt.
 The inner loop follows `agent.strategy`:
 
@@ -51,8 +55,11 @@ class SpecialistResult:
 
 class Specialist:
     def __init__(self, name: SpecialistName, toolbox: Toolbox, ctx: AgentContext, cfg: dict[str, Any],
-                 orders_seen: list[str] | None = None):
+                 orders_seen: list[str] | None = None, write_operations: tuple[str, ...] = ()):
         self.name, self.toolbox, self.ctx, self.cfg = name, toolbox, ctx, cfg
+        # Write mode: the backend_write operations this specialist may make itself, and `report` to finish.
+        self.write_operations = write_operations
+        self.finish = "report" if write_operations else "route"
         # Shared with the route tool, which checks every order looked up when a proposal names none.
         self.orders_seen = orders_seen if orders_seen is not None else []
         self.max_turns = cfg["limits"]["max_agent_steps"]
@@ -71,19 +78,33 @@ class Specialist:
             "from its products or date; ask the customer only if it is still unclear. "
             f"{self.toolbox.policy.prompt_hint} "
             "Calculate return windows from the workflow date and the delivery date. "
-            "You only propose: finish by calling the route tool once with your proposal, citing the "
-            "clause IDs or policy files you read. Choose route auto only for low-value, low-risk cases; "
-            "approver for a second check; human when an operator must decide. If the case is not what "
-            "the cited clause covers (for example a defective or used item when the clause covers unused "
-            "items), set policy_exception true or route human; never stretch a clause to fit. If only the "
-            "customer can supply a missing fact, call route with action none, route auto and customer_question. "
-            "If an order or other record the customer named is not found, ask them to confirm it the same way; "
-            "do not route it to a human. "
+            f"{self._acting_hint()} "
+            "If the case is not what the cited clause covers (for example a defective or used item when the "
+            "clause covers unused items), set policy_exception true or route human; never stretch a clause to "
+            f"fit. If only the customer can supply a missing fact, call {self.finish} with action none, route "
+            "auto and customer_question. If an order or other record the customer named is not found, ask "
+            "them to confirm it the same way; do not route it to a human. "
             "If the brief has your_task, handle only that part of the message: another specialist handles "
             "the rest, so do not propose or ask about it. "
-            "Never write to the customer yourself: the supervisor writes the reply from your proposal. "
+            "Never write to the customer yourself: the supervisor writes the reply from your "
+            f"{'report' if self.write_operations else 'proposal'}. "
             "Never invent facts, amounts or policy terms."
         )
+
+    def _acting_hint(self) -> str:
+        if not self.write_operations:
+            return ("You only propose: finish by calling the route tool once with your proposal, citing the "
+                    "clause IDs or policy files you read. Choose route auto only for low-value, low-risk cases; "
+                    "approver for a second check; human when an operator must decide.")
+        review = ("If it returns review_required, call request_review with the same write and a review_reason, "
+                  "then make the write once approved." if "request_review" in self.toolbox.names else
+                  "If it returns review_required, retry with a review_reason; an independent reviewer checks it.")
+        return (f"You act on your own cases: when the facts and policy support a write, make it with backend_write "
+                f"(operation {' or '.join(self.write_operations)}), citing the clause IDs or policy files you "
+                f"read; the tool checks the rules on the recorded facts first. {review} If it is blocked, correct "
+                "it or explain why; if it hands the case off, report route human. Then finish by calling report "
+                "once with what you did or found: the action and order, amount and items of any write, the "
+                "clauses you cited, route auto when it is done or answered, human when an operator must decide.")
 
     def run(self, ticket_id: str, brief: dict[str, Any], strategy: str) -> SpecialistResult:
         if strategy not in STRATEGIES:
@@ -109,7 +130,7 @@ class Specialist:
                  result: SpecialistResult) -> dict[str, Any]:
         self.ctx.budget.check()
         seen = sorted(set(result.orders_seen))
-        unnamed = name == "route" and isinstance(arguments, dict) and not arguments.get("order_id")
+        unnamed = name == self.finish and isinstance(arguments, dict) and not arguments.get("order_id")
         if unnamed and len(seen) == 1:
             # The case is about the one order the specialist looked up, so the rule engine checks that
             # order (e.g. for a late shipment) even when an information-only proposal leaves it out.
@@ -121,7 +142,7 @@ class Specialist:
         attempts = self.ctx.retries.tool_errors + 1
         for attempt in range(1, attempts + 1):
             try:
-                if name == "route":
+                if name == self.finish:
                     self._check_citations(arguments, result)
                 value = self.toolbox.execute(ticket_id, name, arguments)
             except (ValueError, FileNotFoundError) as exc:
@@ -141,12 +162,12 @@ class Specialist:
         result.evidence.append({"tool": name, "agent": self.name, "result": value})
         if name == "policy" and "error" not in value:
             result.citable |= getattr(self.toolbox.policy, "citable", lambda _: set())(value)
-        if name != "route" and "error" not in value and isinstance(arguments, dict):
+        if name != self.finish and "error" not in value and isinstance(arguments, dict):
             order_id = arguments.get("order_id") or (
                 arguments.get("record_id") if arguments.get("kind") == "orders" else None)
             if order_id:
                 result.orders_seen.append(order_id)
-        if name == "route" and value.get("status") == "recorded":
+        if name == self.finish and value.get("status") == "recorded":
             result.proposal = Proposal.model_validate(value["proposal"])
             result.min_route = value["min_route"]
         return value
@@ -180,7 +201,7 @@ class Specialist:
                     return
                 nudged = True
                 messages += [{"role": "assistant", "content": reply.content or ""},
-                             {"role": "user", "content": "Finish by calling the route tool with your proposal."}]
+                             {"role": "user", "content": f"Finish by calling the {self.finish} tool."}]
                 continue
             chosen = reply.tool_calls[0]
             if len(reply.tool_calls) > 1:
@@ -208,18 +229,19 @@ class Specialist:
     # ------------------------------------------------------------- plan and execute
 
     def _plan_and_execute(self, ticket_id: str, brief: dict[str, Any], result: SpecialistResult) -> None:
-        reads = [schema for schema in self.toolbox.schemas if schema["function"]["name"] != "route"]
+        reads = [schema for schema in self.toolbox.schemas if schema["function"]["name"] != self.finish]
         policy_context = self.toolbox.policy.planner_context()
         previous_error: str | None = None
         for attempt in range(self.max_replans + 1):
             self.ctx.budget.check()
             reply = self.ctx.chat("specialist", [
                 {"role": "system", "content": self.system_prompt() +
-                 ' First plan the read and policy calls you need, in order. Return JSON only as '
+                 f' First plan the {"read, policy and write" if self.write_operations else "read and policy"} '
+                 'calls you need, in order. Return JSON only as '
                  '{"calls":[{"name":"EXACT_TOOL_NAME","arguments":{}}]}. Use only these tool schemas: '
                  + json.dumps(reads) + ". " + (policy_context + ". " if policy_context else "") +
-                 "Use literal known IDs; never invent results of earlier calls. Do not include route; "
-                 "you will write the proposal after the calls run. Correct any previous error using the evidence."},
+                 f"Use literal known IDs; never invent results of earlier calls. Do not include {self.finish}; "
+                 "you will write it after the calls run. Correct any previous error using the evidence."},
                 {"role": "user", "content": json.dumps({
                     **brief, "evidence": result.evidence, "previous_error": previous_error}, default=str)},
             ], json_mode=True)
@@ -240,6 +262,12 @@ class Specialist:
                     failed = (f"planned call {name} failed: {value['error']}; plan again using the evidence, "
                               "without repeating calls whose results are already in it")
                     break
+                if value.get("status") in {"review_required", "blocked", "awaiting_human"}:
+                    # A write that needs a review first, that the gate refused or that it handed to a person
+                    # changes what comes next: no later planned call runs on it.
+                    failed = (f"planned {name} returned {value['status']}: {value.get('reason')}; plan again "
+                              "using the evidence, without repeating calls whose results are already in it")
+                    break
             if failed:
                 previous_error = failed
                 self.ctx.log("plan_rejected", reason=previous_error, replan=attempt + 1)
@@ -248,9 +276,10 @@ class Specialist:
             try:
                 draft = chat_json(self.ctx, "specialist", [
                     {"role": "system", "content": self.system_prompt() +
-                     " The planned calls have run. Write your proposal as one JSON object whose top-level "
-                     "fields are exactly the route tool's arguments (no analysis or other fields): "
-                     + json.dumps(self.toolbox.argument_models["route"].model_json_schema())},
+                     " The planned calls have run. Write your " + ("report" if self.write_operations else "proposal")
+                     + f" as one JSON object whose top-level fields are exactly the {self.finish} tool's "
+                     "arguments (no analysis or other fields): "
+                     + json.dumps(self.toolbox.argument_models[self.finish].model_json_schema())},
                     {"role": "user", "content": json.dumps({
                         **brief, "evidence": result.evidence, "previous_error": previous_error}, default=str)},
                 ], ProposalDraft)
@@ -258,7 +287,7 @@ class Specialist:
                 previous_error = str(exc)
                 self.ctx.log("plan_rejected", reason=previous_error, replan=attempt + 1)
                 continue
-            value = self._execute(ticket_id, self.ctx.next_call_id(), "route",
+            value = self._execute(ticket_id, self.ctx.next_call_id(), self.finish,
                                   draft.model_dump(mode="json", exclude_defaults=True), result)
             if result.proposal is not None or result.error:
                 return
@@ -277,8 +306,8 @@ class Specialist:
         for call in plan["calls"]:
             if not isinstance(call, dict) or set(call) != {"name", "arguments"}:
                 raise ValueError("each call requires exactly name and arguments")
-            if call["name"] == "route":
-                # The proposal is written after the plan runs, so a planned route call is dropped rather
+            if call["name"] == self.finish:
+                # The proposal is written after the plan runs, so a planned finishing call is dropped rather
                 # than costing a replan.
                 self.ctx.log("plan_route_dropped", agent=self.name)
                 continue

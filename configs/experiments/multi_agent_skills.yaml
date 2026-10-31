@@ -9,6 +9,9 @@ extends: base.yaml
 system: multi_agent
 policy:
   mode: skills
+review:
+  trigger: agent               # design supervisor (S3/S4): specialists ask for a write's review themselves;
+                               # the fixed workflow (S7/S8) has its own decide step and ignores it
 multi_agent:
   design: workflow              # workflow: fixed steps; supervisor: the supervisor chooses every step
   orchestration: null           # react: pick each part after seeing the last; plan_and_execute: plan all parts first
