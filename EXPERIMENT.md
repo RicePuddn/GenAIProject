@@ -73,7 +73,7 @@ Config files are named by setup and variant: `s1-a.yaml`, `s3-c.yaml`, and so on
 | Business rules | One rules engine, reading `src/support_ops/policy/rules/rules.json` |
 | Write path | One write gate (`gateway/write_gate.py`): rule check → cited clauses must be ones retrieved in this ticket → independent approver review when required. Agentic setups reach it through the `backend_write` tool; graph setups call it as a node |
 | Write review and reply check | Same approver prompts and limits (`review.max_rejections: 1`, `review.max_reply_drafts: 2`) |
-| Reply | Same reply prompt and the same wording checks (no "refunded" claims, no internal IDs) |
+| Reply | Same reply prompt and the same wording checks |
 | Ticket save | Saved in code at the end of every turn, the same way in every setup |
 | Budgets | 40 tool calls, 12 agent steps and US$0.05 per ticket |
 | Clock | Fixed at `run.clock_start` (2026-10-01 09:00 +08:00) |
@@ -222,10 +222,3 @@ These make setups differ in ways other than the factor being tested.
 
 19. **No `.gitattributes`.** On Windows, `core.autocrlf` rewrites the policy PDFs and breaks the rules fingerprint
     check. Add `*.pdf binary`.
-20. **The Pinecone index lives in one teammate's account.** All four RAG setups (S1, S3, S5, S7) depend on it, and S1
-    has never run live in RAG mode. Give everyone access, or document how to rebuild the index.
-21. **The tests are tied to internals.** About 5,300 lines of tests target current class internals, so the restructure
-    will break many of them. Before moving code, keep a small set of behaviour tests (message in → expected outcome and
-    writes) as the safety net, and rewrite the rest as the code moves.
-22. **The README describes mechanics, not the study.** It is 348 lines, mostly about streaming, history trimming and
-    single-agent details. Cut it to setup and run instructions plus a link to this file.
