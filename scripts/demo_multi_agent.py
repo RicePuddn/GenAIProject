@@ -22,7 +22,7 @@ import streamlit as st
 
 API = os.environ.get("SUPPORT_OPS_MULTI_API", "http://127.0.0.1:8001").rstrip("/")
 STRATEGIES = ["react", "plan_and_execute"]
-DESIGNS = {"workflow": "Fixed workflow", "supervisor": "Pure supervisor"}
+DESIGNS = {"supervisor": "Pure supervisor", "workflow": "Fixed workflow"}   # S3/S4 first; S7/S8 the fixed one
 STATUS_LABELS = {
     "resolved": ("success", "Resolved"),
     "awaiting_customer": ("info", "Waiting for the customer"),
@@ -307,7 +307,7 @@ with st.sidebar:
                                help="The agent sees and changes only this customer's orders, and the "
                                     "ticket is saved as theirs. Signed out, nothing is scoped.")
     default = info.get("default_strategy", "react")
-    default_design = info.get("default_design", "workflow")
+    default_design = info.get("default_design", "supervisor")
     design = st.radio("Multi-agent design", list(DESIGNS), format_func=DESIGNS.get,
                       index=list(DESIGNS).index(default_design) if default_design in DESIGNS else 0,
                       help="Fixed workflow: code runs triage → specialist → decide → execute. Pure supervisor: "

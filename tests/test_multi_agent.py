@@ -929,6 +929,8 @@ class ApiTests(Base):
         days_before_now_relative_to_NOW = 2 - (datetime.now(timezone.utc) - NOW).days
         workflow = partial(MultiAgentWorkflow, writer=FakeWriter(), reader=reader(delivered_days_ago=days_before_now_relative_to_NOW),
                            policy=rag_policy())
+        # These test the fixed workflow (S7/S8); the configs default to the pure supervisor (S3/S4).
+        self.cfg["multi_agent"]["design"] = "workflow"
         with patch("support_ops.api_multi._runtime", return_value=(self.cfg, self.llm)), \
              patch("support_ops.api_multi.MultiAgentWorkflow", workflow):
             return TestClient(app).post(path, json=body)
@@ -975,6 +977,7 @@ class ApiTests(Base):
             "approver", slow(verdict()))
         days = 2 - (datetime.now(timezone.utc) - NOW).days
         workflow = partial(MultiAgentWorkflow, writer=FakeWriter(), reader=reader(delivered_days_ago=days), policy=rag_policy())
+        self.cfg["multi_agent"]["design"] = "workflow"   # the fixed workflow (S7/S8)
         with patch("support_ops.api_multi._runtime", return_value=(self.cfg, self.llm)), \
              patch("support_ops.api_multi.MultiAgentWorkflow", workflow), \
              patch("support_ops.api_multi._run_chat", run_chat):

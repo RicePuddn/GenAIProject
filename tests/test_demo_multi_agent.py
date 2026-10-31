@@ -100,6 +100,9 @@ class DemoMultiAgentTests(unittest.TestCase):
         with patch("urllib.request.urlopen", fake):
             app = AppTest.from_file(str(ROOT / "scripts/demo_multi_agent.py"), default_timeout=30).run()
             self.assertIn("rag", app.sidebar.markdown[0].value)
+            design = next(radio for radio in app.sidebar.radio if radio.label == "Multi-agent design")
+            self.assertEqual((design.options[0], design.value), ("Pure supervisor", "supervisor"))   # S3/S4 by default
+            design.set_value("workflow").run()   # this test follows the fixed workflow (S7/S8)
             strategy = next(radio for radio in app.sidebar.radio if radio.label == "Supervisor strategy")
             strategy.set_value("plan_and_execute").run()
             strategy.set_value("react").run()
