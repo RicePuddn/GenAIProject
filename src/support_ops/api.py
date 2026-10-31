@@ -16,6 +16,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from support_ops.backend.postgres import PostgresReader
 from support_ops.helpers.cancellation import CancellationToken, WorkflowCancelled
 from support_ops.helpers.clock import Clock
 from support_ops.helpers.config import load_config
@@ -43,6 +44,9 @@ class ChatRequest(BaseModel):
     customer_message: str = Field(min_length=1, max_length=20_000)
     ticket_id: str | None = Field(default=None, min_length=1, max_length=100)
     strategy: Literal["react", "plan_and_execute"] | None = None
+    # The signed-in account: reads and writes are scoped to it, and the ticket is saved as theirs.
+    # Without one, nothing is scoped and the ticket is saved under the placeholder customer.
+    customer_id: str | None = Field(default=None, min_length=1, max_length=100)
     # Stateless: the client sends the earlier turns of the ticket; the server keeps nothing.
     history: list[Turn] = Field(default_factory=list, max_length=MAX_HISTORY_TURNS)
 
@@ -50,6 +54,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     ticket_id: str
     strategy: str
+    customer_id: str | None = None
     reply: str
     ticket_status: str
     handoff_packet: dict[str, Any] | None = None
@@ -106,15 +111,32 @@ def info() -> dict[str, Any]:
     }
 
 
+@app.get("/customers")
+def customers() -> list[dict[str, Any]]:
+    """The accounts a client can sign in as (the demo page's account picker)."""
+    try:
+        return PostgresReader().customers()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def signed_in(customer_id: str | None, reader: PostgresReader | None = None) -> str | None:
+    """The request's account, once it is known to exist; None when no one is signed in."""
+    if customer_id and (reader or PostgresReader()).read("customers", customer_id).get("not_found"):
+        raise ValueError(f"unknown customer account {customer_id}")
+    return customer_id
+
+
 def _run_chat(request: ChatRequest, tracer: Tracer,
               cancellation: CancellationToken | None = None) -> ChatResponse:
     """One turn of the workflow; shared by /chat and /chat/stream."""
     cancellation = cancellation or CancellationToken()
     cancellation.check()
+    customer_id = signed_in(request.customer_id)  
     cfg, llm = _runtime()
     # Keep mutable workflow state and its per-ticket tracer isolated per request.
     workflow = SingleAgentWorkflow(llm, cfg, clock=Clock(datetime.now(timezone.utc)),
-                                   cancellation=cancellation)
+                                   cancellation=cancellation, customer_id=customer_id)
     history = [turn.model_dump() for turn in request.history]
     result = workflow.invoke(tracer.ticket_id, request.customer_message, strategy=request.strategy,
                              tracer=tracer, history=history)
@@ -123,6 +145,7 @@ def _run_chat(request: ChatRequest, tracer: Tracer,
     return ChatResponse(
         ticket_id=tracer.ticket_id,
         strategy=result["strategy"],
+        customer_id=request.customer_id,
         reply=reply,
         ticket_status=result.get("ticket_status", "open"),
         handoff_packet=result.get("handoff_packet"),

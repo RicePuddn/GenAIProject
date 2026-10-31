@@ -20,8 +20,8 @@ RECORD_KINDS = (
     "returns", "refunds", "support_tickets",
 )
 
-# The `support_tickets.category` values, plus other. The customer on every agent ticket until login exists:
-# naming an order does not prove who is chatting.
+# The `support_tickets.category` values, plus other. UNKNOWN_CUSTOMER is the customer on a ticket when no
+# account is signed in: naming an order does not prove who is chatting.
 TicketCategory = Literal["delivery", "returns", "refund", "payment", "order_change", "cancellation", "product",
                          "account", "other"]
 TicketStatus = Literal["in_progress", "resolved", "awaiting_customer", "awaiting_human"]
@@ -97,6 +97,11 @@ class PostgresReader:
         return {"returns": returns, "refunds": self._select(
             "SELECT * FROM refunds WHERE lower(order_id) = lower(%s) ORDER BY requested_at, id", order_id)}
 
+    def customers(self) -> list[dict[str, Any]]:
+        """The accounts a demo can sign in as, without the placeholder customer."""
+        return self._select("SELECT id, first_name, last_name, email, loyalty_tier FROM customers "
+                            "WHERE id <> %s ORDER BY id", UNKNOWN_CUSTOMER)
+
     def shipment_events_for_order(self, order_id: str) -> list[dict[str, Any]]:
         return self._select(
             """SELECT e.id, e.shipment_id, s.tracking_number, e.occurred_at,
@@ -111,7 +116,7 @@ class PostgresWriter:
     """Applies one approved operation in one transaction, with its idempotency record.
 
     The order row stays locked until commit, so limits are checked against the records the write will
-    change. No customer ownership check yet: when login arrives, it belongs in `apply`, after the lock.
+    change. With a signed-in customer, `apply` checks the order is theirs after taking the lock.
     """
 
     def __init__(self, dsn: str | None = None):
@@ -127,15 +132,18 @@ class PostgresWriter:
     def save_ticket(self, *, ticket_id: str, status: str, category: str, priority: str, subject: str,
                     customer_message: str, assigned_team: str | None = None, order_id: str | None = None,
                     resolution: str | None = None, handoff_packet: dict[str, Any] | None = None,
-                    at: datetime) -> dict[str, Any]:
-        """Create or update one conversation's ticket; a ticket keeps its first message and creation time.
-        An `order_id` not in the database is ignored. No caller is identified yet, so the customer is
-        always `UNKNOWN_CUSTOMER`, even when the order has an owner."""
+                    at: datetime, customer_id: str | None = None) -> dict[str, Any]:
+        """Create or update one conversation's ticket; a ticket keeps its first message, creation time and
+        customer. The ticket is the signed-in `customer_id`'s, else `UNKNOWN_CUSTOMER` (no account given:
+        naming an order does not prove who is chatting). An `order_id` not in the database, or not that
+        customer's, is ignored. Another customer's ticket is never updated: that raises WriteRefused."""
         team = assigned_team or CATEGORY_TEAMS.get(category, "order_support")
+        customer = customer_id or UNKNOWN_CUSTOMER
         with self._connect() as conn, conn.cursor() as cur:
             order = None
             if order_id:
-                cur.execute("SELECT id FROM orders WHERE lower(id) = lower(%s)", (order_id,))
+                cur.execute("SELECT id FROM orders WHERE lower(id) = lower(%s) AND (%s::text IS NULL "
+                            "OR customer_id = %s)", (order_id, customer_id, customer_id))
                 order = cur.fetchone()
             cur.execute(
                 """INSERT INTO support_tickets (id, customer_id, order_id, created_at, channel, category, priority,
@@ -149,12 +157,15 @@ class PostgresWriter:
                        resolution = COALESCE(EXCLUDED.resolution, support_tickets.resolution),
                        handoff_packet = COALESCE(EXCLUDED.handoff_packet, support_tickets.handoff_packet),
                        updated_at = EXCLUDED.updated_at
+                   WHERE support_tickets.customer_id = EXCLUDED.customer_id
                    RETURNING *""",
-                {"id": ticket_id, "customer": UNKNOWN_CUSTOMER,
+                {"id": ticket_id, "customer": customer,
                  "order": order["id"] if order else None, "at": at, "category": category, "priority": priority,
                  "status": status, "subject": subject, "message": customer_message, "resolution": resolution,
                  "team": team, "packet": Jsonb(handoff_packet) if handoff_packet else None})
-            return cur.fetchone()
+            if (row := cur.fetchone()) is None:
+                raise WriteRefused(f"ticket {ticket_id} belongs to another customer")
+            return row
 
     def replay(self, idempotency_key: str) -> dict[str, Any] | None:
         """The stored request and result of an earlier write with this key."""
@@ -163,15 +174,17 @@ class PostgresWriter:
             return cur.fetchone()
 
     def apply(self, request: dict[str, Any], *, idempotency_key: str, reason: str, at: datetime,
-              payment_id: str | None = None, return_id: str | None = None) -> dict[str, Any]:
-        """Run `request` (ticket_id, operation, order_id, amount, items). Raises WriteRefused."""
+              payment_id: str | None = None, return_id: str | None = None,
+              customer_id: str | None = None) -> dict[str, Any]:
+        """Run `request` (ticket_id, operation, order_id, amount, items). Raises WriteRefused. With a
+        signed-in `customer_id`, another customer's order is refused as not found."""
         operation = request["operation"]
         if operation not in RECORD_PREFIXES:
             raise WriteRefused(f"unsupported write operation: {operation}")
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute("SELECT * FROM orders WHERE lower(id) = lower(%s) FOR UPDATE", (request["order_id"],))
             order = cur.fetchone()
-            if order is None:
+            if order is None or (customer_id and order["customer_id"] != customer_id):
                 raise WriteRefused(f"order {request['order_id']} not found")
             # A concurrent retry waited on the lock above, so it is caught here.
             cur.execute("SELECT result FROM backend_writes WHERE idempotency_key = %s", (idempotency_key,))

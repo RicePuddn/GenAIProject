@@ -329,6 +329,8 @@ class DemoPageTests(unittest.TestCase):
                     client = TestClient(api)
                     if request.full_url.endswith("/info"):
                         return io.BytesIO(client.get("/info").content)
+                    if request.full_url.endswith("/customers"):   # the account picker: signed out
+                        return io.BytesIO(b"[]")
                     payload = json.loads(request.data)
                     self.chat_payloads.append(payload)
                     refund = {"operation": "refund", "order_id": ORDER, "amount": 32, "reason": "damaged_item",
