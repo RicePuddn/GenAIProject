@@ -83,6 +83,12 @@ CREATE TABLE IF NOT EXISTS support_tickets (
   status TEXT NOT NULL, subject TEXT NOT NULL, customer_message TEXT NOT NULL,
   resolution TEXT, assigned_team TEXT NOT NULL
 );
+-- One row per applied agent write; its key turns a retried write into a replay.
+CREATE TABLE IF NOT EXISTS backend_writes (
+  idempotency_key TEXT PRIMARY KEY, ticket_id TEXT NOT NULL, operation TEXT NOT NULL,
+  order_id TEXT NOT NULL REFERENCES orders(id), request JSONB NOT NULL, result JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL
+);
 CREATE INDEX IF NOT EXISTS ix_orders_customer ON orders(customer_id, placed_at DESC);
 CREATE INDEX IF NOT EXISTS ix_shipments_order ON shipments(order_id);
 CREATE INDEX IF NOT EXISTS ix_tickets_customer ON support_tickets(customer_id, created_at DESC);

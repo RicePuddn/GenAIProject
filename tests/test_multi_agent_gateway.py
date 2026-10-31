@@ -1,4 +1,4 @@
-"""Specialist toolboxes, the route tool, approval tokens and mock writes (multi-agent arm)."""
+"""Specialist toolboxes, the route tool, approval tokens and backend writes (multi-agent arm)."""
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
@@ -11,12 +11,13 @@ from support_ops.backend.postgres import PostgresReader
 from support_ops.gateway.approvals import TicketFlow
 from support_ops.gateway.route import RouteTool
 from support_ops.gateway.ticket_state import TicketState
-from support_ops.gateway.writes import MockWrites
+from support_ops.gateway.writes import BackendWrites
 from support_ops.helpers.clock import Clock
 from support_ops.policy.rag import RagPolicy
 from support_ops.policy.rag.policy import PolicySearchArguments
 from support_ops.policy.routing import RoutingRules
 from support_ops.systems.tools import SupportTools
+from tests.fake_writer import FakeWriter
 from tests.test_routing import REFUND
 
 NOW = datetime(2026, 10, 1, 9, tzinfo=timezone.utc)
@@ -61,16 +62,17 @@ class ToolboxTests(unittest.TestCase):
         self.backend = reader()
         self.shared = SupportTools(self.backend, RagPolicy(Mock()), TicketState(Clock(NOW)))
 
-    def test_each_specialist_sees_only_its_tools_and_never_ticket_state(self):
+    def test_each_specialist_sees_only_its_tools_and_never_a_write_tool(self):
         for names in (ORDERS_SHIPPING_TOOLS, RETURNS_REFUNDS_TOOLS):
             box = Toolbox(self.shared, names)
             self.assertEqual([schema["function"]["name"] for schema in box.schemas], list(names))
             self.assertNotIn("ticket_state", box.names)
+            self.assertNotIn("backend_write", box.names)
         box = Toolbox(self.shared, ORDERS_SHIPPING_TOOLS)
         with self.assertRaisesRegex(ValueError, "available tools: read_record"):
             box.execute("T1", "get_payments_for_order", {"order_id": ORDER})
         with self.assertRaisesRegex(ValueError, "unknown tool"):
-            box.execute("T1", "ticket_state", {"action": "write", "operation": "refund", "record_id": ORDER})
+            box.execute("T1", "backend_write", {"operation": "cancel", "order_id": ORDER, "reason": "r"})
         self.backend.payments_for_order.assert_not_called()
 
     def test_shared_tools_dispatch_and_extra_tools_get_validated_arguments(self):
@@ -272,7 +274,7 @@ class FlowTests(unittest.TestCase):
     def setUp(self):
         self.clock = Clock(NOW)
         self.flow = TicketFlow(TicketState(self.clock), self.clock)
-        self.writes = MockWrites(self.flow)
+        self.writes = BackendWrites(self.flow, FakeWriter())
         self.rules = RoutingRules.load()
 
     def propose(self, ticket="T1", **overrides):
@@ -283,7 +285,7 @@ class FlowTests(unittest.TestCase):
 
     def write(self, token, ticket="T1", amount=20, key="K1", order=ORDER):
         return self.writes.execute(ticket, token=token, operation="refund", order_id=order,
-                                   amount=amount, idempotency_key=key)
+                                   amount=amount, items=[{"item_id": "ITM-1", "quantity": 1}], idempotency_key=key)
 
     def test_auto_refund_executes_once_and_replays_on_retry(self):
         token = self.flow.approve("T1", *self.propose())["approval_token"]
@@ -292,8 +294,15 @@ class FlowTests(unittest.TestCase):
         again = self.write(token)
         self.assertTrue(again["replayed"])
         self.assertEqual(again["write_id"], first["write_id"])
-        self.assertEqual(len(self.writes.executed), 1)
+        self.assertEqual(len(self.writes.writer.applied), 1)
         self.flow.transition("T1", "resolved")
+
+    def test_token_bound_to_the_items(self):
+        token = self.flow.approve("T1", *self.propose())["approval_token"]
+        refused = self.writes.execute("T1", token=token, operation="refund", order_id=ORDER, amount=20,
+                                      items=[{"item_id": "ITM-2", "quantity": 1}], idempotency_key="K1")
+        self.assertEqual(refused["status"], "refused")
+        self.assertIn("amount or items", refused["reason"])
 
     def test_token_bound_to_ticket_order_and_amount(self):
         token = self.flow.approve("T1", *self.propose())["approval_token"]
@@ -308,7 +317,7 @@ class FlowTests(unittest.TestCase):
         self.clock.advance(301)
         self.assertIn("expired", self.write(token)["reason"])
         token = self.flow.approve("T2", *self.propose(ticket="T2"))["approval_token"]
-        self.flow.redeem(token, "T2", "refund", ORDER, 20)
+        self.flow.redeem(token, "T2", "refund", ORDER, 20, [{"item_id": "ITM-1", "quantity": 1}])
         self.assertIn("already used", self.write(token, ticket="T2", key="K2")["reason"])
 
     def test_approver_route_needs_a_pre_execution_approval(self):

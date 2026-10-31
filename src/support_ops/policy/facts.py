@@ -9,6 +9,8 @@ from support_ops.helpers.clock import Clock
 
 VOID_REFUND_STATUSES = {"failed", "cancelled", "rejected"}
 VOID_RETURN_STATUSES = {"cancelled", "rejected", "closed"}
+# Rule-engine operations (also the `backend_write` tool's) and the writer's name for each.
+WRITE_OPERATIONS = {"refund": "refund", "return_request": "return", "cancel": "order_change"}
 
 
 # The paid line amount includes its recorded discount and tax allocation.
@@ -61,6 +63,10 @@ class BackendFacts:
                 facts["inspection_or_waiver"] = False
             whole_order = selected == {item["id"] for item in items}
             facts.update(self._payment(order, affected, history.get("refunds", []), whole_order))
+            if order.get("status") == "cancelled" and whole_order and "return_id" not in facts:
+                # ODR-OrderChangeCancel-4.2: a cancelled order owes its captured balance, with no return.
+                facts.update(request_accepted=True, inspection_or_waiver=True, approved_refund_amount=(
+                    facts["captured_amount"] - facts["refunded_amount"] - facts["pending_refund_amount"]))
         return facts
 
     # Order-item states describe packing; shipment records describe label creation and handover.

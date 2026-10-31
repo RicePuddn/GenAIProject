@@ -1,8 +1,8 @@
 # Scripts
 
 `seed_backend.py` contains all hardcoded seed rows, grouped by table, and inserts them
-after creating tables from `data/backend_seed/schema.sql`. Existing rows are preserved.
-Run it after configuring
+after creating tables from `data/backend_seed/schema.sql`. Existing rows are preserved; add
+`--reset` to delete all rows first, including agent writes. Run it after configuring
 `.env` and starting the database:
 
 ```bash

@@ -36,6 +36,12 @@ The seed contains 60 background orders for the demos plus the 10 gold orders
 See the [case overview](../cases/agents/README.md) for scenarios and expected results.
 Gold cases use a fixed clock of 31 October 2026, 09:00 UTC.
 
-Agent writes remain request-local simulations; they do not update these rows.
-To check real database reads, seed an isolated database and set
-`SUPPORT_OPS_TEST_DATABASE_URL` before running `pytest tests/test_backend_models.py`.
+All four systems write to these tables, and each write is recorded in `backend_writes`: S1 and S2
+through the `backend_write` tool, S3 and S4 through the gateway. To go back to the seed rows, which deletes everything else:
+
+```bash
+.venv/bin/python scripts/seed_backend.py --reset
+```
+
+To test real database reads and writes, seed an isolated database and set
+`SUPPORT_OPS_TEST_DATABASE_URL` before running `pytest`. The write tests delete all rows in that database.

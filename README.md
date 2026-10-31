@@ -184,7 +184,7 @@ uv pip install --python .venv/bin/python -e ".[demo]"
 | `react` | The supervisor selects one tool, executes it, receives the result, then chooses the next step. |
 | `plan_and_execute` | The supervisor produces an ordered plan using the shared tool schemas and available policy filenames. The workflow validates the entire plan and executes its calls sequentially. Invalid plans or recoverable tool errors trigger a bounded correction using completed results. |
 
-Both strategies use the same model wrapper, tool contracts, policy files, mock approval
+Both strategies use the same model wrapper, tool contracts, policy files, write
 rule, tracing, and final response node. A successful plan executes without supervisor
 calls between its tools. Plans use known literal arguments; they cannot substitute an
 unknown result from a previous call into a later call.
@@ -235,12 +235,12 @@ Cost estimates depend on configured prices; unpriced models contribute zero.
 The workflow bounds supervisor turns, tool executions, replans, and accumulated
 LLM cost between calls. A single call can exceed the remaining cost budget.
 
-## Policies and mock operations
+## Policies and write operations
 
 The current tools are `read_record`, the order lookups `get_shipments_for_order`,
 `get_shipment_events_for_order`, `get_items_for_order` (with product details),
-`get_payments_for_order` and `get_returns_for_order` (returns and refunds), then `policy`
-and `ticket_state`.
+`get_payments_for_order` and `get_returns_for_order` (returns and refunds), then `policy`,
+`ticket_state` and `backend_write`.
 A dedicated final response node generates the customer reply through the shared LLM wrapper after operational tool work completes.
 
 RAG searches return ranked clauses and their direct references. Skills retrieval
@@ -257,11 +257,11 @@ policy provider plugged into the `policy` tool.
 
 Unsupported write operations and above-limit refunds require a human handoff.
 
-PostgreSQL tools only read data. Approval tokens, mock writes, audits, and handoff
-packets are held in memory for each request. A mock approval does not issue a
-real refund or update PostgreSQL. Tokens are opaque simulation artifacts; signed
-token validation and durable ticket state are future work. Conversation history
-travels with each request (see above), but approvals from earlier requests are not restored.
+The read tools only read data. The `backend_write` tool changes the database after checking
+the recorded facts and the rules: a refund is recorded as `pending` and no money moves, a
+return as `requested`, and a cancellation updates the order. Applied writes are kept in
+`backend_writes`; a repeated write returns the first result. Audits and handoff packets are
+held in memory for each request. Conversation history travels with each request (see above).
 Prompt Guard screens prompt attacks; it does not provide a complete abuse or
 out-of-scope classification system. This local experiment API has no customer
 authentication or order ownership checks.
@@ -296,7 +296,7 @@ src/support_ops/
   policy/rules/               grouped JSON rules and deterministic checks
   policy/skills.py            skill navigation (the skills provider)
   policy/rag/                 policy chunking, embeddings and retrieval
-  gateway/ticket_state.py     request-local approvals, audit and handoff
+  gateway/ticket_state.py     request-local audit and handoff
   systems/tools.py            shared tool schemas, validation and dispatcher
   systems/single_agent.py     LangGraph nodes and strategy routing
   eval/                       shared evaluation notebooks

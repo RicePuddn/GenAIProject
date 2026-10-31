@@ -14,12 +14,13 @@ from support_ops.api_multi import app
 from support_ops.agents.specialist import citation_forms
 from support_ops.agents.toolbox import Toolbox
 from support_ops.helpers.clock import Clock
+from tests.fake_writer import FakeWriter
 from support_ops.helpers.config import load_config
 from support_ops.helpers.llm import text, tool_call
 from support_ops.policy.skills import SkillsPolicy
 from support_ops.systems.multi_agent import MultiAgentWorkflow
 from support_ops.systems.tools import SupportTools
-from tests.test_multi_agent import NOW, Base, rag_policy, reader, route, triage, verdict
+from tests.test_multi_agent import NOW, Base, rag_policy, reader, route, decide, verdict
 
 SKILLS = {
     "orders-and-shipping": {"SKILL.md": "---\ndescription: Orders.\n---\n# Orders\n- tracking.md\n",
@@ -126,7 +127,7 @@ class SkillsBase(Base):
         self.cfg["multi_agent"]["check_citations"] = False   # as in Base; turned on where a test reads first
 
     def run_flow(self, message="My mug arrived broken, refund please. ORD-2026-00001", strategy="react", **backend):
-        self.workflow = MultiAgentWorkflow(self.llm, self.cfg, reader=reader(**backend),
+        self.workflow = MultiAgentWorkflow(self.llm, self.cfg, writer=FakeWriter(), reader=reader(**backend),
                                            policy=SkillsPolicy(skills_dir()), clock=Clock(NOW))
         return self.workflow.invoke("T1", message, strategy)
 
@@ -138,7 +139,7 @@ class SkillsWorkflowTests(SkillsBase):
 
     def test_refund_ticket_reads_skills_and_executes(self):
         self.cfg["multi_agent"]["check_citations"] = True   # it reads refunds.md before citing it
-        self.llm.push("supervisor", triage(), text("Your refund of 20 SGD is recorded.")).push(
+        self.llm.push("supervisor", decide(), text("Your refund of 20 SGD is recorded.")).push(
             "specialist", tool_call("policy", action="list"),
             tool_call("policy", action="open", skill="returns-and-refunds"),
             tool_call("policy", action="read", skill="returns-and-refunds", file="refunds.md"),
@@ -150,7 +151,7 @@ class SkillsWorkflowTests(SkillsBase):
         self.assertEqual((result["execution"]["status"], result["ticket_status"]), ("executed", "resolved"))
 
     def test_prompt_has_the_skills_scope_sentence(self):
-        self.llm.push("supervisor", triage(), text("Recorded.")).push("specialist", route()).push("approver", verdict())
+        self.llm.push("supervisor", decide(), text("Recorded.")).push("specialist", route()).push("approver", verdict())
         self.run_flow()
         self.assertIn("Your policy skills cover your own area", self.specialist_prompt())
         self.assertNotIn("Policy search", self.specialist_prompt())
@@ -159,9 +160,9 @@ class SkillsWorkflowTests(SkillsBase):
         # Comment 3 on PR #5: the returns specialist's ticket used to raise ScannerError.
         root = skills_dir()
         (root / "orders-and-shipping" / "SKILL.md").write_text("---\ndescription: bad: yaml\n---\n# Orders\n")
-        self.llm.push("supervisor", triage(), text("Recorded.")).push(
+        self.llm.push("supervisor", decide(), text("Recorded.")).push(
             "specialist", tool_call("policy", action="list"), route()).push("approver", verdict())
-        self.workflow = MultiAgentWorkflow(self.llm, self.cfg, reader=reader(), policy=SkillsPolicy(root), clock=Clock(NOW))
+        self.workflow = MultiAgentWorkflow(self.llm, self.cfg, writer=FakeWriter(), reader=reader(), policy=SkillsPolicy(root), clock=Clock(NOW))
         result = self.workflow.invoke("T1", "My mug arrived broken, refund please. ORD-2026-00001", "react")
         self.assertEqual(result["ticket_status"], "resolved")
 
@@ -174,7 +175,7 @@ class SkillsWorkflowTests(SkillsBase):
 
 class RagUnchangedTests(Base):
     def test_rag_prompt_keeps_the_s3_sentence(self):
-        self.llm.push("supervisor", triage(), text("Recorded.")).push("specialist", route()).push("approver", verdict())
+        self.llm.push("supervisor", decide(), text("Recorded.")).push("specialist", route()).push("approver", verdict())
         self.run_flow()
         prompt = next(messages[0]["content"] for role, messages in self.llm.calls if role == "specialist")
         self.assertIn("Policy search covers your own policy sections; search with scope all when the case "
@@ -222,7 +223,7 @@ class CitationTests(SkillsBase):
             "action": "read", "skill": "orders-and-shipping", "file": "tracking.md"}}]}
         own_area = {"calls": [{"name": "policy", "arguments": {
             "action": "read", "skill": "returns-and-refunds", "file": "refunds.md"}}]}
-        self.llm.push("supervisor", triage(), text("Your refund of 20 SGD is recorded.")).push(
+        self.llm.push("supervisor", decide(), text("Your refund of 20 SGD is recorded.")).push(
             "specialist", text(json.dumps(other_area)), text(json.dumps(own_area)),
             self.draft("returns-and-refunds/refunds.md")).push("approver", verdict())
         result = self.run_flow(strategy="plan_and_execute")
@@ -233,7 +234,7 @@ class CitationTests(SkillsBase):
         self.assertEqual(result["proposal"]["cited_clauses"], ["returns-and-refunds/refunds.md"])
 
     def test_citing_a_file_that_was_not_read_is_rejected(self):
-        self.llm.push("supervisor", triage(), text("Your refund of 20 SGD is recorded.")).push(
+        self.llm.push("supervisor", decide(), text("Your refund of 20 SGD is recorded.")).push(
             "specialist", tool_call("policy", action="read", skill="returns-and-refunds", file="refunds.md"),
             route(cited_clauses=["orders-and-shipping/tracking.md"]),   # never read
             route(cited_clauses=["refunds.md"])).push("approver", verdict())
@@ -243,11 +244,11 @@ class CitationTests(SkillsBase):
         self.assertEqual((result["ticket_status"], result["proposal"]["cited_clauses"]), ("resolved", ["refunds.md"]))
 
     def test_rag_citations_are_the_clause_ids_a_search_returned(self):
-        self.llm.push("supervisor", triage(), text("Your refund of 20 SGD is recorded.")).push(
+        self.llm.push("supervisor", decide(), text("Your refund of 20 SGD is recorded.")).push(
             "specialist", tool_call("policy", action="search", query="damaged item refund"),
             route(cited_clauses=["REF-9"]), route(cited_clauses=["REF-1"])).push("approver", verdict())
         self.workflow = MultiAgentWorkflow(self.llm, load_config("configs/experiments/multi_agent_rag.yaml"),
-                                           reader=reader(), policy=rag_policy(), clock=Clock(NOW))
+                                           writer=FakeWriter(), reader=reader(), policy=rag_policy(), clock=Clock(NOW))
         result = self.workflow.invoke("T1", "My mug arrived broken, refund please. ORD-2026-00001", "react")
         self.assertEqual(result["trace"].of_kind("citation_rejected")[0]["unread"], ["REF-9"])
         self.assertEqual(result["ticket_status"], "resolved")
@@ -258,7 +259,7 @@ class CitationTests(SkillsBase):
                          {"refunds.md", "returns-and-refunds/refunds.md", "RET-1"})
 
     def test_a_read_file_can_be_cited_by_case_path_or_anchor(self):
-        self.llm.push("supervisor", triage(), text("Your refund of 20 SGD is recorded.")).push(
+        self.llm.push("supervisor", decide(), text("Your refund of 20 SGD is recorded.")).push(
             "specialist", tool_call("policy", action="read", skill="returns-and-refunds", file="refunds.md"),
             route(cited_clauses=["Returns-And-Refunds/Refunds.md", "policy/skills/returns-and-refunds/refunds.md",
                                  "refunds.md#damaged-items"])).push("approver", verdict())
@@ -267,7 +268,7 @@ class CitationTests(SkillsBase):
         self.assertEqual(result["ticket_status"], "resolved")
 
     def test_the_same_file_name_in_another_skill_is_still_unread(self):
-        self.llm.push("supervisor", triage(), text("Your refund of 20 SGD is recorded.")).push(
+        self.llm.push("supervisor", decide(), text("Your refund of 20 SGD is recorded.")).push(
             "specialist", tool_call("policy", action="open", skill="returns-and-refunds"),
             route(cited_clauses=["policy/skills/orders-and-shipping/SKILL.md"]),   # opened the other SKILL.md
             route(cited_clauses=["returns-and-refunds/SKILL.md"])).push("approver", verdict())
@@ -287,7 +288,7 @@ class ScopeSettingTests(SkillsBase):
     def test_a_partial_scope_map_keeps_the_other_specialists_default(self):
         self.cfg["multi_agent"]["policy_skills"] = {"returns_refunds": ["returns-and-refunds", "orders-and-shipping"]}
         self.cfg["multi_agent"]["policy_sections"] = {"orders_shipping": ["Orders"]}
-        workflow = MultiAgentWorkflow(self.llm, self.cfg, reader=reader(), policy=SkillsPolicy(skills_dir()),
+        workflow = MultiAgentWorkflow(self.llm, self.cfg, writer=FakeWriter(), reader=reader(), policy=SkillsPolicy(skills_dir()),
                                       clock=Clock(NOW))
         self.assertEqual(workflow.settings["policy_skills"],
                          {"orders_shipping": ["orders-and-shipping"],
@@ -297,12 +298,12 @@ class ScopeSettingTests(SkillsBase):
 
     def test_an_explicit_null_scope_still_means_the_whole_policy(self):
         self.cfg["multi_agent"]["policy_skills"] = {"orders_shipping": None}
-        workflow = MultiAgentWorkflow(self.llm, self.cfg, reader=reader(), policy=SkillsPolicy(skills_dir()),
+        workflow = MultiAgentWorkflow(self.llm, self.cfg, writer=FakeWriter(), reader=reader(), policy=SkillsPolicy(skills_dir()),
                                       clock=Clock(NOW))
         self.assertIsNone(workflow.settings["policy_skills"]["orders_shipping"])
 
     def test_skills_scope_is_checked_once_at_start_not_per_ticket(self):
-        self.llm.push("supervisor", triage(), text("Recorded.")).push("specialist", route()).push("approver", verdict())
+        self.llm.push("supervisor", decide(), text("Recorded.")).push("specialist", route()).push("approver", verdict())
         with patch.object(SkillsPolicy, "check_scope", autospec=True, return_value=[]) as check_scope:
             self.run_flow()
         self.assertEqual(check_scope.call_count, len(self.workflow.settings["policy_skills"]))

@@ -25,12 +25,16 @@ STRATEGIES = ("react", "plan_and_execute")
 
 SCOPES: dict[SpecialistName, str] = {
     "orders_shipping": "questions about an order itself (its items, quantities, prices and status), "
-                       "shipment tracking, delivery delays and order changes "
-                       "(cancellation or address change: action order_change)",
+                       "shipment tracking, delivery delays and order changes (action order_change: reason_code "
+                       "cancel for a cancellation; other changes go to a human). You cannot see payments, so "
+                       "never say whether an order was paid; any refund after a cancellation is handled "
+                       "separately by the returns and refunds specialist",
     "returns_refunds": "return eligibility and return labels (action return), exchanges (action exchange), "
                        "both with items: the order item IDs and quantities coming back, from the order's "
                        "items; and refunds (action refund, with amount, reason_code and the items it is "
-                       "for; never more than was paid for them)",
+                       "for; never more than was paid for them). For a cancelled order with no return, check its payments: refund "
+                       "the captured balance less earlier and pending refunds, listing no items; if nothing "
+                       "is owed, propose action none",
 }
 
 

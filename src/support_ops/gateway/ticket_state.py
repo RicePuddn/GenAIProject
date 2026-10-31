@@ -1,12 +1,6 @@
-"""Request-local simulation of approvals, audit events and human handoffs.
-
-Tokens are opaque simulation artifacts. No production payment or database write
-is performed, and state is retained only for the lifetime of this instance.
-"""
+"""Request-local audit events and human handoffs, retained only for the lifetime of this instance."""
 from __future__ import annotations
 
-import secrets
-from datetime import timedelta
 from typing import Any
 
 from support_ops.helpers.clock import Clock
@@ -14,12 +8,10 @@ from support_ops.policy.rules import Rules
 
 
 class TicketState:
-    def __init__(self, clock: Clock, token_ttl_seconds: int = 300, rules: Rules | None = None):
+    def __init__(self, clock: Clock, rules: Rules | None = None):
         self.clock = clock
-        self.token_ttl_seconds = token_ttl_seconds
         self.rules = rules or Rules.load()
         self.audit_log: list[dict[str, Any]] = []
-        self.writes: dict[tuple[str, str, str], dict[str, Any]] = {}
         self.handoffs: list[dict[str, Any]] = []
 
     def run(self, ticket_id: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -32,41 +24,4 @@ class TicketState:
         if action == "audit":
             self.audit_log.append({**event, "event": "audit"})
             return {"status": "audited"}
-        if action != "write":
-            raise ValueError("unsupported ticket-state action")
-
-        operation, record_id = args.get("operation"), args.get("record_id")
-        if not operation or not record_id:
-            raise ValueError("write requires operation and record_id")
-        if operation not in {"refund", "return_request", "cancel"}:
-            return self.run(ticket_id, {**args, "action": "handoff", "reason": "unsupported mock write operation"})
-        decision = self.rules.check(operation, args.get("amount"), args.get("facts"))
-        if decision["requires_human"]:
-            return self.run(ticket_id, {
-                **args, "action": "handoff",
-                "reason": decision["reason"],
-            })
-        if not decision["allowed"]:
-            return {"status": "blocked", "reason": decision["reason"], "policy_check": decision}
-        if decision["route"] == "approver" and not args.get("review_reason", "").strip():
-            return {"status": "review_required", "policy_check": decision,
-                    "reason": "Review the policy and recorded facts, then supply review_reason before writing."}
-        key = (ticket_id, operation, record_id)
-        if key in self.writes:
-            previous = self.writes[key]
-            if previous["amount"] != args.get("amount"):
-                raise ValueError("conflicting amount for an existing mock write")
-            return previous
-        issued_at = self.clock.now()
-        result = {
-            "status": "approved_mock_write", "mock": True,
-            "approval_token": secrets.token_urlsafe(18), "operation": operation,
-            "record_id": record_id, "amount": args.get("amount"), "currency": self.rules.currency,
-            "policy_check": decision, "review_reason": args.get("review_reason"),
-            "payment_id": decision.get("payment_id"),
-            "issued_at": issued_at.isoformat(),
-            "expires_at": (issued_at + timedelta(seconds=self.token_ttl_seconds)).isoformat(),
-        }
-        self.writes[key] = result
-        self.audit_log.append({**event, "event": "write", "approval_token": result["approval_token"]})
-        return result
+        raise ValueError("unsupported ticket-state action")

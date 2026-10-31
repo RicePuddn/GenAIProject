@@ -7,7 +7,7 @@ uses the same database, LLM wrapper, tracing and policy tool.
 
 The core rule: **LLMs propose, deterministic code disposes.** Agents only read, propose, review
 and write text. Whether anything is executed is decided by code: a rule engine sets the minimum
-route for each proposal, approval tokens are bound to one ticket, order and amount, and the mock
+route for each proposal, approval tokens are bound to one ticket, order, amount and items, and the
 write endpoint refuses anything without a valid token.
 
 ## Run it
@@ -74,9 +74,9 @@ In a second terminal, with the API running:
 ```
 
 It opens at <http://localhost:8501>. Pick the supervisor's orchestration and the specialists' strategy in the sidebar and write as the
-customer. While the ticket runs, the page shows each step live: triage, the specialist's tool calls
+customer. While the ticket runs, the page shows each step live: the supervisor's decisions, the specialist's tool calls
 and retrieved clauses, the route decision, the approver's verdicts, the
-mock write and any handoff. Each reply has an **Outcome** tab with the proposal, the audit log and
+database write and any handoff. Each reply has an **Outcome** tab with the proposal, the audit log and
 the handoff packet. Set `SUPPORT_OPS_MULTI_API` to point the page at another API address.
 
 Messages to try (return windows count from today, so use orders delivered in the last 30 days):
@@ -87,7 +87,7 @@ Messages to try (return windows count from today, so use orders delivered in the
 | `One of the two Terra bottles in ORD-2026-00031 arrived dented. Can I get a refund for it?` | S$32 refund → approver → executed |
 | `I'd like a refund for the Flex Training Mat from ORD-2026-00045. It's unused and still in its original packaging.` | S$48 refund or return → approver → executed |
 | `My headphones from ORD-2026-00041 stopped working. I want a full refund.` | Awaiting a human, with a handoff packet |
-| `I want to speak to a human about ORD-2026-00031.` | Handed off at triage |
+| `I want to speak to a human about ORD-2026-00031.` | Handed off by the supervisor |
 
 ### 4. Tests
 
@@ -111,7 +111,7 @@ Each level has its own setting, so all four combinations can be compared:
 
 | Setting | `plan_and_execute` | `react` |
 |---|---|---|
-| **`orchestration`**, the supervisor: which specialist handles which part | Triage plans every part up front (`tasks`, one per specialist); the graph runs them in order and never asks the supervisor again | Triage only classifies; then the supervisor picks one step at a time (`orchestrate` node): delegate a part to a specialist, see how it ended, delegate the next or finish |
+| **`orchestration`**, the supervisor: which specialist handles which part | The supervisor's one decision lists every part up front (`tasks`, one per specialist); the graph runs them in order and never asks again | The supervisor decides one step at a time (`supervise` node): delegate a part to a specialist, see how it ended, delegate the next or finish |
 | **`strategy`**, the specialists: which tools to call | List all read and policy calls as JSON, run them, then propose; replan only after an invalid plan or a proposal the rules reject | One tool call per turn, each chosen after seeing the last result |
 
 Set them per request (`orchestration`, `strategy`), in the Streamlit sidebar, or in config
@@ -120,44 +120,42 @@ so the default pairs are **plan_and_execute + plan_and_execute** and **react + r
 
 | | Plan-and-execute orchestration | ReAct orchestration |
 |---|---|---|
-| Supervisor LLM calls | triage + reply | triage + one per step (each delegation, then finish) + reply |
-| Can react to a result | no: the plan is fixed at triage | yes: e.g. the order specialist finds the item damaged, so the refund specialist is called |
-| Step limit | the number of tasks (at most one per specialist) | `max_orchestration_steps` (default 4) |
-| Same specialist twice | no | yes, unless it already executed a write on the ticket (code refuses: mock writes do not reach the database, so a second refund would see the same facts) |
+| Supervisor LLM calls | one decision + reply | one per step (each delegation, then finish) + reply |
+| Can react to a result | no: the plan is fixed at the first decision | yes: e.g. the order specialist finds the item damaged, so the refund specialist is called |
+| Step limit | one decision | `max_orchestration_steps` (default 4) |
+| Same specialist twice | no | yes, unless it already executed a write on the ticket (code refuses: one ticket needs one write per specialist, so a second is more likely a repeat) |
 
 ### Decisions in code
 
-The LangGraph `StateGraph` has a fixed set of nodes (guard → triage → orchestrate → specialist → decide
-→ execute → handoff → reply). Each node returns a `next` value that a conditional edge follows, and that
+The LangGraph `StateGraph` has a fixed set of nodes (guard → supervise → specialist → decide → execute →
+handoff → reply). Each node returns a `next` value that a conditional edge follows, and that
 value is always set by Python code in the node. The LLMs shape the path only through **typed outputs that
 code reads**:
 
 | Node | LLM output | What code decides from it |
 |---|---|---|
-| `guard` | Prompt Guard 2 score per chunk | above `guard.threshold`, or unreadable → handoff; else triage |
-| `triage` | `Triage` (supervisor): intent, urgency, `tasks` (one per specialist, each with its part of the message), `wants_human`, `duplicate_of`, `off_topic`, confidence | `triage_escalation()` → handoff; off topic → reply; else the first task (plan) or `orchestrate` (react) |
-| `orchestrate` (react only) | `SupervisorStep`: delegate (specialist + request) or finish | delegate → that specialist, unless it already wrote; finish or the step limit → the strictest part decides; finishing with no part done → handoff |
+| `guard` | Prompt Guard 2 score per chunk | above `guard.threshold`, or unreadable → handoff; else supervise |
+| `supervise` | `SupervisorDecision`: `thought`, `action` (`delegate`, `handoff`, `redirect`, `finish`), `tasks`, `reason`, and on the first decision the `case` | The graph follows the action. It only refuses a delegation to a specialist that already wrote, and hands off a `finish` with no part done or a decision that stays unreadable. There is no triage code: the supervisor LLM decides who handles what and when a person is needed |
 | `specialist` | `Proposal` through the `route` tool | `RouteTool` rejects a route looser than `min_route`; then: missing record → ask or hand off; question for the customer → end the part; else decide |
 | `decide` | approver verdict (only on the `approver` route) | `human` → the part needs a human; reject → back to the specialist once; escalate or a second reject → the part needs a human; approve or `auto` → gateway token |
-| `execute` | none | the mock write checks the token; refused → the part needs a human |
-| end of a part | none | plan: another task → its specialist; react: back to `orchestrate`. At the end the strictest part decides: any human → handoff, any question → `awaiting_customer`, else resolved |
+| `execute` | none | the backend write checks the token and the database; refused → the part needs a human |
+| end of a part | none | plan: another task → its specialist; react: back to `supervise`. At the end the strictest part decides: any human → handoff, any question → `awaiting_customer`, else resolved |
 | `handoff` | none | builds the packet, ticket → `awaiting_human` |
 | `reply` | the reply draft (supervisor) and the approver's reply check | a draft failing review twice → fixed hold reply and handoff |
 
-So the supervisor LLM chooses **which specialists, for which part of the message** (all at once, or one
-step at a time), and **how the reply is worded**. Whether anything is executed, needs an approver or goes
+So the supervisor LLM **works out what the customer needs**, chooses **which specialists handle which part** (all at
+once, or one step at a time), decides **when a person or a redirect is needed**, and **words the reply**. Whether anything is executed, needs an approver or goes
 to a person comes from `src/support_ops/policy/rules/rules.json` through code. No setting lets a model skip a gate.
 
 ### One message, several specialists
 
 A message such as "Where is ORD-2026-00002? Also the bottle in ORD-2026-00031 arrived dented, refund it"
-needs both specialists. Under plan-and-execute orchestration, triage lists one **task** per specialist,
-in the order the customer raised them, each with `request`: the part of the message it handles
-(`specialist` alone still means one task for the whole message). Under ReAct orchestration the supervisor
+needs both specialists. Under plan-and-execute orchestration, the supervisor's decision lists one **task** per
+specialist, in the order the customer raised them, each with `request`: exactly what it handles. Under ReAct orchestration the supervisor
 delegates the parts one by one, each with its `request`. Either way each specialist's brief has
 `your_task`, and its prompt says to handle only that part.
 
-- **Every part goes through its own gates:** its own route check, approver, bound token and mock write.
+- **Every part goes through its own gates:** its own route check, approver, bound token and database write.
   One part's approval never covers another.
 - **A part that needs a person or the customer does not stop the others.** The tracking answer is still
   given while the refund waits for review. Between parts the ticket returns to `triaged` (audited as
@@ -177,13 +175,13 @@ delegates the parts one by one, each with its `request`. Either way each special
 | API | `api_multi.py` | FastAPI | `/chat`, `/chat/stream` (SSE, 4 workers, cancel on disconnect); stateless, history sent by the client |
 | Workflow | `systems/multi_agent.py` | LangGraph | The graph above; owns the per-ticket state, tokens and audit log |
 | Agents | Guard (`agents/guard.py`) | LLM classifier | Screens every turn of the conversation |
-| | Supervisor (`supervisor/supervisor.py`) | LLM | Triage; ReAct orchestration steps (role `orchestrator`); drafts the reply |
+| | Supervisor (`supervisor/supervisor.py`) | LLM | Works out the case, decides what happens next, drafts the reply |
 | | Specialists `orders_shipping`, `returns_refunds` (`agents/specialist.py`) | LLM + tools | Gather facts, search policy, propose through `route` |
 | | Approver (`agents/approver.py`) | LLM | Checks a proposal before execution and the reply before sending |
 | Deterministic | `supervisor/escalation.py`, `supervisor/outcome.py` | code | Handoff triggers and packet, missing-record checks; what the reply may say |
 | | `agents/toolbox.py`, `gateway/route.py` | code | Each specialist's tools; facts from the DB and the minimum route |
 | | `policy/routing.py` + `src/support_ops/policy/rules/rules.json` | code | Rule engine: auto < approver < human |
-| | `gateway/approvals.py`, `gateway/writes.py`, `gateway/ticket_state.py` | code | Ticket states, bound tokens, idempotent mock writes, audit |
+| | `gateway/approvals.py`, `gateway/writes.py`, `gateway/ticket_state.py` | code | Ticket states, bound tokens, idempotent database writes, audit |
 | | `agents/runtime.py` | code | Per-ticket context: LLM calls, budget, retries, JSON repair |
 | Data | `backend/postgres.py` | PostgreSQL | Read-only, allowlisted queries |
 | | `policy/rag/` | Pinecone RAG | Cosine or hybrid search over the fixed PDF corpus, with optional reranking |
@@ -194,14 +192,12 @@ delegates the parts one by one, each with its `request`. Either way each special
 ```mermaid
 flowchart TD
     M[Customer message + history] --> G[Guard<br/>Prompt Guard 2]
-    G -->|benign| T[Supervisor: triage]
+    G -->|benign| O{Supervisor: supervise<br/>case and next action}
     G -->|flagged / unreadable| H
-    T -->|plan: tasks, one per specialist| S[Specialist for the next part<br/>react · plan_and_execute]
-    T -->|react| O{Supervisor: orchestrate<br/>delegate or finish?}
-    O -->|delegate a part| S
+    O -->|delegate: every part in plan mode,<br/>one part in react mode| S[Specialist for the next part<br/>react · plan_and_execute]
     O -->|finish| PE
-    T -->|wants human, duplicate, no fit,<br/>low confidence, triage failed| H
-    T -->|off topic| W[Ticket → awaiting_customer]
+    O -->|handoff| H
+    O -->|redirect| W[Ticket → awaiting_customer]
     S <-->|proposal / accepted or rejected| RT[route tool<br/>DB facts → min_route]
     S -->|record not found| MR{Same ID repeated<br/>in this message?}
     MR -->|no: ask to confirm| PE
@@ -216,7 +212,7 @@ flowchart TD
     P -->|approve| A
     P -->|reject, once, with issues| S
     P -->|reject again / escalate| PE
-    A -->|write needed| X[Mock write<br/>token checked, idempotent]
+    A -->|write needed| X[Database write<br/>token checked, idempotent]
     A -->|information only| PE
     A -->|refused| PE
     X -->|executed or refused| PE
@@ -236,11 +232,12 @@ flowchart TD
 1. **Guard.** Prompt Guard 2 screens every client-sent turn (all of `history`, including alleged agent
    replies, and the new message), in 1,000-character chunks overlapping by 200, as the single agent does.
    A flagged or unreadable chunk hands the ticket off with a fixed hold reply and no further LLM calls.
-2. **Triage.** The supervisor returns a `Triage` (JSON, retried once if malformed). `triage_escalation`
-   checks it in order: a request for a person, a duplicate of an open ticket, no specialist for a support
-   request, confidence below `triage_confidence_min` → handoff. An off-topic message skips the specialist
-   and goes to the reply (`awaiting_customer`). Otherwise the first task's specialist runs (plan), or the
-   supervisor's first orchestration step (react).
+2. **Supervise.** The supervisor LLM reads the message and earlier turns and returns a `SupervisorDecision` (JSON,
+   retried once if malformed). The first decision states the `case`: the issue, intent, urgency, language and the
+   details the customer gave (order IDs, items, amounts). These are claims, so specialists verify them with tools.
+   Then `delegate` runs specialists, `handoff` goes to a person (asks for one, repeats an open ticket, nothing fits,
+   or the supervisor is unsure), and `redirect` answers an unrelated message. Under ReAct orchestration each later
+   decision also sees `parts_done` and `earlier_thoughts`, its own reasoning so far.
 3. **Specialist,** once per part (see *One message, several specialists*). It gathers facts with its own read tools, searches its policy sections, and ends by
    calling the `route` tool with a typed proposal (action, order, amount or items, cited clauses, route,
    reason). The route tool reads the facts the rules need from the database, computes the **minimum
@@ -259,9 +256,9 @@ flowchart TD
    second reject or an escalate → the part needs a human. `auto` and approved proposals reach the gateway.
 6. **Gateway and write.** `TicketFlow.approve` re-checks the route against the minimum and issues a token
    bound to the ticket, operation, order and amount (none for an information-only answer, which ends the
-   part resolved). The mock write runs only with that token, once per idempotency key; a refusal means the
+   part resolved). The database write runs only with that token, once per idempotency key; a refusal means the
    part needs a human.
-7. **End of the part.** Plan: if triage listed another task, its specialist runs next. React: the
+7. **End of the part.** Plan: if the decision listed another task, its specialist runs next. React: the
    supervisor sees how the part ended and delegates the next part or finishes. At the end the strictest
    part decides: a human → handoff; a question → `awaiting_customer` and the reply; otherwise the reply.
 8. **Handoff.** A packet (summary, actions taken, cited clauses, recommendation, proposal, rule result)
@@ -314,7 +311,7 @@ specialist then proposes `none` with route `human`. Account changes belong to ne
 human. Policy search keeps clauses from the specialist's sections plus the direct references of the clauses
 kept, wherever they sit; `scope: all` searches everything for a case that crosses sections. The
 sections come from `multi_agent.policy_sections`, matched to the stored domain or policy title, and a
-configured section missing from the corpus is logged as `policy_sections_missing`. Triage sends any
+configured section missing from the corpus is logged as `policy_sections_missing`. The supervisor sends any
 request for money back or to return an item to returns and refunds, even when the order is late.
 
 ### Routing rules
@@ -348,9 +345,9 @@ its review explanation when automated review is required.
 
 ### A message that is not about the store
 
-Triage marks a message with nothing to do with orders, shipments, items, payments, returns, refunds or
-the store's policies (weather, trivia, coding…) as `off_topic`. It skips the specialist and does not
-hand off: the reply says what the team can help with and invites a relevant question
+The supervisor answers a message with nothing to do with orders, shipments, items, payments, returns, refunds or
+the store's policies (weather, trivia, coding…) with `redirect`. No specialist runs and nobody is handed the
+ticket: the reply says what the team can help with and invites a relevant question
 (`awaiting_customer`), as the single agent's reply prompt does. A mixed message goes to the specialist
 for its support part, and the reply answers only that part. The reply prompt treats the customer's
 message and history as untrusted data.
@@ -365,7 +362,47 @@ customer confirmed order X, but it cannot be found"); a different number gets an
 the specialist re-checked the old one. IDs are compared ignoring Unicode dashes (`‑ – —`), case and
 spaces, and the agents see those dashes as `-` (a model once read `ORD‑00042` as `ORD-100042`). The
 handoff reply says the record could not be found and does not ask the customer to check it again. A
-customer who asks for a person is still handed off at triage.
+customer who asks for a person is still handed off by the supervisor.
+
+### Writes to the database
+
+S1 and S2 use the same `PostgresWriter` through the shared `backend_write` tool, which runs the rules itself
+because no gateway sits in front of it. Specialists are never given that tool.
+
+`BackendWrites` checks the ticket state and the token, then `PostgresWriter` applies the write in one
+transaction. It locks the order row, re-checks limits against the current records, writes the rows and
+records the result in `backend_writes`. The same idempotency key returns the first result. Anything the
+writer refuses, or a database error, means the part goes to a human. Without
+`SUPPORT_OPS_WRITE_DATABASE_URL`, writes use `SUPPORT_OPS_DATABASE_URL`.
+
+| Proposal | What is written |
+|---|---|
+| `refund` | A `refunds` row with status `pending`, on the order's captured payment; capped at the balance left. No money moves |
+| `return` | A `returns` row with status `requested`, plus its `return_items` |
+| `exchange` | Only a `backend_writes` record: the rules need an accepted exchange return, which is already in `returns`, and there is no exchanges table |
+| `order_change` (`reason_code: cancel`) | Order, its items and shipments set to `cancelled`, if the order is still `processing`. Other changes go to a human |
+
+A return written here has status `requested`, so any later proposal on that order goes to a human until the
+store processes it (see the routing rules).
+
+**Writes persist, so evals need a clean database.** Run `.venv/bin/python scripts/seed_backend.py --reset` before
+each trial, on a database of its own. It deletes all rows, including earlier agent writes. Record IDs come from
+the idempotency key, so a rerun of the same ticket writes the same IDs.
+
+### Cancelling a paid order
+
+Under ODR-OrderChangeCancel-4.2 a cancelled order is owed its captured balance, less anything refunded or
+pending, even if the customer does not ask. It is two writes with their own gates, not one:
+
+1. `orders_shipping` proposes the cancellation and says in its reason that a refund is owed.
+2. The supervisor sends the refund to `returns_refunds`. Under ReAct orchestration it does so after seeing the
+   cancellation in `parts_done`. Under plan-and-execute orchestration its one decision lists both tasks up front, and if the
+   cancellation did not happen, the refund's rule check does not pass.
+3. `facts.py` gives a cancelled order with no return the facts a refund needs, with the balance as the approved
+   amount, so the usual tiers apply: up to S$30 auto, up to S$100 approver, above that human.
+
+The reply says the refund is pending and never that the money is back. The supervisor can forget step 2, so
+cancellations need their own eval cases.
 
 ### Ticket states
 
@@ -382,7 +419,7 @@ recommendation, proposal, rule-engine result), when:
 
 - the guard flags any turn of the conversation, or its result is unreadable;
 - the customer asks for a person, or the message duplicates an open ticket;
-- no specialist fits, or triage confidence is below `triage_confidence_min`;
+- the supervisor decides no specialist fits or it is unsure, or its decision stays unreadable;
 - the specialist errors, or a step, tool or cost limit is reached (but see missing records above);
 - the route is `human`, or the approver rejects twice or escalates;
 - the gateway refuses the approval, or the write is refused;
@@ -399,18 +436,16 @@ any `policy.mode` other than `rag`.
 |---|---|---|
 | `agent.strategy` | `react` | Default specialist strategy |
 | `multi_agent.orchestration` | `null` | Default orchestration: `react` or `plan_and_execute`; `null` follows `agent.strategy` |
-| `multi_agent.max_orchestration_steps` | `4` | ReAct orchestration: supervisor decisions per ticket (delegations and the finish) |
-| `llm.models.orchestrator` | `openai/gpt-oss-120b` | Model for the ReAct orchestration steps (its own role, so its cost shows separately) |
+| `multi_agent.max_orchestration_steps` | `4` | Supervisor decisions per ticket (delegations and the finish) |
 | `llm.models.supervisor` / `specialist` / `approver` | `openai/gpt-oss-120b` | Model per role |
 | `llm.cache_dir` | `results/cache` | Response cache; `null` for live timings |
 | `policy.corpus_dir` | `policy/raw_policy/pdf` | Fixed PDF policy corpus |
 | `policy.rag.*` | see `base.yaml` | Retrieval stages: dense, BM25, rerank, direct reference expansion |
-| `multi_agent.triage_confidence_min` | `0.5` | Below this, hand off rather than guess |
 | `multi_agent.max_reproposals` | `1` | Approver rejections the specialist may fix |
 | `multi_agent.max_reply_drafts` | `2` | Reply drafts the approver reviews before the hold reply |
 | `multi_agent.policy_sections.<specialist>` | `Orders and shipping` / `Returns and refunds` | The corpus sections a specialist's policy search covers by default |
 | `multi_agent.retries.tool_errors` | `1` | Automatic re-runs of a tool that failed for a reason the model can't fix (database timeout, dropped connection). Argument mistakes are never re-run; they go back to the specialist. After the last attempt the ticket is handed off |
-| `multi_agent.retries.invalid_json` | `1` | Extra tries after a malformed JSON reply from triage, the ReAct orchestrator, a plan-and-execute proposal or the approver; the validation error is sent back with the retry. After the last try, triage hands off, the orchestrator settles the parts done (or hands off), the specialist replans, and the approver escalates |
+| `multi_agent.retries.invalid_json` | `1` | Extra tries after a malformed JSON reply from the supervisor, a plan-and-execute proposal or the approver; the validation error is sent back with the retry. After the last try, the supervisor settles the parts done (or hands off), the specialist replans, and the approver escalates |
 | `multi_agent.retries.backoff_s` | `0.5` | Wait before a tool re-run, times the attempt number |
 | `multi_agent.llm_by_role.<role>` | none | Per-role overrides of `llm` (e.g. `provider`, `base_url`, `api_key_env`), to run a role on another OpenAI-compatible provider. Unset: every role uses Groq |
 | `limits.max_steps_per_ticket` / `max_agent_steps` / `max_cost_usd_per_ticket` | `40` / `12` / `0.05` | Per-ticket tool, specialist-turn and cost budgets |
@@ -423,19 +458,20 @@ New for S3 (nothing in S1's files was changed for it):
 
 | Path | Purpose |
 |---|---|
-| `src/support_ops/systems/multi_agent.py` | LangGraph workflow: guard → triage → specialist → decide → execute → handoff → reply |
-| `src/support_ops/supervisor/supervisor.py` | Supervisor's LLM calls: triage and reply drafting |
-| `src/support_ops/supervisor/escalation.py` | Handoff triggers after triage, the handoff packet, the fixed hold reply, missing-record checks |
+| `src/support_ops/systems/multi_agent.py` | LangGraph workflow: guard → supervise → specialist → decide → execute → handoff → reply |
+| `src/support_ops/supervisor/supervisor.py` | Supervisor's LLM calls: deciding what happens next and drafting the reply |
+| `src/support_ops/supervisor/escalation.py` | The handoff packet, the fixed hold reply, missing-record checks |
 | `src/support_ops/supervisor/outcome.py` | What the reply may tell the customer, in customer terms |
 | `src/support_ops/agents/specialist.py` | Specialist loop with the two strategies; one class for both domains |
 | `src/support_ops/agents/approver.py` | Proposal check before execution, reply check after |
-| `src/support_ops/agents/models.py` | Typed messages: `Triage`, `ProposalDraft` / `Proposal`, `ApprovalResult`, `HandoffPacket` |
+| `src/support_ops/agents/models.py` | Typed messages: `SupervisorDecision`, `Case`, `ProposalDraft` / `Proposal`, `ApprovalResult`, `HandoffPacket` |
 | `src/support_ops/agents/toolbox.py` | Each specialist's tool subset (no write tools), a search-only `policy` tool scoped to its sections, and the `route` tool |
 | `src/support_ops/agents/guard.py` | Prompt Guard screening |
 | `src/support_ops/agents/runtime.py` | Shared per-ticket context: LLM call, trace, budget, retries |
 | `src/support_ops/gateway/route.py` | `route` tool: reads facts, computes the minimum route, rejects looser routes |
 | `src/support_ops/gateway/approvals.py` | Ticket state machine, approval tokens, handoff |
-| `src/support_ops/gateway/writes.py` | Mock write endpoint: token check, idempotency, audit |
+| `src/support_ops/gateway/writes.py` | Write endpoint: token check, idempotency, audit |
+| `src/support_ops/backend/postgres.py` | `PostgresReader` (read-only) and `PostgresWriter` (one transaction per operation) |
 | `src/support_ops/policy/routing.py` | Rule engine for minimum routes |
 | `src/support_ops/api_multi.py` | FastAPI app for S3 |
 | `scripts/demo_multi_agent.py` | Streamlit page for S3 |
@@ -461,12 +497,12 @@ Shared with S1 and reused unchanged:
 |---|---|
 | `ticket_status` | `resolved`, `awaiting_customer` or `awaiting_human` |
 | `orchestration`, `strategy` | The supervisor's and the specialists' mode for this ticket |
-| `triage` | The supervisor's classification |
+| `case` | The supervisor's reading of the message: the issue and the customer's claims, not verified facts |
 | `proposal`, `min_route` | What the specialist proposed and the rule engine's minimum, with reasons |
 | `approval`, `reply_review` | The approver's verdicts on the proposal and on the reply |
-| `execution` | The mock write result, if any |
+| `execution` | The database write result, if any |
 | `handoff_packet` | What an operator receives on a handoff (with `parts` for a multi-part ticket) |
-| `parts` | One per specialist when triage split the message: its request, how it ended, proposal, approval, execution |
+| `parts` | One per specialist when the supervisor split the message: its request, how it ended, proposal, approval, execution |
 | `evidence` | Every tool call with its result |
 | `audit_log` | Every state change, token issue and write attempt |
 | `trace` | LLM calls, tokens, cost, elapsed time and the event timeline |
@@ -487,6 +523,8 @@ Approval tokens never appear in a response or in the audit log.
   config can move the agents to another provider with `multi_agent.llm_by_role` and point the API at it
   with `SUPPORT_OPS_MULTI_CONFIG`; keep the guard on Groq, which hosts Prompt Guard 2.
 - **A provider error ends the ticket with an API error** rather than a handoff.
-- **Approval tokens are not bound to the returned items**, only to ticket, operation, order and amount.
-- **Mock writes and approvals live in memory for one request.** Nothing is written to PostgreSQL, and
-  there is no customer authentication or order-ownership check.
+- **No customer login yet.** Anyone naming an order ID can trigger a write. Login will send the customer's
+  identity with every request; S3 must then limit its reads and writes to that account, with the write
+  check in `PostgresWriter.apply`.
+- **Nothing processes `pending` refunds.** A written refund stays `pending`, and no money moves.
+- **Approvals and the audit log live in memory for one request.** Applied writes are in `backend_writes`.

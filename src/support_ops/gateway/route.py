@@ -16,7 +16,7 @@ from support_ops.agents.toolbox import ExtraTool
 from support_ops.backend.postgres import PostgresReader
 from support_ops.helpers.clock import Clock
 from support_ops.policy.routing import ROUTES, RoutingRules, at_least
-from support_ops.policy.facts import BackendFacts, goods_value
+from support_ops.policy.facts import WRITE_OPERATIONS, BackendFacts, goods_value
 
 # Refunds in these states never paid out, so they do not count against the order total.
 VOID_REFUND_STATUSES = {"failed", "cancelled", "rejected"}
@@ -99,7 +99,8 @@ class RouteTool:
         if proposal.action == "none" and not proposal.order_id and len(orders) > 1:
             return self.check_each(proposal, orders)
         facts, existing = self.order_context(proposal)
-        operation = {"return": "return_request", "order_change": "cancel"}.get(proposal.action, proposal.action)
+        operation = next((rule for rule, write in WRITE_OPERATIONS.items() if write == proposal.action),
+                         proposal.action)
         recorded = self.backend_facts.read(operation, proposal.order_id, [line.item_id for line in proposal.items],
                                           history=facts.get("history")) \
             if proposal.order_id and proposal.action != "none" else {}

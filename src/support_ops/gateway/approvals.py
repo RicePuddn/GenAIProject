@@ -9,7 +9,7 @@ from __future__ import annotations
 import secrets
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, Iterable
 
 from support_ops.agents.models import ApprovalResult, HandoffPacket, Proposal
 from support_ops.gateway.ticket_state import TicketState
@@ -32,6 +32,10 @@ TRANSITIONS: dict[str, set[str]] = {
 
 def _same_amount(a: Any, b: Any) -> bool:
     return (a is None and b is None) or (a is not None and b is not None and Decimal(str(a)) == Decimal(str(b)))
+
+
+def _lines(items: Iterable[dict[str, Any]]) -> list[tuple[str, int]]:
+    return sorted((line["item_id"], line["quantity"]) for line in items)
 
 
 class TicketFlow:
@@ -85,7 +89,9 @@ class TicketFlow:
         self.tokens[token] = {
             "ticket_id": ticket_id, "operation": proposal.action, "order_id": proposal.order_id,
             "amount": proposal.amount, "route": proposal.route, "issued_at": issued,
+            "items": _lines(line.model_dump() for line in proposal.items),
             "payment_id": minimum.get("policy_check", {}).get("payment_id"),
+            "return_id": minimum.get("policy_check", {}).get("return_id"),
             "expires_at": issued + timedelta(seconds=self.token_ttl_seconds), "used": False,
         }
         # The token itself is never written to the audit log, only what it is bound to.
@@ -95,7 +101,8 @@ class TicketFlow:
         return {"status": "approved", "approval_token": token,
                 "expires_at": self.tokens[token]["expires_at"].isoformat()}
 
-    def redeem(self, token: str, ticket_id: str, operation: str, order_id: str | None, amount: Any) -> dict[str, Any]:
+    def redeem(self, token: str, ticket_id: str, operation: str, order_id: str | None, amount: Any,
+               items: Iterable[dict[str, Any]] = ()) -> dict[str, Any]:
         """Check a token against the write it is presented with and mark it used."""
         grant = self.tokens.get(token)
         details = {"operation": operation, "order_id": order_id, "amount": amount}
@@ -104,9 +111,9 @@ class TicketFlow:
         if grant["used"]:
             self.refuse(ticket_id, "token", "approval token already used", **details)
         if (grant["ticket_id"], grant["operation"], grant["order_id"]) != (ticket_id, operation, order_id) \
-                or not _same_amount(grant["amount"], amount):
+                or not _same_amount(grant["amount"], amount) or grant["items"] != _lines(items):
             self.refuse(ticket_id, "token", "approval token is bound to a different ticket, operation, "
-                        "order or amount", **details)
+                        "order, amount or items", **details)
         now: datetime = self.clock.now()
         if now > grant["expires_at"]:
             self.refuse(ticket_id, "token", "approval token expired", **details)

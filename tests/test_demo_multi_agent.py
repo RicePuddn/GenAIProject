@@ -19,6 +19,7 @@ from support_ops.helpers.config import ROOT, load_config
 from support_ops.helpers.llm import ScriptedLLM, text, tool_call
 from support_ops.policy.rag import RagPolicy
 from support_ops.systems.multi_agent import MultiAgentWorkflow
+from tests.fake_writer import FakeWriter
 
 ORDER = "ORD-2026-00031"
 CLAUSE = {"id": "REF-1", "title": "Refund method and approval", "section": "Returns and refunds",
@@ -43,14 +44,17 @@ def reader():
 
 
 def scripted_turn(llm: ScriptedLLM, reply: str) -> None:
-    """A ticket that touches every step: triage, specialist tools, approval, the write and the reply check."""
+    """A ticket that touches every step: the supervisor, specialist tools, approval, the write and the reply check."""
     route = tool_call("route", action="refund", order_id=ORDER, amount=32, reason_code="damaged_item",
                       items=[{"item_id": "ITM-2", "quantity": 1}], cited_clauses=["REF-1"], route="approver",
                       reason="One bottle arrived dented.")
     llm.push("guard", text("0.01"), text("0.01"), text("0.01")).push(
         "supervisor",
-        text(json.dumps({"intent": "refund_request", "urgency": "normal", "language": "en",
-                         "specialist": "returns_refunds", "confidence": 0.9, "reason": "Refund."})),
+        text(json.dumps({"thought": "They want a refund for one bottle.", "action": "delegate", "reason": "Refund.",
+                         "tasks": [{"specialist": "returns_refunds", "request": "Refund the dented bottle in " + ORDER}],
+                         "case": {"issue": "Dented bottle.", "intent": "refund_request", "urgency": "normal",
+                                  "language": "en"}})),
+        text(json.dumps({"thought": "The refund is done.", "action": "finish", "reason": "Done."})),
         text(reply),
     ).push(
         "specialist",
@@ -58,11 +62,6 @@ def scripted_turn(llm: ScriptedLLM, reply: str) -> None:
         tool_call("get_items_for_order", order_id=ORDER),
         tool_call("get_returns_for_order", order_id=ORDER),
         route,
-    ).push(
-        "orchestrator",   # react: delegate the refund, see it executed, finish
-        text(json.dumps({"action": "delegate", "specialist": "returns_refunds",
-                         "request": "Refund the dented bottle in " + ORDER, "reason": "Refund asked."})),
-        text(json.dumps({"action": "finish", "reason": "The refund part is done."})),
     ).push("approver", *[text(json.dumps({"decision": "approve", "issues": [], "reason": "Within policy."}))] * 2)
 
 
@@ -73,7 +72,7 @@ class RealApi:
         self.cfg = load_config("configs/experiments/multi_agent_rag.yaml")
         self.llm, self.chat_payloads = ScriptedLLM(), []
         retriever = Mock(search=Mock(return_value=[CLAUSE]), sections=Mock(return_value=["Returns"]))
-        self.workflow = partial(MultiAgentWorkflow, reader=reader(), policy=RagPolicy(retriever))
+        self.workflow = partial(MultiAgentWorkflow, writer=FakeWriter(), reader=reader(), policy=RagPolicy(retriever))
 
     def __call__(self, request, timeout=None):
         with patch("support_ops.api_multi._runtime", return_value=(self.cfg, self.llm)), \
@@ -107,11 +106,11 @@ class DemoMultiAgentTests(unittest.TestCase):
                          ["One bottle in ORD-2026-00031 arrived dented.", "Reply 1"])
         texts = [element.value for element in app.markdown]
         self.assertIn("Reply 2", texts)
-        for heading in ("#### Supervisor · triage", "#### Specialist · returns refunds (react)",
-                        "#### Approver · proposal check", "#### Gateway · mock write", "#### Approver · reply check"):
+        for heading in ("#### Supervisor · decide", "#### Specialist · returns refunds (react)",
+                        "#### Approver · proposal check", "#### Gateway · write", "#### Approver · reply check"):
             self.assertIn(heading, texts)
         successes = [element.value for element in app.success]
-        self.assertTrue(any(value.startswith("Mock refund 32") for value in successes))
+        self.assertTrue(any(value.startswith("Recorded refund 32") for value in successes))
         self.assertIn("Resolved", successes)
 
     def test_unreachable_api_shows_an_error_instead_of_crashing(self):

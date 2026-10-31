@@ -222,7 +222,7 @@ class WorkflowWiringTests(unittest.TestCase):
         llm = ScriptedLLM().push("guard", text("0.01")).push(
             "supervisor",
             tool_call("policy", action="check", operation="refund", amount=30),
-            tool_call("ticket_state", action="write", operation="refund", record_id="O1", amount=30),
+            tool_call("backend_write", operation="refund", order_id="O1", amount=30, reason="damaged_item"),
         )
         with tempfile.TemporaryDirectory() as directory:
             self.cfg["policy"]["rules_file"] = str(write_rules(directory, "20"))

@@ -4,7 +4,7 @@ import unittest
 
 from pydantic import ValidationError
 
-from support_ops.agents.models import ApprovalResult, HandoffPacket, Proposal, Triage
+from support_ops.agents.models import ApprovalResult, FirstDecision, HandoffPacket, Proposal, SupervisorDecision
 
 REFUND = {
     "specialist": "returns_refunds", "action": "refund", "order_id": "ORD-2026-00001",
@@ -60,25 +60,23 @@ class ProposalTests(unittest.TestCase):
 
 
 class OtherModelTests(unittest.TestCase):
-    def test_triage_bounds_confidence_and_allows_no_specialist(self):
-        triage = Triage(intent="other", urgency="low", language="en", specialist=None,
-                        confidence=0.3, reason="Out of scope.")
-        self.assertIsNone(triage.specialist)
+    def test_a_decision_matches_its_action(self):
+        task = {"specialist": "orders_shipping", "request": "Where is ORD-1?"}
+        base = dict(thought="t", reason="r")
+        self.assertEqual(SupervisorDecision(**base, action="delegate", tasks=[task]).tasks[0].request, "Where is ORD-1?")
+        self.assertEqual(SupervisorDecision(**base, action="finish", tasks=[task]).tasks, [])
+        for bad in ([], [task, task]):
+            with self.subTest(bad), self.assertRaises(ValidationError):
+                SupervisorDecision(**base, action="delegate", tasks=bad)
         with self.assertRaises(ValidationError):
-            Triage(intent="x", urgency="low", language="en", specialist=None, confidence=1.5, reason="r")
+            SupervisorDecision(**base, action="delegate", tasks=[{"specialist": "orders_shipping"}])
 
-    def test_triage_tasks_follow_the_specialist(self):
-        base = dict(intent="mixed", urgency="normal", language="en", confidence=0.9, reason="r")
-        one = Triage(**base, specialist="returns_refunds")
-        self.assertEqual([(task.specialist, task.request) for task in one.tasks], [("returns_refunds", None)])
-        two = Triage(**base, specialist="returns_refunds",
-                     tasks=[{"specialist": "orders_shipping", "request": "Where is ORD-1?"},
-                            {"specialist": "returns_refunds", "request": "Refund the mug in ORD-2"}])
-        self.assertEqual(two.specialist, "orders_shipping")   # the first task leads
-        self.assertEqual(Triage(**base, specialist=None, off_topic=True,
-                                tasks=[{"specialist": "orders_shipping"}]).tasks, [])
+    def test_the_first_decision_must_state_the_case(self):
+        base = dict(thought="t", reason="r", action="redirect")
         with self.assertRaises(ValidationError):
-            Triage(**base, specialist=None, tasks=[{"specialist": "orders_shipping"}] * 2)
+            FirstDecision(**base)
+        case = {"issue": "Cancel.", "intent": "cancel", "urgency": "low", "language": "en", "order_ids": ["ORD-1"]}
+        self.assertEqual(FirstDecision(**base, case=case).case.order_ids, ["ORD-1"])
 
     def test_rejection_or_escalation_must_name_an_issue(self):
         ApprovalResult(stage="reply", decision="approve", reason="Matches the executed refund.")

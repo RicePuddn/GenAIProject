@@ -5,6 +5,7 @@ The labelled cases reference orders ORD-2026-00101 through ORD-2026-00110.
 """
 from __future__ import annotations
 
+import argparse
 import os
 
 import psycopg
@@ -1001,15 +1002,28 @@ def seed_records(cur) -> None:
 
 
 # Create missing tables from schema.sql, then insert the same records on every run.
+def seed(dsn: str, *, reset: bool = False) -> None:
+    """Create the tables and insert the seed rows; `reset` first deletes everything, including agent writes."""
+    with psycopg.connect(dsn, connect_timeout=5) as conn, conn.cursor() as cur:
+        cur.execute((ROOT / "data/backend_seed/schema.sql").read_text())
+        if reset:
+            tables = [sql.Identifier(table) for table in (*SEED_TABLES, "backend_writes")]
+            cur.execute(sql.SQL("TRUNCATE {} CASCADE").format(sql.SQL(", ").join(tables)))
+        seed_records(cur)
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--reset", action="store_true",
+                        help="delete all rows first, so agent writes from earlier runs are gone")
+    args = parser.parse_args()
     load_env()
     dsn = os.environ.get("SUPPORT_OPS_DATABASE_URL")
     if not dsn:
         raise RuntimeError("set SUPPORT_OPS_DATABASE_URL in .env (see .env.example)")
-    with psycopg.connect(dsn, connect_timeout=5) as conn, conn.cursor() as cur:
-        cur.execute((ROOT / "data/backend_seed/schema.sql").read_text())
-        seed_records(cur)
-    print("Seeded background data and 10 labelled evaluation scenarios. Existing rows were preserved.")
+    seed(dsn, reset=args.reset)
+    print("Seeded background data and 10 labelled evaluation scenarios. "
+          + ("All earlier rows were deleted." if args.reset else "Existing rows were preserved."))
 
 
 if __name__ == "__main__":

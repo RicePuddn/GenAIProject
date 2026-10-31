@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from support_ops.api import app
 from support_ops.backend.postgres import PostgresReader
 from support_ops.gateway.ticket_state import TicketState
+from tests.fake_writer import FakeWriter
 from support_ops.helpers.clock import Clock
 from support_ops.helpers.config import load_config
 from support_ops.helpers.llm import ChatResult, OpenAICompatLLM, ScriptedLLM, ToolCall, text, tool_call
@@ -261,27 +262,41 @@ class ToolTests(unittest.TestCase):
 
     def test_refund_limit_shared_and_above_limit_handoff_does_not_recurse(self):
         gateway = TicketState(self.clock)
+        writer = FakeWriter()
         self.assertFalse(Rules.load().check("refund", 100)["allowed"])
-        args = {"action": "write", "operation": "refund", "record_id": "O1", "amount": 100.01}
-        result = gateway.run("T1", args)
+        tools = SupportTools(Mock(spec=PostgresReader), SkillsPolicy(), gateway, writer)
+        result = tools.execute("T1", "backend_write", {"operation": "refund", "order_id": "O1", "amount": 100.01,
+                                                       "reason": "damaged_item"})
         self.assertEqual(result["status"], "awaiting_human")
         self.assertEqual(result["handoff_packet"]["action"], "handoff")
         self.assertEqual(len(gateway.handoffs), 1)
-        self.assertEqual(gateway.writes, {})
+        self.assertEqual(writer.applied, {})
 
-    def test_mock_write_is_idempotent_and_rejects_conflicting_amount(self):
+    def test_backend_write_is_idempotent_and_rejects_a_conflicting_amount(self):
         gateway = TicketState(self.clock)
-        args = {"action": "write", "operation": "refund", "record_id": "O1", "amount": 50, "review_reason": "Verified the payment, approval and original destination.",
-                "facts": {"payment_id": "PAY-1", "payment_status": "captured", "currency": "SGD", "captured_amount": 100,
-                          "refunded_amount": 0, "pending_refund_amount": 0, "approved_refund_amount": 100,
-                          "request_accepted": True, "inspection_or_waiver": True}}
-        first = gateway.run("T1", args)
-        self.assertEqual(first, gateway.run("T1", args))
-        self.assertEqual(len(gateway.audit_log), 1)
-        self.assertTrue(first["mock"])
+        tools = SupportTools(Mock(spec=PostgresReader), SkillsPolicy(), gateway, FakeWriter())
+        args = {"operation": "refund", "order_id": "O1", "amount": 50, "reason": "damaged_item",
+                "review_reason": "Verified the payment, approval and original destination."}
+        facts = {"payment_id": "PAY-1", "payment_status": "captured", "currency": "SGD", "captured_amount": 100,
+                 "refunded_amount": 0, "pending_refund_amount": 0, "approved_refund_amount": 100,
+                 "request_accepted": True, "inspection_or_waiver": True}
+        with patch.object(tools.backend_facts, "read", return_value=facts):
+            first = tools.execute("T1", "backend_write", args)
+            self.assertEqual(first["status"], "executed")
+            self.assertEqual(first["operation"], "refund")
+            self.assertTrue(tools.execute("T1", "backend_write", args)["replayed"])
+            self.assertEqual(len(tools.writer.applied), 1)
+            self.assertEqual([event["type"] for event in gateway.audit_log], ["write"])
+            with self.assertRaisesRegex(ValueError, "conflicting amount"):
+                tools.execute("T1", "backend_write", {**args, "amount": 60})
+        result = tools.execute("T2", "backend_write", {**args, "operation": "exchange"})
+        self.assertEqual((result["status"], result["handoff_packet"]["reason"]),
+                         ("awaiting_human", "unsupported write operation"))
+
+    def test_ticket_state_has_no_write_action_left(self):
+        tools = SupportTools(Mock(spec=PostgresReader), SkillsPolicy(), TicketState(self.clock), FakeWriter())
         with self.assertRaises(ValueError):
-            gateway.run("T1", {**args, "amount": 60})
-        self.assertEqual(gateway.run("T2", {**args, "operation": "cancel"})["status"], "awaiting_human")
+            tools.validate("ticket_state", {"action": "write", "operation": "refund", "record_id": "O1"})
 
     def test_order_lookup_tools_read_items_payments_and_returns_by_order_id(self):
         reader = Mock(spec=PostgresReader)
@@ -305,8 +320,9 @@ class ToolTests(unittest.TestCase):
             ("policy", {"action": "guess"}), ("policy", {"action": "read"}),
             ("read_record", {"kind": "shipments", "record_id": "O1"}),
             ("read_record", {"kind": "orders", "record_id": 5}),
-            ("ticket_state", {"action": "write", "operation": "refund", "record_id": "O1"}),
-            ("ticket_state", {"action": "write", "operation": "refund", "record_id": "O1", "amount": float("nan")}),
+            ("backend_write", {"operation": "refund", "order_id": "O1", "reason": "r"}),
+            ("backend_write", {"operation": "refund", "order_id": "O1", "reason": "r", "amount": float("nan")}),
+            ("backend_write", {"operation": "return_request", "order_id": "O1", "reason": "r"}),
             ("policy", {"action": "check", "operation": "refund", "amount": -1}),
         ):
             with self.subTest(name=name, args=args), self.assertRaises(ValueError):

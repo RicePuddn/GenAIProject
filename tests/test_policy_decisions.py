@@ -10,6 +10,7 @@ from support_ops.policy.facts import BackendFacts
 from support_ops.policy.rag import RagPolicy
 from support_ops.policy.skills import SkillsPolicy
 from support_ops.systems.tools import SupportTools
+from tests.fake_writer import FakeWriter
 from tests.test_multi_agent_gateway import NOW, ORDER, reader
 from tests.test_routing import REFUND
 
@@ -17,12 +18,12 @@ from tests.test_routing import REFUND
 class BackendFactTests(unittest.TestCase):
     def tools(self, provider="skills", backend=None):
         policy = SkillsPolicy() if provider == "skills" else RagPolicy(Mock())
-        return SupportTools(backend or reader(), policy, TicketState(Clock(NOW)))
+        return SupportTools(backend or reader(), policy, TicketState(Clock(NOW)), FakeWriter())
 
     def write(self, tools, amount=20, **details):
-        return tools.execute("T1", "ticket_state", {
-            "action": "write", "operation": "refund", "record_id": ORDER,
-            "item_ids": ["ITM-1"], "amount": amount, **details,
+        return tools.execute("T1", "backend_write", {
+            "operation": "refund", "order_id": ORDER, "reason": "damaged_item",
+            "items": [{"item_id": "ITM-1", "quantity": 1}], "amount": amount, **details,
         })
 
     def test_actual_records_provide_balances_without_implying_inspection_or_approval(self):
@@ -51,13 +52,13 @@ class BackendFactTests(unittest.TestCase):
                 self.assertEqual(result["check"], "refund.missing_facts")
                 self.assertIn("inspection_or_waiver", result["missing_facts"])
                 self.assertEqual(self.write(tools, review_reason="I say it passed.")["status"], "awaiting_human")
-                self.assertFalse(tools.ticket_state.writes)
+                self.assertFalse(tools.writer.applied)
                 with self.assertRaises(ValidationError):
                     self.write(tools, facts={"inspection_or_waiver": True})
 
     def test_unknown_item_ids_cannot_use_another_items_records(self):
         tools = self.tools()
-        result = self.write(tools, item_ids=["OTHER-ITEM"])
+        result = self.write(tools, items=[{"item_id": "OTHER-ITEM", "quantity": 1}])
         self.assertEqual(result["status"], "awaiting_human")
 
     def test_refund_cannot_reuse_an_approval_already_paid_or_pending(self):
@@ -73,7 +74,7 @@ class BackendFactTests(unittest.TestCase):
                     result = self.write(tools)
                     self.assertEqual(result["status"], "blocked")
                     self.assertEqual(result["policy_check"]["check"], "refund.approved_amount_exceeded")
-                    self.assertFalse(tools.ticket_state.writes)
+                    self.assertFalse(tools.writer.applied)
 
     def test_remaining_approval_excludes_failed_and_other_return_refunds(self):
         backend = reader(total=100, refunds=[
@@ -86,7 +87,7 @@ class BackendFactTests(unittest.TestCase):
         tools = self.tools(backend=backend)
         facts = tools.backend_facts.read("refund", ORDER, ["ITM-1"])
         self.assertEqual(facts["approved_refund_amount"], 20)
-        self.assertEqual(self.write(tools)["status"], "approved_mock_write")
+        self.assertEqual(self.write(tools)["status"], "executed")
 
     def test_partial_refund_allocation_stays_unknown_for_a_multi_item_return(self):
         backend = reader(total=100, refunds=[{
@@ -95,7 +96,7 @@ class BackendFactTests(unittest.TestCase):
         tools = self.tools(backend=backend)
         result = self.write(tools)
         self.assertEqual(result["status"], "awaiting_human")
-        self.assertFalse(tools.ticket_state.writes)
+        self.assertFalse(tools.writer.applied)
 
     def test_open_item_states_and_no_shipments_allow_pre_fulfillment_cancellation(self):
         backend = reader()
@@ -156,10 +157,10 @@ class BackendFactTests(unittest.TestCase):
                 tools = self.tools(provider)
                 with patch.object(tools.backend_facts, "read", return_value=REFUND):
                     self.assertEqual(self.write(tools, 60)["status"], "review_required")
-                    self.assertFalse(tools.ticket_state.writes)
+                    self.assertFalse(tools.writer.applied)
                     reviewed = self.write(tools, 60, review_reason="Reviewed the policy, facts and amount.")
                     self.assertEqual(reviewed["policy_check"]["route"], "approver")
-                    self.assertEqual(reviewed["status"], "approved_mock_write")
+                    self.assertEqual(reviewed["status"], "executed")
                 tools = self.tools(provider)
                 with patch.object(tools.backend_facts, "read", return_value=REFUND):
                     self.assertEqual(self.write(tools, 120, review_reason="Please allow.")["status"], "awaiting_human")
@@ -170,4 +171,4 @@ class BackendFactTests(unittest.TestCase):
                 tools = self.tools()
                 with patch.object(tools.backend_facts, "read", return_value={**REFUND, **changes}):
                     self.assertEqual(self.write(tools, review_reason="Override.")["status"], expected)
-                self.assertFalse(tools.ticket_state.writes)
+                self.assertFalse(tools.writer.applied)
