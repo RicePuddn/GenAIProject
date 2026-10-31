@@ -44,6 +44,7 @@ load once at startup. Swagger UI is at <http://127.0.0.1:8001/docs>. The single-
 | `POST /chat` | One customer turn; returns the reply, outcome and full trace. |
 | `POST /chat/stream` | The same turn as Server-Sent Events: one `trace` event per step, then `result` (or `error`). Runs on a pool of 4 workers (a fifth concurrent stream gets `503`); a client that disconnects cancels its ticket at the next step. |
 | `GET /info` | Config in use: policy mode, corpus, models, default strategy and orchestration. |
+| `GET /customers` | Accounts to sign in as. Send one as `customer_id` on `/chat` to scope every read and write to it (see the README). |
 | `GET /health` | Liveness only; does not check the database or Groq. |
 
 Request body:
@@ -397,7 +398,7 @@ customer still gets the reply. `gateway/tickets.py` builds the row from the work
 
 | Column | Value |
 |---|---|
-| `customer_id` | Always the seeded placeholder `dummy_00` until login exists: naming an order does not prove who is chatting. Use `order_id` to find an order's tickets |
+| `customer_id` | The request's signed-in `customer_id`; the placeholder `dummy_00` when none is sent, since naming an order does not prove who is chatting. Another customer's ticket is never updated. Use `order_id` to find an order's tickets |
 | `order_id` | The first order from a proposal or lookup, never one the customer only claimed |
 | `category`, `priority`, `subject` | `case.category`, `case.urgency`, `case.issue`; `other`, `normal` and a fixed subject when no case exists (a guard hold) |
 | `status` | `resolved`, `awaiting_customer` or `awaiting_human`; `in_progress` while parts run |

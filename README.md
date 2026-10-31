@@ -119,6 +119,18 @@ curl -X POST http://127.0.0.1:8000/chat \
   -d '{"ticket_id":"TKT-LOCAL-001","customer_message":"Where is my order ORD-2026-00001?","strategy":"react"}'
 ```
 
+### Signed-in account
+
+Send `customer_id` to chat as a customer (accounts are listed by `GET /customers`). Every read
+and write is then scoped to that account: another customer's orders and records read exactly as
+missing ones, so the agent cannot learn they exist, and writes to them are refused. The agent is
+told which account is signed in, and the ticket is saved under it. Without `customer_id` nothing
+is scoped and tickets are saved under the placeholder customer `dummy_00`. Both APIs accept it.
+
+```json
+{"customer_id": "CUS-EVAL-001", "customer_message": "Please refund ORD-2026-00101."}
+```
+
 ### Multi-turn conversations
 
 The API is stateless: the server keeps nothing between requests. To continue a ticket, copy
@@ -170,6 +182,7 @@ A Streamlit page shows a chat window and, while the agent works, its steps as th
 the guard result, each thought, each tool call with its result (retrieved policy clauses as a
 table) and any handoff. Under each reply the full timeline stays available with cost and
 timing. It keeps the conversation and sends it as `history`, and **New ticket** starts over.
+**Signed in as** picks the customer account; switching it starts a new ticket.
 With the API running:
 
 ```bash
@@ -275,8 +288,11 @@ return as `requested`, and a cancellation updates the order. Applied writes are 
 `backend_writes`; a repeated write returns the first result. Audits and handoff packets are
 held in memory for each request. Conversation history travels with each request (see above).
 Prompt Guard screens prompt attacks; it does not provide a complete abuse or
-out-of-scope classification system. This local experiment API has no customer
-authentication or order ownership checks.
+out-of-scope classification system. `customer_id` scopes data to an account, but this local
+experiment API does not authenticate it: any client can send any account.
+
+S1 and S2 save the conversation's `support_tickets` row through the `update_ticket` tool, which the
+prompt asks the agent to call once the outcome is known; whether it does is the agent's choice.
 
 ## Automated checks
 

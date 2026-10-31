@@ -36,6 +36,7 @@ from support_ops.agents.runtime import AgentContext, Budget, BudgetExceeded, Ret
 from support_ops.agents.specialist import STRATEGIES, Specialist
 from support_ops.agents.toolbox import (ORDERS_SHIPPING_TOOLS, RETURNS_REFUNDS_TOOLS, Toolbox,
                                         returns_lookup_tool)
+from support_ops.backend.accounts import for_account
 from support_ops.backend.postgres import PostgresReader, PostgresWriter
 from support_ops.gateway.approvals import TicketFlow
 from support_ops.gateway.route import RouteTool
@@ -102,8 +103,11 @@ class MultiAgentState(TypedDict, total=False):
 class MultiAgentWorkflow:
     def __init__(self, llm: LLM, cfg: dict[str, Any], *, reader: PostgresReader | None = None,
                  policy: PolicyProvider | None = None, clock: Clock | None = None, tracer: Tracer | None = None,
-                 cancellation: CancellationToken | None = None, writer: PostgresWriter | None = None):
+                 cancellation: CancellationToken | None = None, writer: PostgresWriter | None = None,
+                 customer_id: str | None = None):
         self.llm, self.cfg = llm, cfg
+        # The signed-in customer: every read and write is scoped to their account, and tickets are theirs.
+        self.customer_id = customer_id
         self.settings = {**DEFAULTS, **cfg.get("multi_agent", {})}
         if moved := {"max_reproposals", "max_reply_drafts"} & set(self.settings):
             raise ValueError(f"multi_agent.{sorted(moved)} moved to review.max_rejections and "
@@ -123,9 +127,9 @@ class MultiAgentWorkflow:
         self.cancellation = cancellation or CancellationToken()
         rules = Rules.load(cfg["policy"]["rules_file"])
         self.routing = RoutingRules.load(cfg["policy"]["rules_file"])
-        self.reader = reader or PostgresReader()
+        self.reader, writer = for_account(reader or PostgresReader(), writer or PostgresWriter(), customer_id)
         self.ticket_state = TicketState(self.clock, rules=rules)
-        self.writer = writer = writer or PostgresWriter()
+        self.writer = writer
         self.tools = SupportTools(self.reader, policy or policy_from_config(cfg, rules), self.ticket_state, writer)
         policy = self.tools.policy
         if policy.strict_scope:   # e.g. a mistyped skill folder: fail now, not as empty lists mid-ticket
@@ -218,6 +222,8 @@ class MultiAgentWorkflow:
     def _brief(self, state: MultiAgentState, part: bool = False) -> dict[str, Any]:
         """What an agent reads. With `part`, a multi-part ticket adds the part in progress."""
         brief: dict[str, Any] = {"message": plain_dashes(state["customer_message"])}
+        if self.customer_id:   # tools return only this account's records
+            brief["signed_in_account"] = self.customer_id
         tasks = state.get("tasks") or []
         if part and tasks and (len(tasks) > 1 or state.get("orchestration") == "react"):
             brief["your_task"] = plain_dashes(tasks[state["part"]].request)

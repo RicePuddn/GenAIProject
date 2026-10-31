@@ -9,6 +9,8 @@ from support_ops.helpers.config import ROOT
 
 INFO = {"policy_mode": "rag", "corpus": "mini", "default_strategy": "react",
         "model": "openai/gpt-oss-120b", "reasoning_effort": "medium"}
+CUSTOMERS = [{"id": "CUS-0001", "first_name": "Ana", "last_name": "Lim", "email": "ana@example.test",
+              "loyalty_tier": "gold"}]
 
 
 def chat_response(message, history, reply):
@@ -44,6 +46,8 @@ class FakeApi:
     def __call__(self, request, timeout=None):
         if request.full_url.endswith("/info"):
             return io.BytesIO(json.dumps(INFO).encode())
+        if request.full_url.endswith("/customers"):
+            return io.BytesIO(json.dumps(CUSTOMERS).encode())
         self.assert_stream(request)
         payload = json.loads(request.data)
         self.chat_payloads.append(payload)
@@ -85,6 +89,8 @@ class DemoAppTests(unittest.TestCase):
         def failing(request, timeout=None):
             if request.full_url.endswith("/info"):
                 return io.BytesIO(json.dumps(INFO).encode())
+            if request.full_url.endswith("/customers"):
+                return io.BytesIO(json.dumps(CUSTOMERS).encode())
             return io.BytesIO(sse("error", {"detail": "set GROQ_API_KEY"}).encode())
 
         with patch("urllib.request.urlopen", failing):
@@ -102,6 +108,21 @@ class DemoAppTests(unittest.TestCase):
             app.sidebar.button[0].click().run()
         self.assertEqual(app.session_state.history, [])
         self.assertIsNone(app.session_state.ticket_id)
+
+    def test_the_signed_in_account_is_sent_and_switching_it_starts_a_new_ticket(self):
+        from streamlit.testing.v1 import AppTest
+
+        api = FakeApi()
+        with patch("urllib.request.urlopen", api):
+            app = AppTest.from_file(str(ROOT / "scripts/demo_app.py"), default_timeout=30).run()
+            app.chat_input[0].set_value("Hello").run()
+            self.assertNotIn("customer_id", api.chat_payloads[0])   # signed out: nothing is scoped
+            app.sidebar.selectbox[0].set_value("CUS-0001").run()
+            self.assertEqual((app.session_state.history, app.session_state.ticket_id), ([], None))
+            app.chat_input[0].set_value("Where is my order?").run()
+        self.assertFalse(app.exception)
+        self.assertEqual(api.chat_payloads[1]["customer_id"], "CUS-0001")
+        self.assertEqual(api.chat_payloads[1]["history"], [])
 
 
 if __name__ == "__main__":

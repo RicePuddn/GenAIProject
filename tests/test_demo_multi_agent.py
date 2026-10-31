@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from support_ops.api_multi import app as api
 from support_ops.backend.postgres import PostgresReader
+from tests.test_demo_app import CUSTOMERS
 from support_ops.helpers.config import ROOT, load_config
 from support_ops.helpers.llm import ScriptedLLM, text, tool_call
 from support_ops.policy.rag import RagPolicy
@@ -80,6 +81,10 @@ class RealApi:
             client = TestClient(api)
             if request.full_url.endswith("/info"):
                 return io.BytesIO(client.get("/info").content)
+            if request.full_url.endswith("/customers"):
+                with patch("support_ops.api.PostgresReader") as reader:
+                    reader.return_value.customers.return_value = CUSTOMERS
+                    return io.BytesIO(client.get("/customers").content)
             payload = json.loads(request.data)
             self.chat_payloads.append(payload)
             scripted_turn(self.llm, f"Reply {len(self.chat_payloads)}")
