@@ -195,7 +195,7 @@ uv pip install --python .venv/bin/python -e ".[demo]"
 | Setting | Behavior |
 | --- | --- |
 | `react` | The supervisor selects one tool, executes it, receives the result, then chooses the next step. |
-| `plan_and_execute` | The supervisor produces an ordered plan using the shared tool schemas and available policy filenames. The workflow validates the entire plan and executes its calls sequentially. Invalid plans or recoverable tool errors trigger a bounded correction using completed results. |
+| `plan_and_execute` | The supervisor produces an ordered plan using the shared tool schemas and available policy filenames. The workflow validates the entire plan and executes its calls sequentially. Invalid plans or recoverable tool errors trigger a bounded correction using completed results. After a plan runs in full, the supervisor is asked once more with its results (the completion check) for any calls still needed, such as the refund owed after a cancellation. Completion checks have their own budget (`limits.max_plan_checks`), separate from corrections (`max_replans`). |
 
 Both strategies use the same model wrapper, tool contracts, policy files, write
 rule, tracing, and final response node. A successful plan executes without supervisor
@@ -260,8 +260,10 @@ A dedicated final response node generates the customer reply through the shared 
 RAG searches return ranked clauses and their direct references. Skills retrieval
 uses `open` on a skill's `SKILL.md`, then `read` on a relevant clause file;
 `list` discovers skills. Available skills are `orders-and-shipping` and `returns-and-refunds`.
-Policy checks and the ticket tool share [rules.json](src/support_ops/policy/rules/rules.json):
-refund limits, return deadlines, cancellation conditions and human-review routes.
+`backend_write` and the multi-agent `route` tool share [rules.json](src/support_ops/policy/rules/rules.json):
+refund limits, return deadlines, cancellation conditions and human-review routes. Every write is checked
+when it is made, so S1/S2 have no separate pre-write check: their `policy check` covers only the delivery
+rules for an order's parcels, as the specialists get them from `route` with action `none`.
 Eligible refunds ≤ SGD 30 can proceed automatically; > SGD 30–100 need automated
 review; > SGD 100 need a human. Business checks run first in every design.
 Checks use existing backend records; unavailable facts require human review
@@ -275,13 +277,19 @@ A write requiring review needs a `review_reason` and `cited_clauses`. Every cita
 or file the `policy` tool returned in this ticket (the same check as the multi-agent specialists, in
 `policy/citations.py`). The write then goes to an independent review: a separate, stateless
 `approver` call that sees the customer's request, the proposed write, the rule check and the tool
-evidence, but none of the agent's own messages or reasoning. It holds the write to the same criteria
-as the multi-agent approver. The agent may fix `review.max_rejections` rejections (shared with the
+evidence, but none of the agent's own messages or reasoning. Every arm's write review and reply check
+use the same two prompts (`PROPOSAL_PROMPT` and `REPLY_CHECK_PROMPT` in `agents/approver.py`), so the
+arms differ only in what each check is given. The agent may fix `review.max_rejections` rejections (shared with the
 multi-agent approver); the next rejection, or an escalation, goes to a human.
 
-Every final reply is checked the same way before it is sent, by a separate `approver` call against
-the ticket's evidence. A rejected draft is redrafted with the issues; if none passes within
-`review.max_reply_drafts`, the customer gets the fixed hold reply and the ticket goes to a human.
+Every arm drafts its reply with the same prompt (`helpers/reply_prompt.py`); only its last paragraph
+differs, saying whether the writer is given the ticket's evidence (single agent) or an outcome summary (multi-agent).
+Every final reply is checked the same way before it is sent, by a separate `approver` call: S1/S2
+give it the ticket's evidence, the multi-agent arms their outcome summary. A rejected draft is redrafted with the issues; if none passes within
+`review.max_reply_drafts`, the customer gets the fixed hold reply and the ticket goes to a human. Before that check, code rejects a draft that
+describes a pending refund as paid ("has been refunded", "refund has been processed"), since no money moves,
+or that shows internal IDs (policy clauses, items, payments, refunds, tickets); the order number may stay. Up to
+`review.max_wording_rewrites` such drafts are redrafted without counting toward `review.max_reply_drafts`.
 
 The read tools only read data. The `backend_write` tool changes the database after checking
 the recorded facts and the rules: a refund is recorded as `pending` and no money moves, a
@@ -293,7 +301,9 @@ out-of-scope classification system. `customer_id` scopes data to an account, but
 experiment API does not authenticate it: any client can send any account.
 
 S1 and S2 save the conversation's `support_tickets` row through the `update_ticket` tool, which the
-prompt asks the agent to call once the outcome is known; whether it does is the agent's choice.
+prompt asks the agent to call once the outcome is known; whether it does is the agent's choice. A
+handoff ends the turn with no agent step after it, so then the workflow saves the ticket itself as
+`awaiting_human`, keeping the agent's category, priority and subject if it set them.
 
 ## Automated checks
 

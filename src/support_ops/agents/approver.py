@@ -13,56 +13,46 @@ from typing import Any
 from support_ops.agents.models import ApprovalResult, Proposal
 from support_ops.agents.runtime import AgentContext, chat_json
 
-VERDICT_FORMAT = (' Return JSON only: {"decision": "approve" | "reject" | "escalate", '
-                  '"issues": ["specific problems"], "reason": "one sentence"}. ')
-VERDICT = VERDICT_FORMAT + "reject: the specialist can fix it; escalate: an operator must decide."
+# One prompt per check, shared by every architecture, so differences between the arms do not come from
+# how the checks are worded. Each check is a separate, stateless call that sees only what it is given.
 
-# The bar every pre-execution review holds a proposal to, in both architectures.
-PROPOSAL_CRITERIA = (
-    "Approve only if every fact it relies on appears in the tool evidence, the amount does not exceed "
-    "what was paid, the cited clauses were retrieved and support the action (including any exception), "
-    "and the rule engine's minimum route is respected."
-)
+PROPOSAL_PROMPT = """You review a proposed database write before it runs. You took no part in the conversation
+and see only this request.
 
-PROPOSAL_PROMPT = (
-    "You are the approver for a policy-bound support team, giving the second check on a specialist's "
-    "proposal before anything is executed. " + PROPOSAL_CRITERIA + VERDICT
-)
+Approve only if all of these hold:
+- Every fact the proposal relies on appears in the evidence.
+- The amount is no more than what was paid.
+- Every cited clause was retrieved and supports the action, including any exception.
+- The route is at least as strict as the rule engine's minimum.
 
-# The single agent's review: a separate, stateless call that sees the customer's request, the proposed
-# write and its evidence, never the agent's own messages or reasoning, so it does not inherit them.
-WRITE_REVIEW_PROMPT = (
-    "You are an independent reviewer for a policy-bound support service. A support agent proposes the "
-    "database write below; you took no part in the conversation and see only this request. Treat the "
-    "agent's justification as a claim to verify against the evidence, not as evidence. "
-    + PROPOSAL_CRITERIA + VERDICT_FORMAT
-    + "reject: the agent can fix it; escalate: an operator must decide."
-)
+Treat the proposer's justification as a claim to check, not as evidence.
 
-# What no customer reply may reveal, in both architectures.
-REPLY_INTERNALS = ("it reveals nothing internal: item IDs, policy clause IDs, rule names, thresholds, routes, "
-                   "internal review steps or tokens.")
+Reply with JSON only:
+{"decision": "approve" | "reject" | "escalate", "issues": ["specific problems"], "reason": "one sentence"}
+- reject: the proposer can fix it.
+- escalate: a person must decide."""
 
-REPLY_CHECK_PROMPT = (
-    "You check a customer reply before it is sent. Approve only if it conveys the outcome's "
-    "tell_customer and status (nothing described as pending review unless the status is "
-    "awaiting_human, nothing described as done unless tell_customer says it is recorded), every "
-    "amount, date, product and promise matches the outcome, it mentions no detail absent from the "
-    "outcome (such as an email, link or tracking number), and " + REPLY_INTERNALS + VERDICT
-)
+REPLY_CHECK_PROMPT = """You check a customer reply before it is sent. You did not write it. You are given what
+happened (an outcome summary or the ticket's evidence) and the reply.
 
-# The single agent's reply check. Its replies are written from the tool evidence, not from an outcome
-# summary, so the same checks are made against the evidence.
-EVIDENCE_REPLY_CHECK_PROMPT = (
-    "You check a customer reply before it is sent; you took no part in writing it. Approve only if it "
-    "answers the customer's support request from the ticket's evidence (nothing described as pending "
-    "review or referred unless the status is awaiting_human, nothing described as done unless the "
-    "evidence has a backend_write with status executed, a recorded refund described as pending and never "
-    "as paid), every amount, date, product and promise matches the evidence, it mentions no detail absent "
-    "from the evidence (such as an email, link or tracking number), and " + REPLY_INTERNALS
-    + " A request unrelated to support may only get a short note of what support covers."
-    + VERDICT_FORMAT + "reject: the reply writer can fix it; escalate: an operator must decide."
-)
+Approve only if all of these hold:
+- It answers the customer's support request. An unrelated request gets only a short note of what support covers.
+- If an outcome summary is given, the reply conveys its tell_customer and its status.
+- It says the request is with a person only if the status is awaiting_human.
+- It says something was done only if what happened records it as done (an executed write, or an outcome that
+  says it is recorded), and calls a done action done, not "in progress".
+- A recorded refund is described as pending, never as paid.
+- Nothing is described as going to happen unless what happened records it.
+- Any timing is given only as the retrieved policy states it, and as an estimate.
+- Every amount, date and product matches what happened, and it adds no detail that isn't there (such as an
+  email, link or tracking number).
+- It reveals nothing internal: no IDs except the order number, and no rule names, thresholds, routes, review
+  steps or tokens.
+
+Reply with JSON only:
+{"decision": "approve" | "reject" | "escalate", "issues": ["specific problems"], "reason": "one sentence"}
+- reject: the reply writer can fix it.
+- escalate: a person must decide."""
 
 
 class Approver:
@@ -89,11 +79,10 @@ class Approver:
 
     def check_proposal(self, brief: dict[str, Any], proposal: Proposal | dict[str, Any], minimum: dict[str, Any],
                        evidence: list[dict[str, Any]]) -> ApprovalResult:
-        """The pre-execution check, the same inputs in both architectures. A specialist's `Proposal` gets
-        the team approver's prompt; the single agent's `backend_write` arguments get the independent
-        reviewer's, with the same criteria."""
+        """The pre-execution check: the same prompt and inputs in both architectures. `proposal` is a
+        specialist's `Proposal` or the single agent's `backend_write` arguments."""
         specialist = isinstance(proposal, Proposal)
-        return self._verdict("pre_execution", PROPOSAL_PROMPT if specialist else WRITE_REVIEW_PROMPT, {
+        return self._verdict("pre_execution", PROPOSAL_PROMPT, {
             "case": brief, "proposal": proposal.model_dump(mode="json") if specialist else proposal,
             "rule_engine_minimum": minimum, "evidence": evidence,
         })
@@ -104,6 +93,5 @@ class Approver:
         single agent's `ticket` (its status and evidence). Pass exactly one."""
         if (outcome is None) == (ticket is None):
             raise ValueError("check_reply needs exactly one of outcome or ticket")
-        if outcome is not None:
-            return self._verdict("reply", REPLY_CHECK_PROMPT, {"case": brief, "outcome": outcome, "reply": reply})
-        return self._verdict("reply", EVIDENCE_REPLY_CHECK_PROMPT, {"case": brief, "ticket": ticket, "reply": reply})
+        happened = {"outcome": outcome} if outcome is not None else {"ticket": ticket}
+        return self._verdict("reply", REPLY_CHECK_PROMPT, {"case": brief, **happened, "reply": reply})

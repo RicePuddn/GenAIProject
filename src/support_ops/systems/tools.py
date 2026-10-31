@@ -27,6 +27,11 @@ class ReadArguments(ToolArguments):
     record_id: NonEmpty
 
 
+# Added to every policy check result: a check is not a reading of the policy.
+CHECK_NOTE = ("rule_sources name the sections this rule comes from, without their text: they cannot be cited. "
+              "Cite clause IDs or files from a policy search or read.")
+
+
 class CustomerOrdersArguments(ToolArguments):
     """List the signed-in customer's latest orders, newest first: order ID, date, status, total and product
     names. Use it when the customer has not given an order number, to find the order they mean."""
@@ -36,15 +41,21 @@ class OrderArguments(ToolArguments):
     order_id: NonEmpty
 
 
+# Every write is checked by backend_write itself, as the multi-agent `route` tool checks every proposal,
+# so `check` covers only what no write covers: the delivery rules for an order's parcels (lost, late or
+# damaged in transit), as the specialists get them from `route` with action none.
+CHECK_DESCRIPTION = ("check: the delivery rules for an order's parcels (lost, late or damaged in transit), "
+                     "with operation delivery and the order_id. Writes need no check: backend_write applies "
+                     "the rules itself.")
+
+
 class PolicyArguments(ToolArguments):
-    """list: discover skills; open: read SKILL.md; read: read a discovered clause; check: deterministic refund, return_request, return_dispatch, cancel or delivery checks using recorded facts."""
+    __doc__ = "list: discover skills; open: read SKILL.md; read: read a discovered clause; " + CHECK_DESCRIPTION
     action: Literal["list", "open", "read", "check"]
     skill: NonEmpty | None = None
     file: NonEmpty | None = None
-    operation: NonEmpty | None = None
-    amount: Amount | None = None
-    order_id: NonEmpty | None = Field(default=None, description="Order ID used to load recorded policy facts for a check.")
-    item_ids: list[NonEmpty] = Field(default_factory=list)
+    operation: Literal["delivery"] | None = None
+    order_id: NonEmpty | None = Field(default=None, description="The order whose parcels a delivery check covers.")
 
     @model_validator(mode="after")
     def required_for_action(self) -> Self:
@@ -52,30 +63,25 @@ class PolicyArguments(ToolArguments):
             raise ValueError("open requires skill")
         if self.action == "read" and not (self.skill or self.file):
             raise ValueError("read requires skill or file")
-        if self.action == "check" and not self.operation:
-            raise ValueError("check requires operation")
-        if self.action == "check" and self.operation == "refund" and self.amount is None:
-            raise ValueError("refund check requires amount")
+        if self.action == "check" and not (self.operation and self.order_id):
+            raise ValueError("check requires operation delivery and order_id")
         return self
 
 
 class RagPolicyArguments(ToolArguments):
-    """search: retrieve the policy clauses most relevant to a query, with their exceptions; check: deterministic refund, return_request, return_dispatch, cancel or delivery checks using recorded facts."""
+    __doc__ = ("search: retrieve the policy clauses most relevant to a query, with their exceptions; "
+               + CHECK_DESCRIPTION)
     action: Literal["search", "check"]
     query: NonEmpty | None = None
-    operation: NonEmpty | None = None
-    amount: Amount | None = None
-    order_id: NonEmpty | None = Field(default=None, description="Order ID used to load recorded policy facts for a check.")
-    item_ids: list[NonEmpty] = Field(default_factory=list)
+    operation: Literal["delivery"] | None = None
+    order_id: NonEmpty | None = Field(default=None, description="The order whose parcels a delivery check covers.")
 
     @model_validator(mode="after")
     def required_for_action(self) -> Self:
         if self.action == "search" and not self.query:
             raise ValueError("search requires query")
-        if self.action == "check" and not self.operation:
-            raise ValueError("check requires operation")
-        if self.action == "check" and self.operation == "refund" and self.amount is None:
-            raise ValueError("refund check requires amount")
+        if self.action == "check" and not (self.operation and self.order_id):
+            raise ValueError("check requires operation delivery and order_id")
         return self
 
 
@@ -158,6 +164,8 @@ class UpdateTicketArguments(ToolArguments):
 def validate_arguments(models: dict[str, type[ToolArguments]], name: str, arguments: Any) -> dict[str, Any]:
     if not isinstance(name, str) or name not in models:
         raise ValueError(f"unknown tool: {name!r}; available tools: {', '.join(models)}")
+    if isinstance(arguments, dict):   # models often send null for an optional field: treat it as not given
+        arguments = {key: value for key, value in arguments.items() if value is not None}
     return models[name].model_validate(arguments).model_dump(exclude_none=True)
 
 
@@ -171,6 +179,7 @@ class SupportTools:
         # `backend_write` decides with the gate and writes with the executor; they never share a step.
         self.gate = WriteGate(self.backend_facts, ticket_state, reviewer, max_rejections, review_trigger)
         self.executor = WriteExecutor(self.writer, ticket_state)
+        self.ticket_fields: dict[str, dict[str, Any]] = {}   # per ticket: the last update_ticket arguments
         self.argument_models: dict[str, type[ToolArguments]] = {
             "read_record": ReadArguments,
             "get_orders_for_customer": CustomerOrdersArguments,
@@ -239,14 +248,11 @@ class SupportTools:
         if name == "get_returns_for_order":
             return self.reader.returns_for_order(**args)
         if name == "policy":
-            if args.get("action") == "check" and args.get("operation") == "delivery" and args.get("order_id"):
+            if args.get("action") == "check":   # the argument models allow only the delivery check
                 parcels = self.backend_facts.deliveries(args["order_id"])
                 checks = [self.policy.run({**args, "facts": parcel}) for parcel in parcels or [{}]]
                 decision = next((check for check in checks if check["requires_human"]), checks[0])
-                return {**decision, "parcel_checks": checks}
-            if args.get("action") == "check":
-                args["facts"] = self.backend_facts.read(args["operation"], args["order_id"], args.get("item_ids")) \
-                    if args.get("order_id") else {}
+                return {**decision, "parcel_checks": checks, "note": CHECK_NOTE}
             return self.policy.run(args)
         if name == "backend_write":
             return self._backend_write(ticket_id, args)
@@ -254,6 +260,7 @@ class SupportTools:
             return self.gate.request_review(ticket_id, args)
         if name == "update_ticket":
             row = self.writer.save_ticket(ticket_id=ticket_id, at=self.ticket_state.clock.now(), **args)
+            self.ticket_fields[ticket_id] = args   # the agent's classification, kept if the ticket is handed off
             return {"status": "ticket_saved", "ticket_id": row["id"], "ticket_status": row["status"],
                     "customer_id": row["customer_id"], "order_id": row["order_id"]}
         return self.ticket_state.run(ticket_id, args)

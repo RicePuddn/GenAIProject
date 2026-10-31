@@ -82,7 +82,9 @@ class WriteGate:
                               "how the cited policy and recorded facts support it."}
         if unread := unread_citations(cited, self.citable[ticket_id]):
             raise ValueError(f"cited_clauses {unread} were not returned by the policy tool in this ticket; "
-                             "retrieve them first, or cite only the clause IDs or files you retrieved")
+                             "cite only clause IDs or files a policy search or read returned. A policy check "
+                             "names its rule's sections without their text, so they cannot be cited: search "
+                             "or read the policy for them first")
         return {"status": "allowed", "policy_check": decision}
 
     def require_review(self, ticket_id: str, args: dict[str, Any], decision: dict[str, Any]) -> dict[str, Any] | None:
@@ -139,6 +141,13 @@ class WriteGate:
                 "review": verdict, "policy_check": decision}
 
 
+def done(decision: dict[str, Any]) -> dict[str, Any]:
+    """The rule check as reported with a write that is done. Its reason describes the state before the
+    write (e.g. "the actual update is still required"), which would read as if the write had not
+    happened, so it is left out."""
+    return {key: value for key, value in decision.items() if key != "reason"}
+
+
 class WriteExecutor:
     def __init__(self, writer: PostgresWriter, ticket_state: TicketState):
         self.writer, self.ticket_state = writer, ticket_state
@@ -159,7 +168,7 @@ class WriteExecutor:
             return None
         if json.dumps(previous["request"], sort_keys=True) != json.dumps(request, sort_keys=True):
             raise ValueError("conflicting amount or items for an existing write")
-        return {**previous["result"], "replayed": True, "policy_check": decision}
+        return {**previous["result"], "replayed": True, "policy_check": done(decision)}
 
     def apply(self, ticket_id: str, args: dict[str, Any], decision: dict[str, Any]) -> dict[str, Any]:
         """Write what the gate allowed, and audit it."""
@@ -174,4 +183,4 @@ class WriteExecutor:
                                           "order_id": args["order_id"], "amount": args.get("amount"),
                                           "write_id": result["write_id"], "review_reason": args.get("review_reason"),
                                           "cited_clauses": args.get("cited_clauses", [])})
-        return {**result, "policy_check": decision}
+        return {**result, "policy_check": done(decision)}

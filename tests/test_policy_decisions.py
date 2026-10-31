@@ -30,6 +30,11 @@ class BackendFactTests(unittest.TestCase):
         tools.execute("T1", "policy", {"action": "search", "query": "refund"})
         return "REF-Refunds-6.6"
 
+    @staticmethod
+    def rules_check(tools, operation, amount=None, item_ids=None):
+        """The rules on the recorded facts, exactly as backend_write applies them before a write."""
+        return tools.ticket_state.rules.check(operation, amount, tools.backend_facts.read(operation, ORDER, item_ids))
+
     def write(self, tools, amount=20, **details):
         """A refund in ticket T1; unless the test names its citations, it retrieves and cites the refunds policy."""
         if "cited_clauses" not in details:
@@ -53,15 +58,23 @@ class BackendFactTests(unittest.TestCase):
         for name in ("inspection_or_waiver", "request_accepted", "approved_refund_amount"):
             self.assertNotIn(name, facts)
 
+    def test_a_policy_check_covers_only_delivery_since_backend_write_checks_every_write(self):
+        for provider in ("rag", "skills"):
+            tools = self.tools(provider)
+            for operation in ("refund", "cancel", "return_request", "return_dispatch"):
+                with self.subTest(provider=provider, operation=operation), self.assertRaises(ValueError):
+                    tools.validate("policy", {"action": "check", "operation": operation, "order_id": ORDER})
+            with self.subTest(provider=provider), self.assertRaisesRegex(ValueError, "order_id"):
+                tools.validate("policy", {"action": "check", "operation": "delivery"})
+            self.assertNotIn("amount", tools.argument_models["policy"].model_fields)
+
     def test_both_providers_require_human_review_for_unrecorded_prerequisites(self):
         for provider in ("rag", "skills"):
             with self.subTest(provider=provider):
                 backend = reader()
                 backend.returns_for_order.return_value = {"returns": [], "refunds": []}
                 tools = self.tools(provider, backend)
-                result = tools.execute("T1", "policy", {
-                    "action": "check", "operation": "refund", "order_id": ORDER, "amount": 20,
-                })
+                result = self.rules_check(tools, "refund", 20)
                 self.assertEqual(result["check"], "refund.missing_facts")
                 self.assertIn("inspection_or_waiver", result["missing_facts"])
                 self.assertEqual(self.write(tools, review_reason="I say it passed.")["status"], "awaiting_human")
@@ -119,9 +132,7 @@ class BackendFactTests(unittest.TestCase):
         facts = BackendFacts(backend, Clock(NOW)).read("cancel", ORDER)
         self.assertEqual(facts, {"order_status": "processing", "any_quantity_fulfilled": False,
                                  "packing_started": False, "label_created": False, "carrier_collected": False})
-        result = self.tools(backend=backend).execute("T1", "policy", {
-            "action": "check", "operation": "cancel", "order_id": ORDER,
-        })
+        result = self.rules_check(self.tools(backend=backend), "cancel")
         self.assertTrue(result["allowed"])
 
     def test_fulfillment_events_are_mapped_when_the_records_establish_them(self):
@@ -155,9 +166,7 @@ class BackendFactTests(unittest.TestCase):
     def test_order_level_returns_do_not_establish_the_affected_items(self):
         backend = reader()
         backend.returns_for_order.return_value = {"returns": [{"status": "approved"}], "refunds": []}
-        result = self.tools(backend=backend).execute("T1", "policy", {
-            "action": "check", "operation": "return_request", "order_id": ORDER, "item_ids": ["ITM-1"],
-        })
+        result = self.rules_check(self.tools(backend=backend), "return_request", item_ids=["ITM-1"])
         self.assertEqual(result["check"], "return_request.return_scope_unverified")
 
     # Supply complete inputs explicitly to test the write gate independently of backend mapping.
@@ -204,6 +213,29 @@ class BackendFactTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "were not returned"):   # checked on auto writes too
                         self.write(tools, cited_clauses=[cited, "REF-Invented-9.9"])
                 self.assertFalse(tools.writer.applied)
+
+    def test_a_done_write_drops_the_checks_before_the_write_wording_and_null_means_not_given(self):
+        tools = self.tools()
+        with patch.object(tools.backend_facts, "read", return_value=REFUND):
+            written = self.write(tools, review_reason=None)   # null for an optional field: not given
+            replayed = self.write(tools)
+        self.assertEqual(written["status"], "executed")
+        self.assertEqual(written["policy_check"]["route"], "auto")
+        self.assertNotIn("reason", written["policy_check"])   # it described the state before the write
+        self.assertNotIn("reason", replayed["policy_check"])
+        checked = tools.validate("policy", {"action": "check", "operation": "delivery", "order_id": ORDER,
+                                            "skill": None, "file": None})
+        self.assertEqual(checked, {"action": "check", "operation": "delivery", "order_id": ORDER})
+
+    def test_a_checks_policy_sections_cannot_be_cited_and_the_refusal_says_to_search(self):
+        tools = self.tools("rag")
+        with patch.object(tools.backend_facts, "read", return_value=REFUND):
+            check = tools.execute("T1", "policy", {"action": "check", "operation": "delivery", "order_id": ORDER})
+            self.assertIn("cannot be cited", check["note"])
+            sections = check["rule_sources"]
+            with self.assertRaisesRegex(ValueError, "policy check names its rule's sections without their text"):
+                self.write(tools, cited_clauses=sections)
+        self.assertFalse(tools.writer.applied)
 
     def test_the_gate_decides_without_writing_and_the_executor_writes_what_it_is_handed(self):
         tools = self.tools(reviewer=lambda request: {"decision": "approve", "issues": []})

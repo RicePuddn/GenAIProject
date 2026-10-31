@@ -223,17 +223,18 @@ class WorkflowWiringTests(unittest.TestCase):
         self.addCleanup(build.stop)
         self.reader = Mock(spec=PostgresReader)
 
-    def test_configured_rules_reach_both_the_gateway_and_the_policy_check(self):
+    def test_configured_rules_reach_the_write_gate(self):
         llm = ScriptedLLM().push("guard", text("0.01")).push(
             "supervisor",
-            tool_call("policy", action="check", operation="refund", amount=30),
             tool_call("backend_write", operation="refund", order_id="O1", amount=30, reason="damaged_item"),
         )
         with tempfile.TemporaryDirectory() as directory:
             self.cfg["policy"]["rules_file"] = str(write_rules(directory, "20"))
-            result = SingleAgentWorkflow(llm, self.cfg, reader=self.reader).invoke("T1", "Refund 30?", "react")
-        check = result["evidence"][0]["result"]
+            workflow = SingleAgentWorkflow(llm, self.cfg, reader=self.reader)
+            check = workflow.tools.ticket_state.rules.check("refund", 30)
+            result = workflow.invoke("T1", "Refund 30?", "react")
         self.assertEqual((check["rule"], check["limit"], check["allowed"]), ("test_limit", 20.0, False))
+        self.assertIs(workflow.tools.gate.ticket_state, workflow.tools.ticket_state)   # one copy of the rules
         self.assertEqual(result["ticket_status"], "awaiting_human")
 
     def test_unknown_policy_mode_is_rejected(self):
