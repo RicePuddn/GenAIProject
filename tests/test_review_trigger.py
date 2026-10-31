@@ -8,7 +8,7 @@ from support_ops.helpers.clock import Clock
 from support_ops.helpers.config import load_config
 from support_ops.policy.rules import Rules
 from support_ops.policy.skills import SkillsPolicy
-from support_ops.systems.tools import SupportTools
+from support_ops.systems.tools import BackendWriteArguments, SupportTools
 from tests.fake_writer import FakeWriter
 from tests.test_multi_agent import NOW, ORDER, reader
 from tests.test_multi_agent_skills import skills_dir
@@ -60,6 +60,19 @@ class WriteGateTriggerTests(unittest.TestCase):
         self.assertEqual(tools.execute("T1", "backend_write", {**REFUND, "amount": 50})["status"], "review_required")
         written = tools.execute("T1", "backend_write", {**REFUND, "amount": 50, "review_reason": "Damaged."})
         self.assertEqual((written["status"], len(self.reviews)), ("executed", 1))
+
+    def test_backend_write_describes_who_starts_the_review(self):
+        def described(tools):
+            schema = next(item["function"] for item in tools.schemas if item["function"]["name"] == "backend_write")
+            return " ".join(schema["description"].split()), schema["parameters"]["properties"]["review_reason"]
+        automatic, reason = described(self.tools("automatic"))
+        self.assertEqual(automatic, " ".join(BackendWriteArguments.__doc__.split()))   # the single agent's, unchanged
+        self.assertIn("goes to an independent reviewer before it is executed", automatic)
+        self.assertIn("an independent reviewer checks it", reason["description"])
+        agent, reason = described(self.tools("agent"))
+        self.assertIn("refused (review_required) until request_review approves that exact write", agent)
+        self.assertNotIn("goes to an independent reviewer before it is executed", agent)
+        self.assertIn("give the review_reason to request_review", reason["description"])
 
     def test_an_unknown_trigger_fails_at_start(self):
         with self.assertRaisesRegex(ValueError, "review.trigger must be one of automatic, agent"):

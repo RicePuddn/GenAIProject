@@ -119,6 +119,16 @@ class BackendWriteArguments(ToolArguments):
         return self
 
 
+class AgentReviewedWriteArguments(BackendWriteArguments):
+    """Write an action to the database: refund (recorded as pending; no money moves), return_request or
+    cancel. The recorded facts and the rules are checked first, so the result may be a block, a request
+    for review or a handoff instead. A write requiring review is refused (review_required) until
+    request_review approves that exact write: the same operation, order, amount and items. Each action is
+    written once per ticket."""
+    review_reason: NonEmpty | None = Field(default=None, description=(
+        "Not needed here: give the review_reason to request_review, which the reviewer checks."))
+
+
 class RequestReviewArguments(BackendWriteArguments):
     """Ask the independent reviewer to approve a write before making it (review.trigger agent). Give
     exactly the write you will make, with review_reason explaining how the cited policy and recorded
@@ -168,7 +178,8 @@ class SupportTools:
             "backend_write": BackendWriteArguments,
             "update_ticket": UpdateTicketArguments,
         }
-        if review_trigger == "agent":   # the agent asks for the review itself
+        if review_trigger == "agent":   # the agent asks for the review itself, so backend_write says so
+            self.argument_models["backend_write"] = AgentReviewedWriteArguments
             self.argument_models["request_review"] = RequestReviewArguments
         descriptions = {
             "read_record": ReadArguments.__doc__,
@@ -180,7 +191,7 @@ class SupportTools:
             "get_returns_for_order": "Get existing returns and refunds for an order ID, with their status.",
             "policy": policy.description,
             "ticket_state": TicketArguments.__doc__,
-            "backend_write": BackendWriteArguments.__doc__,
+            "backend_write": self.argument_models["backend_write"].__doc__,
             "update_ticket": UpdateTicketArguments.__doc__,
             "request_review": RequestReviewArguments.__doc__,
         }

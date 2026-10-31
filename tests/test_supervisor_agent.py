@@ -112,6 +112,10 @@ class SpecialistToolTests(SupervisorBase):
         for phrase in ("make it with backend_write (operation refund or return_request)", "call request_review",
                        "finish by calling report"):
             self.assertIn(phrase, prompt)
+        # Its backend_write says the write waits for request_review, matching the prompt.
+        write_tool = self.workflow.tools.schemas[[item["function"]["name"] for item in self.workflow.tools.schemas]
+                                                 .index("backend_write")]["function"]
+        self.assertIn("until request_review approves that exact write", " ".join(write_tool["description"].split()))
 
     def test_specialist_without_a_report_reports_the_error(self):
         self.cfg["limits"]["max_agent_steps"] = 1
