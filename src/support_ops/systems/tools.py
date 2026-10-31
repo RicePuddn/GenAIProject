@@ -119,6 +119,16 @@ class BackendWriteArguments(ToolArguments):
         return self
 
 
+class RequestReviewArguments(BackendWriteArguments):
+    """Ask the independent reviewer to approve a write before making it (review.trigger agent). Give
+    exactly the write you will make, with review_reason explaining how the cited policy and recorded
+    facts support it. Writes on the approver route are refused until approved; an approval covers only
+    the same operation, order, amount and items."""
+    review_reason: NonEmpty = Field(description=(
+        "How the retrieved policy and recorded facts support the action and amount; the reviewer checks it "
+        "against the evidence."))
+
+
 class UpdateTicketArguments(ToolArguments):
     """Create or update this conversation's support ticket in the database. Call it when the outcome is known."""
     status: TicketStatus
@@ -139,12 +149,12 @@ def validate_arguments(models: dict[str, type[ToolArguments]], name: str, argume
 class SupportTools:
     def __init__(self, reader: PostgresReader, policy: PolicyProvider, ticket_state: TicketState,
                  writer: PostgresWriter | None = None,
-                 reviewer: Reviewer | None = None, max_rejections: int = 1):
+                 reviewer: Reviewer | None = None, max_rejections: int = 1, review_trigger: str = "automatic"):
         self.reader, self.policy, self.ticket_state = reader, policy, ticket_state
         self.writer = writer or PostgresWriter()
         self.backend_facts = BackendFacts(reader, ticket_state.clock)
         # `backend_write` decides with the gate and writes with the executor; they never share a step.
-        self.gate = WriteGate(self.backend_facts, ticket_state, reviewer, max_rejections)
+        self.gate = WriteGate(self.backend_facts, ticket_state, reviewer, max_rejections, review_trigger)
         self.executor = WriteExecutor(self.writer, ticket_state)
         self.argument_models: dict[str, type[ToolArguments]] = {
             "read_record": ReadArguments,
@@ -158,6 +168,8 @@ class SupportTools:
             "backend_write": BackendWriteArguments,
             "update_ticket": UpdateTicketArguments,
         }
+        if review_trigger == "agent":   # the agent asks for the review itself
+            self.argument_models["request_review"] = RequestReviewArguments
         descriptions = {
             "read_record": ReadArguments.__doc__,
             "get_shipments_for_order": "Get all shipments for an order ID, not a shipment ID.",
@@ -170,6 +182,7 @@ class SupportTools:
             "ticket_state": TicketArguments.__doc__,
             "backend_write": BackendWriteArguments.__doc__,
             "update_ticket": UpdateTicketArguments.__doc__,
+            "request_review": RequestReviewArguments.__doc__,
         }
         self.schemas = [
             {"type": "function", "function": {
@@ -183,7 +196,7 @@ class SupportTools:
 
     def execute(self, ticket_id: str, name: str, arguments: Any) -> dict[str, Any]:
         value = self._dispatch(ticket_id, name, arguments)
-        if name not in {"backend_write", "update_ticket", "ticket_state"} and "error" not in value:
+        if name not in {"backend_write", "request_review", "update_ticket", "ticket_state"} and "error" not in value:
             self.gate.record(ticket_id, name, value, self.policy.citable(value) if name == "policy" else set())
         return value
 
@@ -213,6 +226,8 @@ class SupportTools:
             return self.policy.run(args)
         if name == "backend_write":
             return self._backend_write(ticket_id, args)
+        if name == "request_review":
+            return self.gate.request_review(ticket_id, args)
         if name == "update_ticket":
             row = self.writer.save_ticket(ticket_id=ticket_id, at=self.ticket_state.clock.now(), **args)
             return {"status": "ticket_saved", "ticket_id": row["id"], "ticket_status": row["status"],
@@ -221,13 +236,14 @@ class SupportTools:
 
     def _backend_write(self, ticket_id: str, args: dict[str, Any]) -> dict[str, Any]:
         """The agent chose to write, so the gate decides and the executor writes: check, then the first
-        result of a repeat, then the review if the route needs one, then the write."""
+        result of a repeat, then the review if the route needs one (run now, or approved earlier through
+        request_review), then the write."""
         checked = self.gate.check(ticket_id, args)
         if checked["status"] != "allowed":
             return checked
         decision = checked["policy_check"]
         if (previous := self.executor.replay(ticket_id, args, decision)) is not None:
             return previous   # already reviewed and written: no second review
-        if decision["route"] == "approver" and (refused := self.gate.review(ticket_id, args, decision)):
+        if decision["route"] == "approver" and (refused := self.gate.require_review(ticket_id, args, decision)):
             return refused
         return self.executor.apply(ticket_id, args, decision)
