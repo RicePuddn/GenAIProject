@@ -149,12 +149,13 @@ def _run_chat(request: MultiChatRequest, tracer: Tracer,
     """One turn of the workflow; shared by /chat and /chat/stream."""
     cancellation = cancellation or CancellationToken()
     cancellation.check()
+    customer_id = signed_in(request.customer_id)   
     cfg, llm = _runtime()
     # A fresh workflow per request keeps ticket state, tokens and the tracer isolated.
     design = request.design or cfg.get("multi_agent", {}).get("design", "workflow")
     system = SupervisorAgentWorkflow if design == "supervisor" else MultiAgentWorkflow
     workflow = system(llm, cfg, clock=Clock(datetime.now(timezone.utc)), cancellation=cancellation,
-                      customer_id=signed_in(request.customer_id))
+                      customer_id=customer_id)
     history = [turn.model_dump() for turn in request.history]
     result = workflow.invoke(tracer.ticket_id, request.customer_message, strategy=request.strategy,
                              tracer=tracer, history=history, orchestration=request.orchestration)

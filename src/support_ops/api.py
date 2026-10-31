@@ -132,10 +132,11 @@ def _run_chat(request: ChatRequest, tracer: Tracer,
     """One turn of the workflow; shared by /chat and /chat/stream."""
     cancellation = cancellation or CancellationToken()
     cancellation.check()
+    customer_id = signed_in(request.customer_id)  
     cfg, llm = _runtime()
     # Keep mutable workflow state and its per-ticket tracer isolated per request.
     workflow = SingleAgentWorkflow(llm, cfg, clock=Clock(datetime.now(timezone.utc)),
-                                   cancellation=cancellation, customer_id=signed_in(request.customer_id))
+                                   cancellation=cancellation, customer_id=customer_id)
     history = [turn.model_dump() for turn in request.history]
     result = workflow.invoke(tracer.ticket_id, request.customer_message, strategy=request.strategy,
                              tracer=tracer, history=history)
