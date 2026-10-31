@@ -38,7 +38,7 @@ Gold cases use a fixed clock of 31 October 2026, 09:00 UTC.
 
 All four systems write to these tables, and each write is recorded in `backend_writes`: S1 and S2
 through the `backend_write` tool, S3 and S4 through the gateway. Conversations also save a row in `support_tickets` (multi-agent in code each turn, S1 and S2 when
-the agent calls `update_ticket`), under the signed-in `customer_id`, or `dummy_00` when none is sent. To go back to the seed rows, which deletes everything else:
+the agent calls `update_ticket`, and on every handoff), under the signed-in `customer_id`, or `dummy_00` when none is sent. To go back to the seed rows, which deletes everything else:
 
 ```bash
 .venv/bin/python scripts/seed_backend.py --reset

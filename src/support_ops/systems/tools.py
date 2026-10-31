@@ -171,6 +171,7 @@ class SupportTools:
         # `backend_write` decides with the gate and writes with the executor; they never share a step.
         self.gate = WriteGate(self.backend_facts, ticket_state, reviewer, max_rejections, review_trigger)
         self.executor = WriteExecutor(self.writer, ticket_state)
+        self.ticket_fields: dict[str, dict[str, Any]] = {}   # per ticket: the last update_ticket arguments
         self.argument_models: dict[str, type[ToolArguments]] = {
             "read_record": ReadArguments,
             "get_orders_for_customer": CustomerOrdersArguments,
@@ -254,6 +255,7 @@ class SupportTools:
             return self.gate.request_review(ticket_id, args)
         if name == "update_ticket":
             row = self.writer.save_ticket(ticket_id=ticket_id, at=self.ticket_state.clock.now(), **args)
+            self.ticket_fields[ticket_id] = args   # the agent's classification, kept if the ticket is handed off
             return {"status": "ticket_saved", "ticket_id": row["id"], "ticket_status": row["status"],
                     "customer_id": row["customer_id"], "order_id": row["order_id"]}
         return self.ticket_state.run(ticket_id, args)

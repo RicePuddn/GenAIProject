@@ -6,6 +6,7 @@ import time
 from datetime import datetime
 from typing import Any, TypedDict
 
+import psycopg
 from langgraph.graph import END, START, StateGraph
 
 from support_ops.agents.approver import Approver
@@ -13,6 +14,7 @@ from support_ops.agents.runtime import AgentContext, Budget, BudgetExceeded, Ret
 from support_ops.backend.accounts import for_account
 from support_ops.backend.postgres import PostgresReader, PostgresWriter
 from support_ops.gateway.ticket_state import TicketState
+from support_ops.gateway.tickets import confirmed_order
 from support_ops.helpers.cancellation import CancellationToken
 from support_ops.helpers.clock import Clock
 from support_ops.helpers.llm import ChatResult, LLM, OpenAICompatLLM, ToolCall
@@ -452,6 +454,32 @@ class SingleAgentWorkflow:
         ])
         return (result.content or "").strip()
 
+    def _save_handoff_ticket(self, state: SupportState, packet: dict[str, Any]) -> None:
+        """Save the ticket as awaiting_human when the turn ends in a handoff.
+
+        Category, priority and subject come from, in order of preference:
+          1. the agent's `update_ticket` call in this turn,
+          2. the ticket as saved in an earlier turn,
+          3. defaults ("other", "normal", "Handed off: <reason>").
+
+        If the save fails, the error is logged and the customer still gets their reply."""
+        ticket_id = state["ticket_id"]
+        try:
+            saved = self.tools.reader.read("support_tickets", ticket_id)
+            saved = saved if isinstance(saved, dict) and not saved.get("not_found") else {}
+            fields = {**{key: saved[key] for key in ("category", "priority", "subject") if saved.get(key)},
+                      **self.tools.ticket_fields.get(ticket_id, {})}
+            self.tools.writer.save_ticket(
+                ticket_id=ticket_id, at=self.clock.now(), status="awaiting_human",
+                category=fields.get("category", "other"), priority=fields.get("priority", "normal"),
+                subject=fields.get("subject") or f"Handed off: {packet.get('reason', 'review required')}"[:200],
+                customer_message=state["customer_message"], handoff_packet=packet,
+                order_id=fields.get("order_id") or packet.get("order_id")
+                or confirmed_order([], None, state["evidence"]))
+            self._event("ticket_saved", by="workflow", status="awaiting_human")
+        except (psycopg.Error, RuntimeError, ValueError) as exc:
+            self._event("ticket_save_failed", ticket_id=ticket_id, error=str(exc)[:300])
+
     def _handoff_reply(self, state: SupportState) -> dict[str, Any]:
         self._event("node_start", node="handoff_reply")
         packet = state.get("handoff_packet")
@@ -463,6 +491,7 @@ class SingleAgentWorkflow:
             })
             packet = handoff["handoff_packet"]
             self._event("handoff_created", packet=packet)
+        self._save_handoff_ticket(state, packet)
         # A fixed acknowledgement avoids another LLM call after a guard or budget failure.
         return {
             "reply": "I’ve referred your request to a support specialist for review.",

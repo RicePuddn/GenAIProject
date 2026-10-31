@@ -293,7 +293,9 @@ out-of-scope classification system. `customer_id` scopes data to an account, but
 experiment API does not authenticate it: any client can send any account.
 
 S1 and S2 save the conversation's `support_tickets` row through the `update_ticket` tool, which the
-prompt asks the agent to call once the outcome is known; whether it does is the agent's choice.
+prompt asks the agent to call once the outcome is known; whether it does is the agent's choice. A
+handoff ends the turn with no agent step after it, so then the workflow saves the ticket itself as
+`awaiting_human`, keeping the agent's category, priority and subject if it set them.
 
 ## Automated checks
 
