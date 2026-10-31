@@ -81,9 +81,9 @@ class WriteGateTriggerTests(unittest.TestCase):
 
 
 class ConfigTests(unittest.TestCase):
-    def test_s3_s4_ask_for_the_review_themselves(self):
+    def test_s3_s4_review_automatically_as_s1_s2_do(self):
         for path in ("configs/experiments/multi_agent_rag.yaml", "configs/experiments/multi_agent_skills.yaml"):
-            self.assertEqual(load_config(path)["review"]["trigger"], "agent")
+            self.assertEqual(load_config(path)["review"]["trigger"], "automatic")
 
 
 if __name__ == "__main__":

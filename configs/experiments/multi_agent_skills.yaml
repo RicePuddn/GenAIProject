@@ -10,8 +10,8 @@ system: multi_agent
 policy:
   mode: skills
 review:
-  trigger: agent               # design supervisor (S3/S4): specialists ask for a write's review themselves;
-                               # the fixed workflow (S7/S8) has its own decide step and ignores it
+  trigger: automatic           # S3/S4: a write needing review is reviewed inside backend_write, as for S1/S2
+                               # (agent: the specialist asks with request_review). The fixed workflow ignores it
 multi_agent:
   design: supervisor            # supervisor (S3/S4): the agents choose their steps; workflow (S7/S8): fixed steps
   orchestration: null           # react: pick each part after seeing the last; plan_and_execute: plan all parts first
