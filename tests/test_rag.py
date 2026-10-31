@@ -13,7 +13,8 @@ from support_ops.backend.postgres import PostgresReader
 from support_ops.gateway.ticket_state import TicketState
 from support_ops.helpers.clock import Clock
 from support_ops.helpers.config import load_config
-from support_ops.helpers.llm import ScriptedLLM, text, tool_call
+from support_ops.helpers.llm import text, tool_call
+from tests.scripted import ScriptedLLM
 from support_ops.policy.rag import RagPolicy
 from support_ops.policy.rag.embeddings import prepare_embeddings, read_embeddings
 from support_ops.policy.rag.loader import Clause
