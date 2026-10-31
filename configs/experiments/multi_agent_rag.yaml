@@ -8,9 +8,11 @@ system: multi_agent
 policy:
   mode: rag
 multi_agent:
+  design: workflow              # workflow: fixed steps; supervisor: the supervisor chooses every step
   orchestration: null           # react: pick each part after seeing the last; plan_and_execute: plan all parts first
   check_citations: true        # a proposal may cite only clauses or files its policy tool returned
   max_orchestration_steps: 4   # supervisor decisions per ticket (delegations + finish)
+  max_supervisor_steps: 12     # design supervisor: tool calls per ticket (refused ones too) before it is handed off
   policy_sections:              # each specialist's policy search scope: section names in the corpus
     orders_shipping: [Orders and shipping]
     returns_refunds: [Returns and refunds]

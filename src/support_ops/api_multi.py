@@ -35,6 +35,7 @@ from support_ops.helpers.workers import WorkflowWorkers
 from support_ops.policy.rules import Rules
 from support_ops.systems.multi_agent import MultiAgentWorkflow
 from support_ops.systems.single_agent import policy_from_config
+from support_ops.systems.supervisor_agent import SupervisorAgentWorkflow
 
 log = logging.getLogger("uvicorn.error")
 DEFAULT_CONFIG = "configs/experiments/multi_agent_rag.yaml"
@@ -47,6 +48,8 @@ class MultiChatRequest(BaseModel):
     ticket_id: str | None = Field(default=None, min_length=1, max_length=100)
     strategy: Literal["react", "plan_and_execute"] | None = None        # the specialists
     orchestration: Literal["react", "plan_and_execute"] | None = None   # the supervisor; default: config, else strategy
+    # workflow: fixed steps (MultiAgentWorkflow); supervisor: the supervisor chooses every step. Default: config.
+    design: Literal["workflow", "supervisor"] | None = None
     # Stateless: the client sends the earlier turns of the ticket; the server keeps nothing.
     history: list[Turn] = Field(default_factory=list, max_length=MAX_HISTORY_TURNS)
 
@@ -55,6 +58,7 @@ class MultiChatResponse(BaseModel):
     ticket_id: str
     strategy: str
     orchestration: str
+    design: str = "workflow"
     reply: str
     ticket_status: str
     case: dict[str, Any] | None = None
@@ -124,6 +128,7 @@ def info() -> dict[str, Any]:
         "default_strategy": cfg.get("agent", {}).get("strategy", "react"),
         "default_orchestration": cfg.get("multi_agent", {}).get("orchestration")
         or cfg.get("agent", {}).get("strategy", "react"),
+        "default_design": cfg.get("multi_agent", {}).get("design", "workflow"),
         "models": {role: cfg["llm"]["models"][role] for role in ("supervisor", "specialist", "approver")},
         "providers": {role: {**cfg["llm"], **cfg.get("multi_agent", {}).get("llm_by_role", {}).get(role, {})}["provider"]
                       for role in ("guard", "supervisor", "specialist", "approver")},
@@ -138,7 +143,9 @@ def _run_chat(request: MultiChatRequest, tracer: Tracer,
     cancellation.check()
     cfg, llm = _runtime()
     # A fresh workflow per request keeps ticket state, tokens and the tracer isolated.
-    workflow = MultiAgentWorkflow(llm, cfg, clock=Clock(datetime.now(timezone.utc)), cancellation=cancellation)
+    design = request.design or cfg.get("multi_agent", {}).get("design", "workflow")
+    system = SupervisorAgentWorkflow if design == "supervisor" else MultiAgentWorkflow
+    workflow = system(llm, cfg, clock=Clock(datetime.now(timezone.utc)), cancellation=cancellation)
     history = [turn.model_dump() for turn in request.history]
     result = workflow.invoke(tracer.ticket_id, request.customer_message, strategy=request.strategy,
                              tracer=tracer, history=history, orchestration=request.orchestration)
