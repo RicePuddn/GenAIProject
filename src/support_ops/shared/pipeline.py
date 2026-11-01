@@ -64,7 +64,8 @@ class TurnOutput:
 
 def interrupted(ctx: TurnContext, exc: ProviderError, parts: list[dict[str, Any]] | None = None) -> TurnResult:
     """The provider failed, so the customer has not heard the outcome: the ticket stays in progress."""
-    ctx.log("provider_error", error=str(exc.__cause__ or exc)[:300])
+    request = next((event for event in reversed(ctx.tracer.events) if event["kind"] == "llm_request"), {})
+    ctx.log("provider_error", role=request.get("role"), error=str(exc.__cause__ or exc)[:300])
     return TurnResult("in_progress", f"provider unavailable: {exc}", hold=True, parts=parts or [])
 
 

@@ -156,6 +156,9 @@ def show_event(event: dict[str, Any]) -> None:
         st.caption(f"`{event['tool']}` failed ({event['error'][:150]}), running it again")
     elif kind in {"json_retry", "json_failed"}:
         st.caption(f"Malformed reply from the {event['role']} (attempt {event['attempt']}): {event['error'][:200]}")
+    elif kind == "provider_error":
+        role = f" ({event['role']})" if event.get("role") else ""
+        st.error(f"LLM provider request{role} failed: {event.get('error', 'unknown provider error')}")
     elif kind == "turn_stopped":
         st.warning(f"Stopped for a person: {event['reason']}")
     elif kind == "budget_exceeded":
