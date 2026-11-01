@@ -19,21 +19,35 @@ MARKDOWN_CLAUSE = re.compile(r"^#{1,6}\s+([A-Z]+(?:-[A-Za-z0-9]+)+(?:\.[0-9]+)*)
 
 
 class PolicyArguments(ToolArguments):
-    __doc__ = "list: discover skills; open: read SKILL.md; read: read a discovered clause; " + CHECK_DESCRIPTION
-    action: Literal["list", "open", "read", "check"]
-    skill: NonEmpty | None = None
-    file: NonEmpty | None = None
+    __doc__ = ("list: discover skills (pass only action); open: read a skill's SKILL.md (pass action and skill); "
+               "read: read a discovered clause (pass action, skill and file); " + CHECK_DESCRIPTION)
+    action: Literal["list", "open", "read", "check"] = Field(description=(
+        "list takes no skill or file; open requires skill and takes no file; "
+        "read requires both skill and file."))
+    skill: NonEmpty | None = Field(default=None, description="Required for open and read; omit for list and check.")
+    file: NonEmpty | None = Field(default=None, description="Required for read; omit for list and open.")
     operation: Literal["delivery"] | None = None
     order_id: NonEmpty | None = Field(default=None, description="The order whose parcels a delivery check covers.")
 
     @model_validator(mode="after")
     def required_for_action(self) -> Self:
+        if self.action == "list" and (self.skill or self.file):
+            raise ValueError("list accepts only action; omit skill and file")
         if self.action == "open" and not self.skill:
-            raise ValueError("open requires skill")
-        if self.action == "read" and not (self.skill or self.file):
-            raise ValueError("read requires skill or file")
-        if self.action == "check" and not (self.operation and self.order_id):
-            raise ValueError("check requires operation delivery and order_id")
+            raise ValueError("open requires skill; omit file")
+        if self.action == "open" and self.file:
+            raise ValueError("open reads SKILL.md; omit file (use read with skill and file for a clause)")
+        if self.action == "read" and not self.skill:
+            raise ValueError("read requires skill and file; use the skill name from list")
+        if self.action == "read" and not self.file:
+            raise ValueError("read requires both skill and file; use the filename from SKILL.md")
+        if self.action == "check":
+            if self.skill or self.file:
+                raise ValueError("check accepts operation and order_id; omit skill and file")
+            if not (self.operation and self.order_id):
+                raise ValueError("check requires operation delivery and order_id")
+        elif self.operation or self.order_id:
+            raise ValueError(f"{self.action} does not accept operation or order_id")
         return self
 
 
@@ -46,8 +60,12 @@ class ScopedPolicyArguments(PolicyArguments):
 class SkillsPolicy:
     arguments = PolicyArguments
     description = PolicyArguments.__doc__
-    prompt_hint = ("Discover policies, open the matching SKILL.md, then read the relevant clause "
-                   "before advising. Never invent policy filenames or missing facts.")
+    prompt_hint = ("Use the available policy filenames to choose a matching skill (call policy with "
+                   "action list if none are provided), then call policy with action open and that skill "
+                   "to read its SKILL.md. Choose a clause named there and call policy with action read, "
+                   "the same skill, and the exact file name. open reads SKILL.md only; read requires "
+                   "both skill and file. After an error, correct the arguments from its message instead "
+                   "of repeating the same call. Never invent policy filenames or missing facts.")
 
     def __init__(self, root: str | Path = ROOT / "data/policy/skills", rules: Rules | None = None):
         path = Path(root)

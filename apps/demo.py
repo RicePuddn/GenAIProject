@@ -107,7 +107,9 @@ def show_event(event: dict[str, Any]) -> None:
         st.markdown(f"**{NODE_TITLES[event['node']]}**" + (f" · {event['agent'].replace('_', ' ')}"
                                                           if event.get("agent") else ""))
     elif kind == "llm_response" and event.get("reasoning"):
-        st.markdown(f"**Thought ({event['role']})**")
+        latency = event.get("latency_s")
+        timing = f" · {latency:.2f}s" if isinstance(latency, (int, float)) else ""
+        st.markdown(f"**Thought ({event['role']}){timing}**")
         st.info(event["reasoning"])
     elif kind == "terminal_tool_name_repaired":
         st.caption(f"Resolved `{event['generated']}` as `{event['resolved']}` using the terminal tool schema.")

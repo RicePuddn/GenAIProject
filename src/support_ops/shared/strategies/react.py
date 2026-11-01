@@ -16,8 +16,11 @@ MAX_REPEATED_ERRORS = 3
 
 def react(ctx: TurnContext, agent: Agent, tools: Toolset, brief: dict[str, Any]) -> AgentRun:
     end = prompts.load("strategies", "react_finish" if tools.terminal else "react_stop")
+    system = f"{agent.prompt}\n\n{prompts.load('strategies', 'react')} {end}"
+    if agent.planner_context:
+        system += f"\n\nPolicy retrieval context:\n{agent.planner_context}"
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": f"{agent.prompt}\n\n{prompts.load('strategies', 'react')} {end}"},
+        {"role": "system", "content": system},
         {"role": "user", "content": json.dumps(brief, default=str)},
     ]
     run, nudged, last_error, repeats = AgentRun(), False, None, 0

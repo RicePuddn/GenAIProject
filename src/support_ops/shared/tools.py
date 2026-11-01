@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, Callable, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from support_ops.shared.budget import BudgetExceeded
 from support_ops.shared.cancellation import WorkflowCancelled
@@ -64,7 +64,8 @@ class OrderArguments(ToolArguments):
 
 
 class WriteLine(ToolArguments):
-    item_id: NonEmpty
+    item_id: NonEmpty = Field(validation_alias=AliasChoices("item_id", "order_item_id", "id"),
+                              description="The order item ID from get_items_for_order.")
     quantity: int = Field(default=1, ge=1)
 
 

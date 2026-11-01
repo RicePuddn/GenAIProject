@@ -44,8 +44,13 @@ class TurnContext:
     def chat(self, role: str, messages: list[dict[str, Any]], *, tools: list[dict] | None = None,
              json_mode: bool = False) -> ChatResult:
         self.log("llm_request", role=role)
+        previous_llm_calls = self.tracer.llm_calls
         result = self.llm.chat(role, messages, tools=tools, tracer=self.tracer, json_mode=json_mode)
+        latency = None
+        if self.tracer.llm_calls > previous_llm_calls:
+            latency = self.tracer.of_kind("llm_call")[-1]["latency_s"]
         self.log("llm_response", role=role, tool_calls=[call.name for call in result.tool_calls],
+                 **({"latency_s": latency} if latency is not None else {}),
                  **({"reasoning": result.reasoning} if result.reasoning else {}))
         return result
 

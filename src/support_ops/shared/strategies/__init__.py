@@ -24,7 +24,7 @@ class Agent:
     name: str                  # in the trace and the evidence: agent, supervisor, orders_shipping, ...
     role: str                  # the LLM role: agent, supervisor or specialist
     prompt: str                # the system prompt, before the strategy's own instructions
-    planner_context: str = ""  # plan_execute: an overview given up front, e.g. the policy files
+    planner_context: str = ""  # retrieval overview given up front, e.g. available policy files or sections
 
 
 @dataclass
