@@ -3,7 +3,9 @@
 One loop on two levels: a supervisor plans the parts of the message (its calls are ask_specialist, one
 per part), a working agent plans its own tool calls. Only the planning text differs.
 
-A correction (after an invalid plan or a failed call) is a replan, up to `limits.max_replans`. After a
+A reply that is not a plan at all (not JSON, or not {"calls": [...]}) is asked for again, as every JSON reply
+is, `retries.invalid_json` times; then the run gives up. A correction (after a plan that names an unknown
+tool, bad arguments or too many calls, or after a failed call) is a replan, up to `limits.max_replans`. After a
 plan has run in full, the agent is asked once more, with the results, for anything still missing (a
 completion check, up to `limits.max_plan_checks`): that is where a plan that needed a value it had not
 seen yet goes on, and where an agent with a terminal tool finishes.
@@ -13,13 +15,26 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
 from support_ops import prompts
-from support_ops.shared.context import TurnContext, parse_json
+from support_ops.shared.context import TurnContext, chat_json
 from support_ops.shared.strategies import Agent, AgentRun
 from support_ops.shared.tools import Toolset
 
 # Results that change what comes next, so no later planned call runs on them.
 REPLAN_STATUSES = {"blocked", "review_required"}
+
+
+class PlannedCall(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    name: str
+    arguments: dict[str, Any]
+
+
+class Plan(BaseModel):
+    """The shape of a plan. Extra top-level keys (a model's own reasoning) are ignored."""
+    calls: list[PlannedCall]
 
 
 def plan_execute(ctx: TurnContext, agent: Agent, tools: Toolset, brief: dict[str, Any]) -> AgentRun:
@@ -34,17 +49,20 @@ def plan_execute(ctx: TurnContext, agent: Agent, tools: Toolset, brief: dict[str
                                tools=json.dumps(tools.schemas, separators=(",", ":")),
                                context=agent.planner_context, end=end)
     while not ctx.stopped:
-        ctx.budget.agent_step()
         system = f"{agent.prompt}\n\n{plan_prompt}"
         if checking:
             system += "\n" + prompts.load("strategies", f"plan_check_{level}")
-        reply = ctx.chat(agent.role, [
-            {"role": "system", "content": system},
-            {"role": "user", "content": json.dumps({**brief, "evidence": run.calls,
-                                                    "previous_error": previous_error}, default=str)},
-        ], json_mode=True)
         try:
-            calls = _validated(ctx, tools, reply.content)
+            plan = chat_json(ctx, agent.role, [
+                {"role": "system", "content": system},
+                {"role": "user", "content": json.dumps({**brief, "evidence": run.calls,
+                                                        "previous_error": previous_error}, default=str)},
+            ], Plan, before_call=ctx.budget.agent_step)
+        except ValueError as exc:
+            run.error = f"no readable plan: {exc}"
+            return run
+        try:
+            calls = _validated(ctx, tools, plan)
         except ValueError as exc:
             failure = f"invalid plan: {exc}"
         else:
@@ -81,15 +99,8 @@ def plan_execute(ctx: TurnContext, agent: Agent, tools: Toolset, brief: dict[str
     return run
 
 
-def _validated(ctx: TurnContext, tools: Toolset, content: str | None) -> list[tuple[str, dict[str, Any]]]:
-    plan = parse_json(content)
-    if not isinstance(plan, dict) or not isinstance(plan.get("calls"), list):
-        raise ValueError('return {"calls": [...]}')
-    calls = []
-    for call in plan["calls"]:
-        if not isinstance(call, dict) or set(call) != {"name", "arguments"}:
-            raise ValueError("each call needs exactly name and arguments")
-        calls.append((call["name"], tools.validate(call["name"], call["arguments"])))
+def _validated(ctx: TurnContext, tools: Toolset, plan: Plan) -> list[tuple[str, dict[str, Any]]]:
+    calls = [(call.name, tools.validate(call.name, call.arguments)) for call in plan.calls]
     if sum(tools.tools[name].data for name, _ in calls) > ctx.budget.tool_calls_left:
         raise ValueError("the plan exceeds the remaining tool budget")
     if tools.terminal:

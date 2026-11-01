@@ -114,13 +114,26 @@ def test_blocked_and_review_required_results_also_replan():
 
 
 def test_invalid_plans_are_corrected_up_to_max_replans():
-    bad = [as_json({"steps": []}), plan(("finish", {"outcome": "resolved", "note": "x"}),
-                                        ("lookup", {"order_id": "O1"})), plan(), text("not json")]
+    bad = [plan(("finish", {"outcome": "resolved", "note": "x"}), ("lookup", {"order_id": "O1"})), plan(),
+           plan(("unknown", {}))]
     result, ctx = run("plan_execute", ScriptedLLM().push("agent", *bad), toolset())
     reasons = [event["reason"] for event in ctx.tracer.of_kind("plan_rejected")]
-    assert reasons[1] == "invalid plan: finish can only be the last call"
-    assert reasons[2] == "invalid plan: nothing left to do: end with finish"
+    assert reasons[0] == "invalid plan: finish can only be the last call"
+    assert reasons[1] == "invalid plan: nothing left to do: end with finish"
+    assert reasons[2].startswith("invalid plan: unknown tool: 'unknown'")
     assert result.error.startswith("no plan worked after 3 corrections")
+
+
+def test_a_reply_that_is_not_a_plan_is_asked_for_again_as_every_json_reply_is():
+    llm = ScriptedLLM().push("agent", text("not json"), plan(("finish", {"outcome": "resolved", "note": "x"})))
+    result, ctx = run("plan_execute", llm, toolset())
+    assert result.finished == {"outcome": "resolved", "note": "x"}
+    assert len(ctx.tracer.of_kind("json_retry")) == 1 and not ctx.tracer.of_kind("plan_rejected")
+    # retries.invalid_json is 1: a second unreadable reply ends the run, without spending replans.
+    result, ctx = run("plan_execute", ScriptedLLM().push("agent", text("not json"), as_json({"steps": []})),
+                      toolset())
+    assert result.error.startswith("no readable plan")
+    assert ctx.budget.agent_steps == 2 and not ctx.tracer.of_kind("plan_rejected")
 
 
 def test_without_a_terminal_tool_an_empty_completion_check_ends_the_run():
