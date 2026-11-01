@@ -4,11 +4,11 @@ from unittest.mock import Mock, patch
 
 from pydantic import ValidationError
 
-from support_ops.gateway.ticket_state import TicketState
-from support_ops.helpers.clock import Clock
+from support_ops.shared.gates.ticket import TicketState
+from support_ops.shared.clock import Clock
 from support_ops.policy.facts import BackendFacts
-from support_ops.policy.rag import RagPolicy
-from support_ops.policy.skills import SkillsPolicy
+from support_ops.shared.policy.rag import RagPolicy
+from support_ops.shared.policy.skills import SkillsPolicy
 from support_ops.systems.tools import SupportTools
 from tests.fake_writer import FakeWriter
 from tests.test_multi_agent_gateway import NOW, ORDER, reader

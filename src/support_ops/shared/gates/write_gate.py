@@ -19,9 +19,9 @@ from collections import defaultdict
 from decimal import Decimal
 from typing import Any, Callable
 
-from support_ops.backend.postgres import PostgresWriter, WriteRefused
-from support_ops.gateway.ticket_state import TicketState
-from support_ops.policy.citations import unread_citations
+from support_ops.shared.db import PostgresWriter, WriteRefused
+from support_ops.shared.gates.ticket import TicketState
+from support_ops.shared.policy.citations import unread_citations
 from support_ops.policy.facts import WRITE_OPERATIONS, BackendFacts
 
 # Takes {"ticket_id", "proposal", "rule_engine_minimum", "evidence"}; returns a decision (approve, reject or

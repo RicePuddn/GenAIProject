@@ -11,15 +11,15 @@ from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient
 
 from support_ops.api import app
-from support_ops.backend.postgres import PostgresReader
-from support_ops.gateway.ticket_state import TicketState
+from support_ops.shared.db import PostgresReader
+from support_ops.shared.gates.ticket import TicketState
 from tests.fake_writer import FakeWriter
-from support_ops.helpers.clock import Clock
-from support_ops.helpers.config import load_config
-from support_ops.helpers.llm import ChatResult, OpenAICompatLLM, ToolCall, text, tool_call
+from support_ops.shared.clock import Clock
+from support_ops.shared.config import load_config
+from support_ops.shared.llm import ChatResult, OpenAICompatLLM, ToolCall, text, tool_call
 from tests.scripted import ScriptedLLM
-from support_ops.policy.rules import Rules
-from support_ops.policy.skills import SkillsPolicy
+from support_ops.shared.rules import Rules
+from support_ops.shared.policy.skills import SkillsPolicy
 from support_ops.systems.single_agent import SingleAgentWorkflow
 from support_ops.systems.tools import SupportTools
 
@@ -244,7 +244,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(body, 'event: error\ndata: {"detail": "set GROQ_API_KEY"}\n\n')
 
     def test_tracer_listener_sees_each_event_as_it_is_logged(self):
-        from support_ops.helpers.tracing import Tracer
+        from support_ops.shared.tracing import Tracer
 
         seen = []
         tracer = Tracer("T1", listener=seen.append)
@@ -402,7 +402,7 @@ class ToolTests(unittest.TestCase):
             self.assertFalse((Path(directory) / "empty.json").exists())
             (Path(directory) / "bad.json").write_text("{")
             self.assertIsNone(llm._cache_get("bad"))
-            from support_ops.helpers.tracing import Tracer
+            from support_ops.shared.tracing import Tracer
             llm.client = Mock()
             with patch.object(llm, "_cache_get", return_value=ChatResult("cached", input_tokens=100, output_tokens=50)):
                 tracer = Tracer("T1")

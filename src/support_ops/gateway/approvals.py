@@ -12,8 +12,8 @@ from decimal import Decimal
 from typing import Any, Iterable
 
 from support_ops.agents.models import ApprovalResult, HandoffPacket, Proposal
-from support_ops.gateway.ticket_state import TicketState
-from support_ops.helpers.clock import Clock
+from support_ops.shared.gates.ticket import TicketState
+from support_ops.shared.clock import Clock
 from support_ops.policy.routing import at_least
 
 TRANSITIONS: dict[str, set[str]] = {

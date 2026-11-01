@@ -9,13 +9,13 @@ from fastapi.testclient import TestClient
 
 from support_ops.api_multi import app
 
-from support_ops.backend.postgres import PostgresReader
-from support_ops.helpers.clock import Clock
+from support_ops.shared.db import PostgresReader
+from support_ops.shared.clock import Clock
 from tests.fake_writer import FakeWriter
-from support_ops.helpers.config import load_config
-from support_ops.helpers.llm import ScriptedLLM, text, tool_call
-from support_ops.policy.rag import RagPolicy
-from support_ops.policy.skills import SkillsPolicy
+from support_ops.shared.config import load_config
+from support_ops.shared.llm import ScriptedLLM, text, tool_call
+from support_ops.shared.policy.rag import RagPolicy
+from support_ops.shared.policy.skills import SkillsPolicy
 from support_ops.systems.multi_agent import HOLD_REPLY, MultiAgentWorkflow
 
 NOW = datetime(2026, 10, 1, 9, tzinfo=timezone.utc)
@@ -402,7 +402,7 @@ class EscalationTests(Base):
         self.assertEqual((flagged["turn_index"], flagged["role"], flagged["label"]), (1, "agent", "malicious"))
 
     def test_long_turns_are_screened_in_overlapping_chunks(self):
-        from support_ops.agents.guard import screen
+        from support_ops.shared.gates.guard import screen
 
         seen, events = [], []
         def chat(role, messages):
@@ -820,7 +820,7 @@ class OrderFillTests(Base):
 
 class CancellationTests(Base):
     def test_a_cancelled_ticket_does_not_start(self):
-        from support_ops.helpers.cancellation import CancellationToken, WorkflowCancelled
+        from support_ops.shared.cancellation import CancellationToken, WorkflowCancelled
 
         token = CancellationToken()
         token.cancel()
@@ -831,7 +831,7 @@ class CancellationTests(Base):
         self.assertEqual(self.llm.calls, [])
 
     def test_cancelling_mid_ticket_stops_before_approval_and_any_write(self):
-        from support_ops.helpers.cancellation import CancellationToken, WorkflowCancelled
+        from support_ops.shared.cancellation import CancellationToken, WorkflowCancelled
 
         token = CancellationToken()
         def specialist_then_disconnect(messages, tools):
@@ -956,7 +956,7 @@ class ApiTests(Base):
         import time
 
         from support_ops import api_multi
-        from support_ops.helpers.cancellation import WorkflowCancelled
+        from support_ops.shared.cancellation import WorkflowCancelled
 
         outcome, ended = {}, threading.Event()
         real_run_chat = api_multi._run_chat

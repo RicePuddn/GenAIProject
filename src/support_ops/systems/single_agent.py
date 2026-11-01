@@ -8,19 +8,19 @@ from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from support_ops.agents.approver import Approver
+from support_ops.shared.gates.approver import Approver
 from support_ops.agents.runtime import AgentContext, Budget, BudgetExceeded, Retries
-from support_ops.backend.accounts import for_account
-from support_ops.backend.postgres import PostgresReader, PostgresWriter
-from support_ops.gateway.ticket_state import TicketState
-from support_ops.helpers.cancellation import CancellationToken
-from support_ops.helpers.clock import Clock
-from support_ops.helpers.llm import ChatResult, LLM, OpenAICompatLLM, ToolCall
-from support_ops.helpers.tracing import Tracer
-from support_ops.policy.provider import PolicyProvider
-from support_ops.policy.rag import RagPolicy
-from support_ops.policy.rules import Rules
-from support_ops.policy.skills import SkillsPolicy
+from support_ops.shared.db.accounts import for_account
+from support_ops.shared.db import PostgresReader, PostgresWriter
+from support_ops.shared.gates.ticket import TicketState
+from support_ops.shared.cancellation import CancellationToken
+from support_ops.shared.clock import Clock
+from support_ops.shared.llm import ChatResult, LLM, OpenAICompatLLM, ToolCall
+from support_ops.shared.tracing import Tracer
+from support_ops.shared.policy.provider import PolicyProvider
+from support_ops.shared.policy.rag import RagPolicy
+from support_ops.shared.rules import Rules
+from support_ops.shared.policy.skills import SkillsPolicy
 from support_ops.systems.tools import SupportTools
 
 

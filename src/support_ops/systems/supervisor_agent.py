@@ -24,13 +24,13 @@ from typing import Any, Self
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from support_ops.agents.approver import Approver
+from support_ops.shared.gates.approver import Approver
 from support_ops.agents.models import SPECIALIST_ACTIONS, WRITE_ACTIONS, Proposal, ProposalDraft, Specialist
 from support_ops.agents.runtime import AgentContext, Budget, chat_json
 from support_ops.agents.specialist import STRATEGIES, Specialist as SpecialistAgent
 from support_ops.agents.toolbox import ExtraTool, Toolbox
 from support_ops.helpers.arguments import NonEmpty, ToolArguments
-from support_ops.helpers.tracing import Tracer
+from support_ops.shared.tracing import Tracer
 from support_ops.supervisor.supervisor import SPECIALIST_GUIDE, Supervisor
 from support_ops.systems.multi_agent import HISTORY_ROLES, MultiAgentState, MultiAgentWorkflow
 

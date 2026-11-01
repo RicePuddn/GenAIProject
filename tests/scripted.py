@@ -1,7 +1,7 @@
 """The single agent's scripted LLM: its independent checks approve unless a test scripts the approver."""
 import json
 
-from support_ops.helpers.llm import ScriptedLLM as BaseScriptedLLM, text
+from support_ops.shared.llm import ScriptedLLM as BaseScriptedLLM, text
 
 APPROVE = text(json.dumps({"decision": "approve", "issues": [], "reason": "Supported by the evidence."}))
 

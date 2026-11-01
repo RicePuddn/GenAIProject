@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from support_ops.backend.postgres import PostgresReader, PostgresWriter
+from support_ops.shared.db import PostgresReader, PostgresWriter
 
 # Record kinds linked to their customer through an order.
 ORDER_RECORDS = {"order_items", "payments", "returns", "refunds"}

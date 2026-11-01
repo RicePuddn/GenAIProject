@@ -9,18 +9,18 @@ from types import SimpleNamespace
 from pinecone import Document
 from unittest.mock import Mock, patch
 
-from support_ops.backend.postgres import PostgresReader
-from support_ops.gateway.ticket_state import TicketState
-from support_ops.helpers.clock import Clock
-from support_ops.helpers.config import load_config
-from support_ops.helpers.llm import text, tool_call
+from support_ops.shared.db import PostgresReader
+from support_ops.shared.gates.ticket import TicketState
+from support_ops.shared.clock import Clock
+from support_ops.shared.config import load_config
+from support_ops.shared.llm import text, tool_call
 from tests.scripted import ScriptedLLM
-from support_ops.policy.rag import RagPolicy
-from support_ops.policy.rag.embeddings import prepare_embeddings, read_embeddings
-from support_ops.policy.rag.loader import Clause
-from support_ops.policy.rag.models import DIMENSION, EMBEDDING_MODEL
-from support_ops.policy.rag.pinecone_store import upload_embeddings, verify_upload
-from support_ops.policy.rag.retriever import PineconeRetriever, RagSettings, reciprocal_rank_fusion, retrieve
+from support_ops.shared.policy.rag import RagPolicy
+from support_ops.shared.policy.rag.embeddings import prepare_embeddings, read_embeddings
+from support_ops.shared.policy.rag.loader import Clause
+from support_ops.shared.policy.rag.models import DIMENSION, EMBEDDING_MODEL
+from support_ops.shared.policy.rag.pinecone_store import upload_embeddings, verify_upload
+from support_ops.shared.policy.rag.retriever import PineconeRetriever, RagSettings, reciprocal_rank_fusion, retrieve
 from support_ops.systems.single_agent import SingleAgentWorkflow
 from support_ops.systems.tools import SupportTools
 
@@ -32,7 +32,7 @@ class RetrievalEntryTests(unittest.TestCase):
         self.assertAlmostEqual(scores["b"], 1 / 62 + 1 / 61)
 
     def test_public_entry_point_uses_the_organisation_configuration(self):
-        with patch("support_ops.policy.rag.retriever.shared_retriever") as build:
+        with patch("support_ops.shared.policy.rag.retriever.shared_retriever") as build:
             build.return_value.search.return_value = [{"id": "RET-SupportingEvidence-3.2"}]
             result = retrieve("Evidence is unsafe")
             settings = build.call_args.args[0]
@@ -73,7 +73,7 @@ class RagToolTests(unittest.TestCase):
 
     def test_workflow_builds_with_the_shared_retriever(self):
         cfg = load_config()
-        with patch("support_ops.policy.rag.policy.shared_retriever", return_value=self.engine) as build:
+        with patch("support_ops.shared.policy.rag.policy.shared_retriever", return_value=self.engine) as build:
             workflow = SingleAgentWorkflow(ScriptedLLM(), cfg, reader=Mock(spec=PostgresReader))
         self.assertIs(workflow.tools.policy.retriever, self.engine)
         build.assert_called_once()
@@ -96,8 +96,8 @@ class SavedEmbeddingTests(unittest.TestCase):
             clause = Clause(id="returns-policy-1", title="Returns", section="Returns Policy",
                             source="returns-policy.pdf", section_id="1", text="Returns are accepted.")
             embedder = Mock(encode=Mock(return_value=[[1.0] + [0.0] * (DIMENSION - 1)]))
-            with patch("support_ops.policy.rag.embeddings.ROOT", root), patch(
-                "support_ops.policy.rag.embeddings.load_corpus", return_value=[clause]
+            with patch("support_ops.shared.policy.rag.embeddings.ROOT", root), patch(
+                "support_ops.shared.policy.rag.embeddings.load_corpus", return_value=[clause]
             ) as load:
                 first = prepare_embeddings(root / "pdf", root / "embeddings", embedder)
                 self.assertEqual(first, prepare_embeddings(root / "pdf", root / "embeddings", embedder))
@@ -129,8 +129,8 @@ class SavedEmbeddingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             clause = Clause(id="policy-1", title="Returns", section="Policy", source="policy.pdf", text="Return goods.")
-            with patch("support_ops.policy.rag.embeddings.ROOT", root), patch(
-                "support_ops.policy.rag.embeddings.load_corpus", return_value=[clause]
+            with patch("support_ops.shared.policy.rag.embeddings.ROOT", root), patch(
+                "support_ops.shared.policy.rag.embeddings.load_corpus", return_value=[clause]
             ), self.assertRaisesRegex(ValueError, "768"):
                 prepare_embeddings(root / "pdf", root / "embeddings", Mock(encode=Mock(return_value=[[1.0]])))
             self.assertFalse((root / "embeddings/manifest.json").exists())
@@ -150,8 +150,8 @@ class PineconeRetrievalTests(unittest.TestCase):
             dense if kwargs["score_by"][0]["type"] == "dense_vector" else keyword))
         docs.fetch.return_value = SimpleNamespace(documents={"c": document("c")})
         settings = RagSettings(k=1, n_prime=2, **options)
-        with patch("support_ops.policy.rag.embeddings.read_embeddings", return_value=({"embedding_model": EMBEDDING_MODEL}, [])), patch(
-            "support_ops.policy.rag.pinecone_store.verify_upload"
+        with patch("support_ops.shared.policy.rag.embeddings.read_embeddings", return_value=({"embedding_model": EMBEDDING_MODEL}, [])), patch(
+            "support_ops.shared.policy.rag.pinecone_store.verify_upload"
         ):
             search = PineconeRetriever(settings, index=SimpleNamespace(documents=docs))
         search._embedder = Mock(encode=Mock(return_value=[[1.0] * DIMENSION]))
@@ -194,14 +194,14 @@ class PineconeRetrievalTests(unittest.TestCase):
             search.search("return")
 
     def test_query_recipe_mismatch_is_rejected(self):
-        with patch("support_ops.policy.rag.embeddings.read_embeddings", return_value=({"embedding_model": EMBEDDING_MODEL}, [])):
+        with patch("support_ops.shared.policy.rag.embeddings.read_embeddings", return_value=({"embedding_model": EMBEDDING_MODEL}, [])):
             with self.assertRaisesRegex(ValueError, "recipe"):
                 PineconeRetriever(RagSettings(embedding_model="different"), index=Mock())
 
     def test_startup_warm_up_loads_and_exercises_models_without_searching(self):
         search, docs = self.build()
-        with patch("support_ops.policy.rag.retriever.load_embedder") as embed, patch(
-            "support_ops.policy.rag.retriever.load_reranker"
+        with patch("support_ops.shared.policy.rag.retriever.load_embedder") as embed, patch(
+            "support_ops.shared.policy.rag.retriever.load_reranker"
         ) as rerank:
             search.warm_up()
             embed.return_value.encode.assert_called_once_with(["search_query: warm-up"])
@@ -247,8 +247,8 @@ class UploadVerificationTests(unittest.TestCase):
         docs.fetch.return_value = SimpleNamespace(documents={document["_id"]: document})
         manifest = {"corpus_hash": "renamed", "data_sha256": "vectors", "count": 1, "dimension": DIMENSION}
         with tempfile.TemporaryDirectory() as directory, patch(
-            "support_ops.policy.rag.pinecone_store.read_embeddings", return_value=(manifest, [document])
-        ), patch("support_ops.policy.rag.pinecone_store.pinecone_client") as client:
+            "support_ops.shared.policy.rag.pinecone_store.read_embeddings", return_value=(manifest, [document])
+        ), patch("support_ops.shared.policy.rag.pinecone_store.pinecone_client") as client:
             client.return_value.index.return_value = SimpleNamespace(documents=docs)
             receipt = upload_embeddings(Path(directory))
         self.assertEqual(receipt["count"], 1)

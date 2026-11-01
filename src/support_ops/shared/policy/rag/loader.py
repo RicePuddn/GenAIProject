@@ -15,7 +15,7 @@ from collections import Counter
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from support_ops.policy.rag.identifiers import POLICY_SECTION_PREFIXES
+from support_ops.shared.policy.rag.identifiers import POLICY_SECTION_PREFIXES
 
 NUMBERED_HEADING = re.compile(r"^(?:#{1,6}\s+)?(\d+(?:\.\d+)*)(?:\.)?\s+([A-Z][^\n]+?)\s*$", re.MULTILINE)
 SECTION_REFERENCE = re.compile(

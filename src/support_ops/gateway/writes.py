@@ -10,7 +10,7 @@ from typing import Any, Sequence
 
 import psycopg
 
-from support_ops.backend.postgres import PostgresWriter
+from support_ops.shared.db import PostgresWriter
 from support_ops.gateway.approvals import TicketFlow
 
 

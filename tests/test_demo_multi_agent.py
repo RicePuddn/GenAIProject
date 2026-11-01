@@ -14,11 +14,11 @@ from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient
 
 from support_ops.api_multi import app as api
-from support_ops.backend.postgres import PostgresReader
+from support_ops.shared.db import PostgresReader
 from tests.test_demo_app import CUSTOMERS
-from support_ops.helpers.config import ROOT, load_config
-from support_ops.helpers.llm import ScriptedLLM, text, tool_call
-from support_ops.policy.rag import RagPolicy
+from support_ops.shared.config import ROOT, load_config
+from support_ops.shared.llm import ScriptedLLM, text, tool_call
+from support_ops.shared.policy.rag import RagPolicy
 from support_ops.systems.multi_agent import MultiAgentWorkflow
 from tests.fake_writer import FakeWriter
 

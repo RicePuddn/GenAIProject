@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from support_ops.helpers.config import ROOT
+from support_ops.shared.config import ROOT
 
 DEFAULT_RULES_FILE = ROOT / "data/policy/rules.json"
 OPERATIONS = ("refund", "return_request", "return_dispatch", "cancel", "delivery")
@@ -86,7 +86,7 @@ class Rules:
     # Validate the JSON checks and their reviewed policy-PDF fingerprints.
     @classmethod
     def load(cls, path: str | Path = DEFAULT_RULES_FILE) -> Rules:
-        from support_ops.policy.rag.identifiers import policy_source
+        from support_ops.shared.policy.rag.identifiers import policy_source
 
         path = Path(path)
         try:

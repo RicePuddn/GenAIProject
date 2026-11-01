@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel
 
-from support_ops.policy.provider import ScopedPolicyTool
+from support_ops.shared.policy.provider import ScopedPolicyTool
 from support_ops.systems.tools import SupportTools, validate_arguments
 
 ORDERS_SHIPPING_TOOLS = (

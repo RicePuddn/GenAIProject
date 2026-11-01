@@ -3,11 +3,11 @@ either way; only the trigger differs. The pure supervisor's specialists (S3/S4) 
 agent keeps the gate's default, automatic."""
 import unittest
 
-from support_ops.gateway.ticket_state import TicketState
-from support_ops.helpers.clock import Clock
-from support_ops.helpers.config import load_config
-from support_ops.policy.rules import Rules
-from support_ops.policy.skills import SkillsPolicy
+from support_ops.shared.gates.ticket import TicketState
+from support_ops.shared.clock import Clock
+from support_ops.shared.config import load_config
+from support_ops.shared.rules import Rules
+from support_ops.shared.policy.skills import SkillsPolicy
 from support_ops.systems.tools import BackendWriteArguments, SupportTools
 from tests.fake_writer import FakeWriter
 from tests.test_multi_agent import NOW, ORDER, reader

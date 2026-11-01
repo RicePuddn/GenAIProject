@@ -4,10 +4,10 @@ import unittest
 from unittest.mock import Mock, patch
 
 from support_ops.api import signed_in
-from support_ops.backend.accounts import AccountReader, AccountWriter, for_account
-from support_ops.backend.postgres import PostgresReader
-from support_ops.helpers.config import load_config
-from support_ops.helpers.llm import text, tool_call
+from support_ops.shared.db.accounts import AccountReader, AccountWriter, for_account
+from support_ops.shared.db import PostgresReader
+from support_ops.shared.config import load_config
+from support_ops.shared.llm import text, tool_call
 from support_ops.systems.single_agent import SingleAgentWorkflow
 from tests.fake_writer import FakeWriter
 from tests.scripted import ScriptedLLM
@@ -77,9 +77,9 @@ class AccountReaderTests(unittest.TestCase):
 
 class CustomerOrdersToolTests(unittest.TestCase):
     def tools(self, backend, customer_id=None):
-        from support_ops.gateway.ticket_state import TicketState
-        from support_ops.helpers.clock import Clock
-        from support_ops.policy.skills import SkillsPolicy
+        from support_ops.shared.gates.ticket import TicketState
+        from support_ops.shared.clock import Clock
+        from support_ops.shared.policy.skills import SkillsPolicy
         from support_ops.systems.tools import SupportTools
         from datetime import datetime, timezone
 

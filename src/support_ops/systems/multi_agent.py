@@ -29,27 +29,27 @@ from typing import Any, Callable, TypedDict
 import psycopg
 from langgraph.graph import END, START, StateGraph
 
-from support_ops.agents.approver import Approver
-from support_ops.agents.guard import screen
+from support_ops.shared.gates.approver import Approver
+from support_ops.shared.gates.guard import screen
 from support_ops.agents.models import ApprovalResult, Case, Proposal, Task
 from support_ops.agents.runtime import AgentContext, Budget, BudgetExceeded, Retries, llm_from_config
 from support_ops.agents.specialist import STRATEGIES, Specialist
 from support_ops.agents.toolbox import (ORDERS_SHIPPING_TOOLS, RETURNS_REFUNDS_TOOLS, Toolbox,
                                         returns_lookup_tool)
-from support_ops.backend.accounts import for_account
-from support_ops.backend.postgres import PostgresReader, PostgresWriter
+from support_ops.shared.db.accounts import for_account
+from support_ops.shared.db import PostgresReader, PostgresWriter
 from support_ops.gateway.approvals import TicketFlow
 from support_ops.gateway.route import RouteTool
 from support_ops.gateway.tickets import ticket_fields
-from support_ops.gateway.ticket_state import TicketState
+from support_ops.shared.gates.ticket import TicketState
 from support_ops.gateway.writes import BackendWrites
-from support_ops.helpers.cancellation import CancellationToken
-from support_ops.helpers.clock import Clock
-from support_ops.helpers.llm import ChatResult, LLM
-from support_ops.helpers.tracing import Tracer
-from support_ops.policy.provider import PolicyProvider
+from support_ops.shared.cancellation import CancellationToken
+from support_ops.shared.clock import Clock
+from support_ops.shared.llm import ChatResult, LLM
+from support_ops.shared.tracing import Tracer
+from support_ops.shared.policy.provider import PolicyProvider
 from support_ops.policy.routing import RoutingRules
-from support_ops.policy.rules import Rules
+from support_ops.shared.rules import Rules
 from support_ops.supervisor.escalation import (FIXED_REPLY_TRIGGERS, HOLD_REPLY, confirm_question, customer_insists,
                                               handoff_packet, missing_records, plain_dashes)
 from support_ops.supervisor.outcome import combined_outcome, customer_outcome

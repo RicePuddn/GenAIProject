@@ -7,14 +7,14 @@ import unittest
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from support_ops.backend.postgres import PostgresReader, PostgresWriter, WriteRefused
+from support_ops.shared.db import PostgresReader, PostgresWriter, WriteRefused
 from support_ops.gateway.approvals import TicketFlow
-from support_ops.gateway.ticket_state import TicketState
+from support_ops.shared.gates.ticket import TicketState
 from support_ops.gateway.writes import BackendWrites
-from support_ops.helpers.clock import Clock
+from support_ops.shared.clock import Clock
 from support_ops.policy.facts import BackendFacts
 from support_ops.policy.routing import RoutingRules
-from support_ops.policy.skills import SkillsPolicy
+from support_ops.shared.policy.skills import SkillsPolicy
 from support_ops.systems.tools import SupportTools
 from scripts.seed_backend import seed
 

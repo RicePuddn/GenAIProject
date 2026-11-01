@@ -8,9 +8,9 @@ from collections.abc import Sequence
 from typing import Any, Literal, Protocol
 
 from support_ops.helpers.arguments import NonEmpty, ToolArguments
-from support_ops.policy.provider import ScopedPolicyTool
-from support_ops.policy.rag.retriever import RagSettings, shared_retriever
-from support_ops.policy.rules import Rules
+from support_ops.shared.policy.provider import ScopedPolicyTool
+from support_ops.shared.policy.rag.retriever import RagSettings, shared_retriever
+from support_ops.shared.rules import Rules
 from support_ops.systems.tools import RagPolicyArguments
 
 

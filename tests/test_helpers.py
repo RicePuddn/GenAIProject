@@ -6,10 +6,10 @@ from datetime import datetime, timezone
 
 import pytest
 
-from support_ops.helpers.clock import Clock
-from support_ops.helpers.config import ROOT, load_config, load_env
-from support_ops.helpers.llm import ScriptedLLM, text, tool_call
-from support_ops.helpers.tracing import Tracer
+from support_ops.shared.clock import Clock
+from support_ops.shared.config import ROOT, load_config, load_env
+from support_ops.shared.llm import ScriptedLLM, text, tool_call
+from support_ops.shared.tracing import Tracer
 
 
 def test_clock_is_controllable_and_timezone_aware():
@@ -75,7 +75,7 @@ def _groq_error(code: str, failed_generation: str):
 def _llm_raising(error):
     from unittest.mock import Mock, patch
 
-    from support_ops.helpers.llm import OpenAICompatLLM
+    from support_ops.shared.llm import OpenAICompatLLM
 
     with patch.dict(os.environ, {"GROQ_API_KEY": "test-key"}):
         llm = OpenAICompatLLM(load_config(overrides={"llm.cache_dir": None}))
@@ -110,7 +110,7 @@ def test_other_provider_errors_still_raise():
 
 def test_recovered_ids_are_the_same_on_a_replay():
     # Comment 5 on PR #5: random IDs changed later turns' messages, so a replay missed the cache.
-    from support_ops.helpers.llm import _recover_tool_calls
+    from support_ops.shared.llm import _recover_tool_calls
 
     error = _groq_error("tool_use_failed", '[{"name": "route", "arguments": {}}, {"name": "policy", "arguments": {}}]')
     first, again = _recover_tool_calls(error, "request-1"), _recover_tool_calls(error, "request-1")
@@ -121,7 +121,7 @@ def test_recovered_ids_are_the_same_on_a_replay():
 
 def test_odd_recovered_arguments_become_tool_errors_not_crashes():
     # Comment 6 on PR #5.
-    from support_ops.helpers.llm import _recover_tool_calls
+    from support_ops.shared.llm import _recover_tool_calls
 
     def arguments(generation):
         return _recover_tool_calls(_groq_error("tool_use_failed", generation))[0].arguments
@@ -134,7 +134,7 @@ def test_odd_recovered_arguments_become_tool_errors_not_crashes():
 
 def test_customer_text_with_special_tokens_is_counted_not_rejected():
     # Comment 7 on PR #5.
-    from support_ops.helpers.llm import count_tokens
+    from support_ops.shared.llm import count_tokens
 
     assert count_tokens("refund please <|endoftext|>") > count_tokens("refund please")
 

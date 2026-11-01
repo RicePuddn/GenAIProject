@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from support_ops.policy.rag.loader import (
+from support_ops.shared.policy.rag.loader import (
     resolve_references, load_corpus, read_document, split_clauses, write_chunks,
 )
 

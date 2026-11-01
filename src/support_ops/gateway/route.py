@@ -13,8 +13,8 @@ from typing import Any
 
 from support_ops.agents.models import SPECIALIST_ACTIONS, ProposalDraft, Proposal, Specialist
 from support_ops.agents.toolbox import ExtraTool
-from support_ops.backend.postgres import PostgresReader
-from support_ops.helpers.clock import Clock
+from support_ops.shared.db import PostgresReader
+from support_ops.shared.clock import Clock
 from support_ops.policy.routing import ROUTES, RoutingRules, at_least
 from support_ops.policy.facts import WRITE_OPERATIONS, BackendFacts, goods_value
 

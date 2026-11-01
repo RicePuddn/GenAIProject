@@ -6,12 +6,12 @@ import unittest
 from datetime import datetime
 from decimal import Decimal
 
-from support_ops.backend.postgres import PostgresReader
-from support_ops.helpers.clock import Clock
-from support_ops.helpers.config import ROOT
+from support_ops.shared.db import PostgresReader
+from support_ops.shared.clock import Clock
+from support_ops.shared.config import ROOT
 from support_ops.policy.facts import BackendFacts
-from support_ops.policy.rag.loader import load_corpus
-from support_ops.policy.rules import Rules
+from support_ops.shared.policy.rag.loader import load_corpus
+from support_ops.shared.rules import Rules
 from scripts.seed_backend import SEED_TABLES
 
 

@@ -20,8 +20,8 @@ from typing import Any
 from support_ops.agents.models import SPECIALIST_ACTIONS, Proposal, ProposalDraft, Specialist as SpecialistName
 from support_ops.agents.runtime import AgentContext, BudgetExceeded, chat_json, parse_json
 from support_ops.agents.toolbox import Toolbox
-from support_ops.helpers.llm import ChatResult, ToolCall
-from support_ops.policy.citations import unread_citations
+from support_ops.shared.llm import ChatResult, ToolCall
+from support_ops.shared.policy.citations import unread_citations
 
 # The same tool failing with the same error this many times in a row ends the attempt.
 MAX_REPEATED_ERRORS = 3

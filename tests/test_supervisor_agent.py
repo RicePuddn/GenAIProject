@@ -2,9 +2,9 @@
 import json
 import unittest
 
-from support_ops.helpers.clock import Clock
-from support_ops.helpers.llm import ScriptedLLM, text, tool_call
-from support_ops.policy.skills import SkillsPolicy
+from support_ops.shared.clock import Clock
+from support_ops.shared.llm import ScriptedLLM, text, tool_call
+from support_ops.shared.policy.skills import SkillsPolicy
 from support_ops.systems.supervisor_agent import NODES, SupervisorAgentWorkflow
 from support_ops.systems.multi_agent import HOLD_REPLY
 from tests.fake_writer import FakeWriter
@@ -392,7 +392,7 @@ class ApiTests(SupervisorBase):
         from fastapi.testclient import TestClient
 
         from support_ops.api_multi import app
-        from support_ops.helpers.config import load_config
+        from support_ops.shared.config import load_config
 
         self.llm.push("orchestrator", choose("ask_customer", question="Which order is it?")).push(
             "supervisor", text("Which order is it?")).push("approver", verdict())
@@ -436,7 +436,7 @@ class DemoPageTests(unittest.TestCase):
         from streamlit.testing.v1 import AppTest
 
         from support_ops.api_multi import app as api
-        from support_ops.helpers.config import ROOT
+        from support_ops.shared.config import ROOT
         from tests.test_demo_multi_agent import ORDER, RealApi, reader as demo_reader
 
         class SupervisorApi(RealApi):

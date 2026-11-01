@@ -7,10 +7,10 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, ValidationError
 
-from support_ops.helpers.clock import Clock
-from support_ops.helpers.config import deep_merge
-from support_ops.helpers.llm import LLM, ChatResult, OpenAICompatLLM
-from support_ops.helpers.tracing import Tracer
+from support_ops.shared.clock import Clock
+from support_ops.shared.config import deep_merge
+from support_ops.shared.llm import LLM, ChatResult, OpenAICompatLLM
+from support_ops.shared.tracing import Tracer
 
 
 class RoleRoutedLLM:

@@ -10,7 +10,7 @@ from typing import Annotated, Any, Literal, Self
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
-from support_ops.backend.postgres import TicketCategory, TicketPriority
+from support_ops.shared.db import TicketCategory, TicketPriority
 from support_ops.policy.routing import Route
 
 NonEmpty = Annotated[str, Field(min_length=1)]

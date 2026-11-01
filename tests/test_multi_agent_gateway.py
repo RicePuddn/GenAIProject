@@ -7,14 +7,14 @@ from pydantic import ValidationError
 
 from support_ops.agents.models import ApprovalResult, HandoffPacket, Proposal
 from support_ops.agents.toolbox import ORDERS_SHIPPING_TOOLS, RETURNS_REFUNDS_TOOLS, ExtraTool, Toolbox
-from support_ops.backend.postgres import PostgresReader
+from support_ops.shared.db import PostgresReader
 from support_ops.gateway.approvals import TicketFlow
 from support_ops.gateway.route import RouteTool
-from support_ops.gateway.ticket_state import TicketState
+from support_ops.shared.gates.ticket import TicketState
 from support_ops.gateway.writes import BackendWrites
-from support_ops.helpers.clock import Clock
-from support_ops.policy.rag import RagPolicy
-from support_ops.policy.rag.policy import PolicySearchArguments
+from support_ops.shared.clock import Clock
+from support_ops.shared.policy.rag import RagPolicy
+from support_ops.shared.policy.rag.policy import PolicySearchArguments
 from support_ops.policy.routing import RoutingRules
 from support_ops.systems.tools import SupportTools
 from tests.fake_writer import FakeWriter

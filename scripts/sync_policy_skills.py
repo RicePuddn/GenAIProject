@@ -1,6 +1,6 @@
 """Refresh the skills' clause files from the same PDFs used by RAG."""
-from support_ops.helpers.config import ROOT
-from support_ops.policy.rag.loader import load_corpus
+from support_ops.shared.config import ROOT
+from support_ops.shared.policy.rag.loader import load_corpus
 
 
 # Keep the existing skill filenames while copying every complete PDF clause.

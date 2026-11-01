@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from support_ops.helpers.llm import ChatResult
+from support_ops.shared.llm import ChatResult
 
 Chat = Callable[..., ChatResult]
 Log = Callable[..., None]

@@ -17,7 +17,7 @@ from dataclasses import dataclass, fields
 from functools import lru_cache
 from typing import Any
 
-from support_ops.policy.rag.models import EMBEDDING_MODEL, RERANK_MODEL, load_embedder, load_reranker
+from support_ops.shared.policy.rag.models import EMBEDDING_MODEL, RERANK_MODEL, load_embedder, load_reranker
 
 # search_text is the existing index's BM25 field and the only stored copy of chunk text.
 FIELDS = ["source", "domain", "category", "section_id", "section_title", "search_text", "references"]
@@ -103,8 +103,8 @@ class PineconeRetriever:
     # Connect to an existing index. This class never creates an index or uploads data.
     def __init__(self, settings: RagSettings, *, index=None):
         self.settings = settings
-        from support_ops.policy.rag.embeddings import read_embeddings
-        from support_ops.policy.rag.pinecone_store import pinecone_client, verify_upload
+        from support_ops.shared.policy.rag.embeddings import read_embeddings
+        from support_ops.shared.policy.rag.pinecone_store import pinecone_client, verify_upload
 
         self.manifest, documents = read_embeddings()
         if settings.embedding_model != self.manifest["embedding_model"] or not settings.contextual:
@@ -208,7 +208,7 @@ def shared_retriever(settings: RagSettings) -> PineconeRetriever:
 
 # Public entry point: use the organisation's selected retrieval settings from base.yaml.
 def retrieve(query: str) -> list[dict]:
-    from support_ops.helpers.config import load_config
+    from support_ops.shared.config import load_config
 
     settings = RagSettings.from_config(load_config()["policy"]["rag"])
     return shared_retriever(settings).search(query)

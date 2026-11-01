@@ -6,9 +6,9 @@ import json
 import math
 from pathlib import Path
 
-from support_ops.helpers.config import ROOT
-from support_ops.policy.rag.loader import load_corpus, write_chunks
-from support_ops.policy.rag.models import DIMENSION, EMBEDDING_MODEL, Embedder, load_embedder
+from support_ops.shared.config import ROOT
+from support_ops.shared.policy.rag.loader import load_corpus, write_chunks
+from support_ops.shared.policy.rag.models import DIMENSION, EMBEDDING_MODEL, Embedder, load_embedder
 
 EMBEDDING_DIR = ROOT / "data/policy/embeddings"
 EMBEDDING_RECIPE = {
@@ -90,7 +90,7 @@ def read_embeddings(folder: Path = EMBEDDING_DIR) -> tuple[dict, list[dict]]:
 
 
 if __name__ == "__main__":
-    from support_ops.helpers.config import load_config
+    from support_ops.shared.config import load_config
 
     policy = load_config()["policy"]
     manifest = prepare_embeddings(ROOT / policy["corpus_dir"])

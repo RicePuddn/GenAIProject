@@ -5,7 +5,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from support_ops.helpers.config import ROOT
+from support_ops.shared.config import ROOT
 
 INFO = {"policy_mode": "rag", "corpus": "mini", "default_strategy": "react",
         "model": "openai/gpt-oss-120b", "reasoning_effort": "medium"}

@@ -11,9 +11,9 @@ import yaml
 from pydantic import model_validator
 
 from support_ops.helpers.arguments import NonEmpty, ToolArguments
-from support_ops.helpers.config import ROOT
-from support_ops.policy.provider import ScopedPolicyTool
-from support_ops.policy.rules import Rules
+from support_ops.shared.config import ROOT
+from support_ops.shared.policy.provider import ScopedPolicyTool
+from support_ops.shared.rules import Rules
 from support_ops.systems.tools import PolicyArguments
 
 # Clause headings belong to skills Markdown; the RAG loader reads numbered PDF sections.

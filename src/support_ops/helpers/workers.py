@@ -3,7 +3,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from threading import BoundedSemaphore, Lock
 from typing import Callable
 
-from .cancellation import CancellationToken
+from support_ops.shared.cancellation import CancellationToken
 
 
 class WorkflowWorkers:

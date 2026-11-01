@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from support_ops.helpers.clock import Clock
-from support_ops.policy.rules import Rules
+from support_ops.shared.clock import Clock
+from support_ops.shared.rules import Rules
 
 
 class TicketState:

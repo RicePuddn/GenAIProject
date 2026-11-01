@@ -7,10 +7,10 @@ import os
 import time
 from pathlib import Path
 
-from support_ops.helpers.config import load_env
-from support_ops.policy.rag.identifiers import POLICY_SECTION_PREFIXES
-from support_ops.policy.rag.embeddings import EMBEDDING_DIR, read_embeddings
-from support_ops.policy.rag.models import DIMENSION
+from support_ops.shared.config import load_env
+from support_ops.shared.policy.rag.identifiers import POLICY_SECTION_PREFIXES
+from support_ops.shared.policy.rag.embeddings import EMBEDDING_DIR, read_embeddings
+from support_ops.shared.policy.rag.models import DIMENSION
 
 # Read index settings from .env; never print or save the API key.
 def pinecone_client():

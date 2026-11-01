@@ -11,13 +11,13 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from support_ops.api_multi import app
-from support_ops.policy.citations import citation_forms
+from support_ops.shared.policy.citations import citation_forms
 from support_ops.agents.toolbox import Toolbox
-from support_ops.helpers.clock import Clock
+from support_ops.shared.clock import Clock
 from tests.fake_writer import FakeWriter
-from support_ops.helpers.config import load_config
-from support_ops.helpers.llm import text, tool_call
-from support_ops.policy.skills import SkillsPolicy
+from support_ops.shared.config import load_config
+from support_ops.shared.llm import text, tool_call
+from support_ops.shared.policy.skills import SkillsPolicy
 from support_ops.systems.multi_agent import MultiAgentWorkflow
 from support_ops.systems.tools import SupportTools
 from tests.test_multi_agent import NOW, Base, rag_policy, reader, route, decide, verdict

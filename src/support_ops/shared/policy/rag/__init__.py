@@ -7,7 +7,7 @@ pinecone_store.py  upload records to the existing index
 retriever.py       shared retrieval for agents and evaluation
 policy.py          adapter for the existing agent policy tool
 """
-from support_ops.policy.rag.policy import RagPolicy
-from support_ops.policy.rag.retriever import retrieve
+from support_ops.shared.policy.rag.policy import RagPolicy
+from support_ops.shared.policy.rag.retriever import retrieve
 
 __all__ = ["RagPolicy", "retrieve"]

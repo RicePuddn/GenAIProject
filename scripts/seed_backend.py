@@ -12,7 +12,7 @@ import psycopg
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
-from support_ops.helpers.config import ROOT, load_env
+from support_ops.shared.config import ROOT, load_env
 
 
 # Products.

@@ -12,12 +12,12 @@ from typing import Any, Literal, Self
 
 from pydantic import Field, model_validator
 
-from support_ops.backend.postgres import (PostgresReader, PostgresWriter, RECORD_KINDS, TicketCategory,
+from support_ops.shared.db import (PostgresReader, PostgresWriter, RECORD_KINDS, TicketCategory,
                                           TicketPriority, TicketStatus)
-from support_ops.gateway.ticket_state import TicketState
-from support_ops.gateway.write_gate import Reviewer, WriteExecutor, WriteGate
+from support_ops.shared.gates.ticket import TicketState
+from support_ops.shared.gates.write_gate import Reviewer, WriteExecutor, WriteGate
 from support_ops.helpers.arguments import Amount, NonEmpty, ToolArguments
-from support_ops.policy.provider import PolicyProvider
+from support_ops.shared.policy.provider import PolicyProvider
 from support_ops.policy.facts import BackendFacts
 
 

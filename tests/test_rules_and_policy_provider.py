@@ -7,14 +7,14 @@ from pathlib import Path
 from typing import Literal
 from unittest.mock import Mock, patch
 
-from support_ops.backend.postgres import PostgresReader
+from support_ops.shared.db import PostgresReader
 from support_ops.helpers.arguments import NonEmpty, ToolArguments
-from support_ops.helpers.config import load_config
-from support_ops.helpers.llm import text, tool_call
+from support_ops.shared.config import load_config
+from support_ops.shared.llm import text, tool_call
 from tests.scripted import ScriptedLLM
-from support_ops.policy.rules import Rules
-from support_ops.policy.rag.loader import load_corpus
-from support_ops.helpers.config import ROOT
+from support_ops.shared.rules import Rules
+from support_ops.shared.policy.rag.loader import load_corpus
+from support_ops.shared.config import ROOT
 from support_ops.systems.single_agent import SingleAgentWorkflow
 
 REFUND_FACTS = {
@@ -156,7 +156,7 @@ class RulesTests(unittest.TestCase):
             (folder / "returns-and-refunds-policy.pdf").write_bytes(b"changed")
             path = root / "rules.json"
             path.write_text(json.dumps(data))
-            with patch("support_ops.policy.rules.rules.ROOT", root), self.assertRaisesRegex(ValueError, "review its hard rules"):
+            with patch("support_ops.shared.rules.ROOT", root), self.assertRaisesRegex(ValueError, "review its hard rules"):
                 Rules.load(path)
 
 
@@ -218,7 +218,7 @@ class FakePolicy:
 class WorkflowWiringTests(unittest.TestCase):
     def setUp(self):
         self.cfg = load_config()
-        build = patch("support_ops.policy.rag.policy.shared_retriever", return_value=Mock())
+        build = patch("support_ops.shared.policy.rag.policy.shared_retriever", return_value=Mock())
         build.start()
         self.addCleanup(build.stop)
         self.reader = Mock(spec=PostgresReader)

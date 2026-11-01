@@ -7,8 +7,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 
-from support_ops.helpers.config import ROOT
-from support_ops.policy.rules import DEFAULT_RULES_FILE, Rules
+from support_ops.shared.config import ROOT
+from support_ops.shared.rules import DEFAULT_RULES_FILE, Rules
 
 Route = Literal["auto", "approver", "human"]
 ROUTES: tuple[Route, ...] = ("auto", "approver", "human")
