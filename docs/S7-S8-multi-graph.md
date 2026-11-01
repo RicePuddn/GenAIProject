@@ -15,7 +15,8 @@ plan_execute/react, supervisor first).
   reads and scoped policy) → propose → rule check → review (approver route) → write. Refusals go back to
   gather with the reason.
 - **Code decides the ticket's outcome:** the strictest of the parts (awaiting_human, then
-  awaiting_customer, then resolved).
+  awaiting_customer, then resolved). If the supervisor gives up (the same error three times, or no plan
+  after its replans), the ticket goes to a person instead, since a part may never have been asked.
 
 ## A turn
 
