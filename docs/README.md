@@ -30,6 +30,10 @@ reply check → ticket save**. Only the body differs between setups. The rest is
   processed). Code rejects paid-refund claims and internal IDs. Then the approver checks the reply. If no
   draft passes, the customer gets the hold reply.
 - **Ticket save.** The ticket is saved in code at the end of every turn.
+- **Failures.** A tool or write that fails for a reason the model can't fix is retried once. If the LLM
+  provider fails, the ticket is saved `in_progress` and the customer is asked to send the message again. Writes
+  already made replay rather than repeat. A tool call that keeps failing does the same to a turn that would
+  otherwise end `resolved`, so an agent cannot resolve a ticket over work that never ran.
 - **Budget.** One per ticket, shared by every agent in it: 40 tool calls, 30 agent steps, US$0.05. Hitting
   it ends the turn with the hold reply.
 

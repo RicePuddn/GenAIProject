@@ -135,6 +135,10 @@ class Rules:
             unsupported_operation=config["unsupported_operation"],
         )
 
+    @property
+    def return_reasons(self) -> list[str]:
+        return self.data["return_request"]["allowed_reasons"]
+
     # Copy the JSON outcome, then add the rule identity, policy sources and case details.
     def _result(self, group: str, check: str, **details) -> dict:
         definition = self.data[group]
@@ -231,6 +235,8 @@ class Rules:
             return self._result(group, "window_exceeded", deadline=deadline.isoformat())
         if facts.get("reason") not in config["allowed_reasons"]:
             return self._result(group, "unsupported_reason")
+        if facts.get("new_request") is True:
+            return self._new_return_request(facts, deadline)
         if facts.get("evidence_status") != "verified":
             return self._result(group, "unverified_evidence")
         if facts["reason"] == "change_of_mind":
@@ -242,6 +248,17 @@ class Rules:
             if not all(facts[name] for name in config["change_of_mind_required"]):
                 return self._result(group, "item_conditions_failed")
         return self._result(group, "passed", deadline=deadline.isoformat())
+
+    # A first request has no return record yet, so its evidence and item conditions are the store's to
+    # review later; only what is already recorded can refuse it here.
+    def _new_return_request(self, facts: dict, deadline: date) -> dict:
+        group = "return_request"
+        if facts["reason"] == "change_of_mind":
+            if type(facts.get("final_sale")) is not bool:
+                return self._result(group, "missing_item_conditions")
+            if facts["final_sale"]:
+                return self._result(group, "final_sale")
+        return self._result(group, "new_request", deadline=deadline.isoformat())
 
     # -------------------- Group 4: Return dispatch --------------------
 
@@ -324,7 +341,7 @@ class BackendFacts:
 
     # Read the affected goods, then collect only the fields needed by the operation.
     def read(self, operation: str, order_id: str, item_ids: list[str] | None = None,
-             *, history: dict | None = None) -> dict[str, Any]:
+             *, history: dict | None = None, stated_reason: str | None = None) -> dict[str, Any]:
         order = self.reader.read("orders", order_id)
         if not isinstance(order, dict) or order.get("not_found"):
             return {}
@@ -355,6 +372,12 @@ class BackendFacts:
         facts.update(self._return_review(history, selected, affected, operation))
         if operation in {"return_request", "exchange"}:
             facts.setdefault("requested_at", self.clock.now().isoformat())
+        if operation == "return_request" and stated_reason and "return_id" not in facts \
+                and not facts["return_scope_unverified"]:
+            # The first request for these goods: until a return exists, the reason can only be the one stated.
+            facts.update(new_request=True, reason=stated_reason)
+            if all(type(item.get("final_sale")) is bool for item in affected):
+                facts["final_sale"] = any(item["final_sale"] for item in affected)
         if operation == "refund":
             if not facts.get("delivered_at") and facts.get("inspection_status") != "waived":
                 facts["inspection_or_waiver"] = False

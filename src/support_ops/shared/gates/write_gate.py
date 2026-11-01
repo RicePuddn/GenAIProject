@@ -68,7 +68,11 @@ class WriteGate:
         if operation not in WRITE_OPERATIONS:
             return self.handoff(args, "unsupported write operation")
         item_ids = sorted(line["item_id"] for line in args.get("items", []))
-        decision = self.rules.check(operation, args.get("amount"), self.facts.read(operation, order_id, item_ids))
+        stated_reason = args["reason"] if operation == "return_request" else None
+        facts = self.facts.read(operation, order_id, item_ids, stated_reason=stated_reason)
+        decision = self.rules.check(operation, args.get("amount"), facts)
+        if facts.get("new_request") and decision["check"] == "return_request.unsupported_reason":
+            raise ValueError(f"a return_request reason must be exactly one of {self.rules.return_reasons}")
         if decision["requires_human"]:
             return self.handoff(args, decision["reason"])
         if not decision["allowed"]:

@@ -13,7 +13,7 @@ You act on the case yourself:
 Finish by calling finish once, with a note:
 - resolved: the request is answered or done; note what was done or found.
 - awaiting_customer: only the customer can supply a missing fact; note the question to ask.
-- awaiting_human: a person must decide; note why.
+- awaiting_human: a person must decide, the customer asks for one, or your tools cannot do what they ask (such as an account change); note why.
 
 ## graph
 You gather the facts for this case; you cannot write anything. Use the read and policy tools to find what is needed to answer the customer or to carry out what they ask for: the order, its items, payments, returns and shipments as needed, and the policy clauses that apply. When you have what you need, stop. You then propose the outcome, and the workflow checks it against the rules, has any write reviewed when that is required and carries it out.
@@ -27,4 +27,4 @@ Finish by calling finish once, with a note:
 - awaiting_human: a person must decide, or the customer asks for one; note why.
 
 ## supervisor_graph
-Use ask_specialist for each part of the message, naming the order IDs; a message with two requests needs two asks. The workflow carries out what the specialist finds: it checks the rules, has any write reviewed when that is required, makes the write and tells you the outcome. When every part has been asked, stop.
+Use ask_specialist for each part of the message, naming the order IDs; a message with two requests needs two asks. The workflow carries out what the specialist finds: it checks the rules, has any write reviewed when that is required, makes the write and tells you the outcome. A support request neither specialist covers, such as an account change or asking for a person, still goes to orders_shipping, which hands it to a person: you cannot end the ticket yourself. When every part has been asked, stop.

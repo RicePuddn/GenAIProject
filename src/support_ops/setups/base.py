@@ -13,7 +13,7 @@ from support_ops.shared.policy.provider import PolicyProvider
 from support_ops.shared.strategies import AgentRun
 from support_ops.shared.tools import ToolRegistry
 
-Status = Literal["resolved", "awaiting_customer", "awaiting_human"]
+Status = Literal["resolved", "awaiting_customer", "awaiting_human", "in_progress"]   # in_progress: the turn was cut off
 STRICTNESS: tuple[Status, ...] = ("resolved", "awaiting_customer", "awaiting_human")
 
 

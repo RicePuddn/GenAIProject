@@ -25,6 +25,7 @@ STATUS_LABELS = {
     "resolved": ("success", "Resolved"),
     "awaiting_customer": ("info", "Waiting for the customer"),
     "awaiting_human": ("warning", "Awaiting a human operator"),
+    "in_progress": ("error", "Cut off: the LLM provider failed. Send the message again"),
 }
 NODE_TITLES = {"gather": "Gather facts", "propose": "Propose", "check": "Rule check", "write_review": "Write review",
                "reply": "Reply and reply check"}

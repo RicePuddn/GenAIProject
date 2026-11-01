@@ -1,5 +1,9 @@
 """`run_turn`: guard → setup body → reply and reply check → ticket save, the same for every setup.
 
+If the LLM provider fails, or a tool call fails for good and the turn would still end resolved, it ends
+`in_progress`: the ticket is saved and the customer is asked to send their message again. Sending it on the
+same ticket is safe, because each write replays by its key.
+
 The pipeline builds the turn's shared services (the account-scoped database, the policy provider, the
 rules, the write gate and the tool registry) and runs the gates around the setup's body, so a setup
 implements only its body and never calls the guard, the reply check or the ticket save itself.
@@ -19,11 +23,11 @@ from support_ops.shared.db import PostgresReader, PostgresWriter
 from support_ops.shared.db.accounts import for_account
 from support_ops.shared.gates.approver import Approver
 from support_ops.shared.gates.guard import screen
-from support_ops.shared.gates.handoff import HOLD_REPLY, handoff_packet
+from support_ops.shared.gates.handoff import HOLD_REPLY, INTERRUPTED_REPLY, handoff_packet
 from support_ops.shared.gates.reply import problems, write_reply
 from support_ops.shared.gates.ticket import TicketLog, save_ticket
 from support_ops.shared.gates.write_gate import WriteExecutor, WriteGate
-from support_ops.shared.llm import LLM
+from support_ops.shared.llm import LLM, ProviderError
 from support_ops.shared.policy.provider import PolicyProvider, policy_from_config
 from support_ops.shared.rules import BackendFacts, Rules
 from support_ops.shared.tools import ToolRegistry
@@ -58,6 +62,12 @@ class TurnOutput:
     history: list[dict[str, str]] = field(default_factory=list)
 
 
+def interrupted(ctx: TurnContext, exc: ProviderError, parts: list[dict[str, Any]] | None = None) -> TurnResult:
+    """The provider failed, so the customer has not heard the outcome: the ticket stays in progress."""
+    ctx.log("provider_error", error=str(exc.__cause__ or exc)[:300])
+    return TurnResult("in_progress", f"provider unavailable: {exc}", hold=True, parts=parts or [])
+
+
 def run_turn(setup: Setup, llm: LLM, *, ticket_id: str, message: str, history: list[dict[str, str]] | None = None,
              customer_id: str | None = None, reader: PostgresReader | None = None,
              writer: PostgresWriter | None = None, policy: PolicyProvider | None = None, clock: Clock | None = None,
@@ -90,15 +100,23 @@ def run_turn(setup: Setup, llm: LLM, *, ticket_id: str, message: str, history: l
     turn = Turn(ctx, brief, ToolRegistry(reader, policy, gate, executor), gate, executor, policy, customer_id)
 
     ctx.log("workflow_start", setup=cfg["setup"]["id"], strategy=cfg["strategy"], history_turns=len(history))
-    flag = screen(ctx, history, message)
-    if flag != "benign":
-        result = TurnResult("awaiting_human", f"guard: {flag}", hold=True)
-    else:
-        try:
+    try:
+        flag = screen(ctx, history, message)
+        if flag != "benign":
+            result = TurnResult("awaiting_human", f"guard: {flag}", hold=True)
+        else:
             result = setup.run(turn)
-        except BudgetExceeded as exc:
-            ctx.log("budget_exceeded", reason=str(exc))
-            result = TurnResult("awaiting_human", f"budget: {exc}", hold=True, parts=[])
+    except BudgetExceeded as exc:
+        ctx.log("budget_exceeded", reason=str(exc))
+        result = TurnResult("awaiting_human", f"budget: {exc}", hold=True, parts=[])
+    except ProviderError as exc:
+        result = interrupted(ctx, exc)
+
+    if result.status == "resolved" and ctx.failed_calls:
+        # An agent cannot call a ticket resolved over work that never ran.
+        ctx.log("tool_failure_unfinished", failed=ctx.failed_calls)
+        result = TurnResult("in_progress", f"a tool failed: {next(iter(ctx.failed_calls.values()))[:200]}", hold=True,
+                            parts=result.parts)
 
     reply, review = HOLD_REPLY, None
     if not result.hold:
@@ -109,11 +127,17 @@ def run_turn(setup: Setup, llm: LLM, *, ticket_id: str, message: str, history: l
         except BudgetExceeded as exc:
             ctx.log("budget_exceeded", reason=str(exc))
             drafted = None
-        if drafted is None:
+        except ProviderError as exc:
+            drafted = None
+            if result.status != "awaiting_human":   # a person already has it otherwise; the hold reply stands
+                result = interrupted(ctx, exc, result.parts)
+        if drafted is not None:
+            reply = drafted
+        elif result.status != "in_progress":
             result = replace(result, status="awaiting_human",
                              note=result.note if result.status == "awaiting_human" else "reply failed review")
-        else:
-            reply = drafted
+    if result.status == "in_progress":
+        reply = INTERRUPTED_REPLY
 
     packet = None
     if result.status == "awaiting_human":

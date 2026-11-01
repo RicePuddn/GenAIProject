@@ -1,5 +1,5 @@
 {
-  "version": "2026-10-31",
+  "version": "2026-11-01",
   "currency": "SGD",
   "timezone": "Asia/Singapore",
   "policy_documents": {
@@ -228,6 +228,15 @@
         "RET-ReturnProcedure-4.1"
       ],
       "checks": {
+        "new_request": {
+          "given": "A first request within the window, for an allowed reason, with no return on record yet. Change-of-mind requests also need goods not sold as final sale.",
+          "outcome": {
+            "allowed": true,
+            "requires_human": false,
+            "reason": "The return request may be recorded as requested; the store reviews its evidence and item conditions before any return or refund is approved.",
+            "route": "auto"
+          }
+        },
         "missing_dates": {
           "given": "The affected item's delivered_at or requested_at date is missing.",
           "outcome": {

@@ -1,9 +1,13 @@
-"""What a human operator receives when a turn ends awaiting_human, and what the customer is told meanwhile."""
+"""What a human operator receives when a turn ends awaiting_human, and what the customer is told meanwhile or when a turn is cut off."""
 from __future__ import annotations
 
 from typing import Any
 
 HOLD_REPLY = "I’ve referred your request to a support specialist for review."
+# The LLM provider or a tool failed, so the turn's outcome cannot be reported. It claims nothing about the
+# request, or that the ticket was saved: the database may be what failed.
+INTERRUPTED_REPLY = ("Sorry, we hit a technical problem and couldn’t finish your request. Please send your message "
+                     "again in a little while.")
 
 
 def handoff_packet(*, ticket_id: str, reason: str, message: str, evidence: list[dict[str, Any]],

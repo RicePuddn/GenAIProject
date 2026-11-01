@@ -32,6 +32,8 @@ class TurnContext:
     # Every data tool call in this turn: {"agent", "tool", "arguments", "result"}.
     evidence: list[dict[str, Any]] = field(default_factory=list)
     stop_reason: str | None = None
+    # Tool calls that failed for a reason no agent can fix and never succeeded after: {call key: error}.
+    failed_calls: dict[str, str] = field(default_factory=dict)
     _call_count: int = 0
 
     def log(self, kind: str, **payload: Any) -> None:

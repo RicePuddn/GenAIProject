@@ -79,6 +79,7 @@ Each variant has a setup ID such as `s1-a` or `s3-c`, resolved from the one matr
 | Reply | Same reply prompt and the same wording checks, written from the ticket's status, the agent's note, the evidence and the problems code finds in what the agents looked up |
 | Ticket save | Saved in code at the end of every turn, the same way in every setup |
 | Budgets | 40 tool calls, 30 agent steps and US$0.05 per ticket, shared by every agent in it; one retry policy (`retries`). The step limit is a safety net set above what a multi-agent ticket needs, so it should rarely end a ticket; budget stops are reported per setup as their own failure type |
+| Failures | A tool or write that fails for a reason the model can't fix is re-run under `retries` in every setup, graph stages included; control tools are not re-run. If the LLM provider fails, every setup ends the turn `in_progress`: the ticket is saved, the customer is asked to send the message again, and no write repeats. A ticket a person already has stays `awaiting_human`. A tool call that fails for good and never works later also stops a turn ending `resolved`: it ends `in_progress` the same way, whatever the agent concluded |
 | Clock | Fixed at `run.clock_start` (2026-10-01 09:00 +08:00); only an explicit `clock_start` in an API request (the demo's "use today's date") overrides it |
 | LLM cache | Off (`llm.cache_dir: null`); when on, the trial number (`run.trial`) is part of the key |
 
@@ -208,12 +209,19 @@ All 19 issues listed before the refactor are resolved:
   priority "normal", and uses the first customer message as the subject. The `update_ticket` tool is gone.
 - **Handoffs end the turn.** When the write gate hands a write to a person, the whole turn ends `awaiting_human`
   in every setup, so in a multi-part message later parts may not run. In the graph setups a proposal of
-  `awaiting_human` does the same; S7/S8 otherwise end on the strictest outcome of their parts, or with a person
-  if the supervisor gives up (as S3/S4 do when the supervisor never calls `finish`).
+  `awaiting_human`, or an agent that gives up while gathering, does the same; S7/S8 otherwise end on the
+  strictest outcome of their parts, or with a person if the supervisor gives up (as S3/S4 do when the supervisor
+  never calls `finish`). A support request neither S7/S8 specialist covers still goes to `orders_shipping`, which
+  hands it to a person, so the supervisor keeps its one tool.
 - **What S7/S8's route tool did, kept for every setup.** A write may ask for a stricter route, a claimed policy
   exception gets a review, unseen returns and refunds are shown once, and code-found problems reach the reply.
   Default routes per action (exchange to the approver, account changes to a person) are not kept: those are
   unsupported writes and go to a person.
+- **First return requests.** An agent may record one when the rules allow it: within the window, an allowed
+  reason, and not a change of mind on final-sale goods. The agent classifies the reason from what the customer
+  reported (RET-ReturnEligibility-2.3), with no approver review: no money moves on it. It is written as
+  `requested`, and the store reviews the evidence and item conditions later, so those are not checked here. The refund is a separate, later step: it needs
+  the return approved and inspected.
 - **Replies.** Every setup's reply is written from the evidence by the `reply_writer` role; the multi-agent
   outcome summary (`tell_customer`) is removed.
 - **Specialists' writes.** They are not limited per specialist; the prompts say which operations are whose.

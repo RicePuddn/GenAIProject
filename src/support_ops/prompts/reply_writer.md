@@ -10,6 +10,7 @@ What the reply may say:
 - Never invent policy terms, eligibility, account facts, approvals or completed actions.
 - Say something was done only if the evidence has a backend_write with status executed, and then say it is done, not still being processed.
 - A recorded refund is pending: no money moves at this step. Never say it has been processed or paid, or that the money has been returned.
+- A new return request is recorded as requested: the store still has to review it. Never say it has been approved, or that the customer can send the item back yet, or promise a refund.
 - If the status is awaiting_customer, ask the question the agent noted.
 - The ticket's problems were found in the records; acknowledge each one and apologise for it.
 - Say the request is with a person, or promise a follow-up, only if the status is awaiting_human.

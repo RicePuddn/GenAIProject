@@ -70,6 +70,19 @@ def test_a_failure_the_agent_cannot_fix_is_retried_once():
     assert ctx.budget.tool_calls == 1   # a retry is the same tool call
 
 
+def test_a_control_tool_is_not_re_run():
+    runs = []
+
+    def ask(args):
+        runs.append(args)
+        raise ConnectionError("database timeout")
+
+    tools = Toolset([Tool("ask", OrderArguments, "Ask.", ask, data=False)])
+    llm = ScriptedLLM().push("agent", tool_call("ask", order_id="O1"), text("Stopped."))
+    run("react", llm, tools)
+    assert len(runs) == 1
+
+
 def test_every_agent_step_and_tool_call_draws_on_the_ticket_budget():
     steps = services().ctx.cfg["limits"]["max_agent_steps"]
     llm = ScriptedLLM().push("agent", *[tool_call("lookup", order_id="O1")] * (steps + 1))
@@ -142,6 +155,14 @@ def test_without_a_terminal_tool_an_empty_completion_check_ends_the_run():
     result, ctx = run("plan_execute", llm, toolset(finish=False))
     assert (result.finished, result.error, len(ctx.evidence)) == (None, None, 1)
     assert 'Return {"calls": []} when nothing is needed.' in llm.calls[0][1][0]["content"]
+
+
+def test_the_planner_keeps_the_evidence_it_was_given():
+    earlier = [{"tool": "lookup", "arguments": {"order_id": "O1"}, "result": {"found": "O1"}}]
+    llm = ScriptedLLM().push("agent", plan(("lookup", {"order_id": "O2"})), plan())
+    run_agent("plan_execute", services(llm=llm).ctx, AGENT, toolset(finish=False), {"message": "Hi", "evidence": earlier})
+    assert llm.user_payload("agent", 0)["evidence"] == earlier
+    assert [item["arguments"]["order_id"] for item in llm.user_payload("agent", 1)["evidence"]] == ["O1", "O2"]
 
 
 def test_the_planner_sees_the_agents_context_and_the_tool_schemas():

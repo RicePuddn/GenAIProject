@@ -7,6 +7,7 @@ mistake the agent can fix (bad arguments, a missing file) comes back as {"error"
 """
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from support_ops.shared.budget import BudgetExceeded
 from support_ops.shared.cancellation import WorkflowCancelled
 from support_ops.shared.db import RECORD_KINDS
+from support_ops.shared.llm import ProviderError
 
 if TYPE_CHECKING:
     from support_ops.shared.context import TurnContext
@@ -77,7 +79,9 @@ class BackendWriteArguments(ToolArguments):
     amount: Amount | None = None
     items: list[WriteLine] = Field(default_factory=list, description=(
         "The order lines affected, from get_items_for_order. Required for a return_request."))
-    reason: NonEmpty = Field(description="Why, in a short phrase such as damaged_item or order_cancellation.")
+    reason: NonEmpty = Field(description=(
+        "Why, in a short phrase such as order_cancellation. For a return_request, exactly one of change_of_mind, "
+        "damaged, faulty, wrong_item or missing_item."))
     cited_clauses: list[NonEmpty] = Field(default_factory=list, description=(
         "Clause IDs or policy files a policy search or read returned in this ticket that support the action. "
         "At least one is required; citing anything else is refused."))
@@ -114,6 +118,31 @@ class FinishArguments(ToolArguments):
         "awaiting_human: a person must decide."))
     note: NonEmpty = Field(description=(
         "resolved: what was done or found; awaiting_customer: the question to ask; awaiting_human: why."))
+
+
+def run_with_retries(ctx: TurnContext, call_id: str, name: str, arguments: Any, run: Callable[[], dict[str, Any]],
+                     attempts: int | None = None) -> dict[str, Any]:
+    """Run a tool's work under the one retry policy. An error the agent can fix is its result, at once; a
+    failure it cannot fix (e.g. a database timeout) is re-run `retries.tool_errors` times first. One that
+    still fails stays in `ctx.failed_calls` until the same call works, so the turn cannot end resolved."""
+    attempts = attempts or ctx.retries.tool_errors + 1
+    key = f"{name}:{json.dumps(arguments, sort_keys=True, default=str)}"
+    for attempt in range(1, attempts + 1):
+        try:
+            value = run()
+            ctx.failed_calls.pop(key, None)
+            return value
+        except (BudgetExceeded, WorkflowCancelled, ProviderError):
+            raise
+        except (ValueError, FileNotFoundError) as exc:   # the same arguments would fail again
+            return {"error": str(exc)}
+        except Exception as exc:
+            if attempt == attempts:
+                ctx.failed_calls[key] = str(exc)
+                return {"error": str(exc)}
+            ctx.log("tool_retry", call_id=call_id, tool=name, attempt=attempt, error=str(exc))
+            time.sleep(ctx.retries.backoff_s * attempt)
+    raise AssertionError("unreachable")
 
 
 def validate_arguments(model: type[ToolArguments], arguments: Any) -> dict[str, Any]:
@@ -175,8 +204,8 @@ class Toolset:
         return validate_arguments(self.tools[name].arguments, arguments)
 
     def call(self, ctx: TurnContext, agent: str, call_id: str, name: str, arguments: Any) -> dict[str, Any]:
-        """Run one tool call for `agent`. Errors the agent can fix are its result; a failure it cannot fix
-        (e.g. a database timeout) is re-run `retries.tool_errors` times first."""
+        """Run one tool call for `agent`. A data tool runs under the retry policy; a control tool is not
+        re-run, because asking a specialist again would repeat its whole part."""
         tool = self.tools.get(name) if isinstance(name, str) else None
         data = tool is None or tool.data
         # A control tool (finish, ask_specialist) is traced apart, so tool counts are data tools in every setup.
@@ -187,23 +216,14 @@ class Toolset:
                 ctx.budget.tool_call()
             ctx.log("tool_start", call_id=call_id, tool=name, input=arguments, agent=agent)
         started = time.perf_counter()
-        attempts = ctx.retries.tool_errors + 1
         args: Any = arguments
-        for attempt in range(1, attempts + 1):
-            try:
-                args = self.validate(name, arguments)
-                value = tool.run(args)
-            except (BudgetExceeded, WorkflowCancelled):
-                raise
-            except (ValueError, FileNotFoundError) as exc:   # the same arguments would fail again
-                value = {"error": str(exc)}
-            except Exception as exc:
-                value = {"error": str(exc)}
-                if attempt < attempts:
-                    ctx.log("tool_retry", call_id=call_id, tool=name, attempt=attempt, error=str(exc))
-                    time.sleep(ctx.retries.backoff_s * attempt)
-                    continue
-            break
+
+        def attempt() -> dict[str, Any]:
+            nonlocal args
+            args = self.validate(name, arguments)
+            return tool.run(args)
+
+        value = run_with_retries(ctx, call_id, name, arguments, attempt, None if data else 1)
         ctx.log("tool_end" if data else "control_result", call_id=call_id, tool=name, agent=agent,
                 elapsed_s=round(time.perf_counter() - started, 6), output=value)
         if data:

@@ -2,7 +2,7 @@ The facts are gathered (evidence). Now propose the outcome as one JSON object, e
 
 - outcome resolved: the request is answered from the evidence, or the writes carry out what the customer asked for; note what to tell the customer.
 - outcome awaiting_customer: only the customer can supply a missing fact; note the question to ask.
-- outcome awaiting_human: a person must decide; note why. Nothing is written.
+- outcome awaiting_human: a person must decide, the customer asks for one, or the writes below cannot do what they ask (such as an account change); note why. Nothing is written.
 - writes: the actions the customer asked for, in order: refund (recorded as pending; no money moves), return_request (with the order items coming back) or cancel, each with its order, amount (refunds), items, reason and cited_clauses. Cite the clause IDs or files a policy search or read returned; a policy check's rule sources cannot be cited. Leave writes empty for a question. The workflow checks each write against the rules, has it reviewed when that is required, then makes it.
 - On a write, set policy_exception when it relies on an exception to the main rule, and route approver or human when the case needs more than the rules require; both only ever make it stricter.
 - review_reason: how the retrieved policy and the recorded facts support the writes, for the independent reviewer.

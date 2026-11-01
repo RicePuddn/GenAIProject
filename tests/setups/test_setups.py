@@ -3,12 +3,16 @@
 The scenarios run in all 24 variants (s1-a … s8-d) from one description each (tests/setups/scripts.py),
 so a difference in outcome between setups can only come from their code, never from the test.
 """
+import json
+
+import psycopg
 import pytest
 
 from support_ops.shared.config import load_config, setup_ids
-from support_ops.shared.gates.handoff import HOLD_REPLY
-from tests.fakes import CUSTOMER, ORDER, FakeDatabase, as_json, escalate, reject, text, tool_call
-from tests.setups.scripts import Scenario, mode, policy_read, refund, run, script
+from support_ops.shared.gates.handoff import HOLD_REPLY, INTERRUPTED_REPLY
+from support_ops.shared.llm import ProviderError
+from tests.fakes import CUSTOMER, ORDER, FakeDatabase, ScriptedLLM, as_json, escalate, plan, reject, text, tool_call
+from tests.setups.scripts import Scenario, citation, mode, policy_read, refund, run, script
 
 ALL = setup_ids()
 
@@ -53,6 +57,21 @@ def test_a_refund_on_the_approver_route_is_reviewed_before_it_is_written(setup_i
     assert [item["tool"] for item in review["evidence"]] == ["policy"]
     assert review["case"]["message"] == "Please refund my order."
     assert llm.roles().count("approver") == 2
+
+
+@pytest.mark.parametrize("setup_id", ALL)
+def test_a_first_return_request_is_written_without_a_review(setup_id):
+    db = FakeDatabase()
+    db.tables["returns"].clear()
+    write = {"operation": "return_request", "order_id": ORDER, "items": [{"item_id": "ITM-1", "quantity": 1}],
+             "reason": "damaged", "cited_clauses": [citation(mode(setup_id))]}
+    llm = script(setup_id, Scenario(reads=[policy_read(mode(setup_id))], writes=[write], note="Return recorded."))
+    output, db = run(setup_id, llm, "My headphones arrived damaged, please return them.", db=db)
+    assert (output.status, [w["operation"] for w in output.writes]) == ("resolved", ["return"])
+    assert output.handoff_packet is None and db.ticket_saves[-1]["category"] == "returns"
+    assert llm.roles().count("approver") == 1   # only the reply check: the agent classified the reason itself
+    prompt = next(messages for role, messages, _ in llm.calls if role == worker_role(setup_id))[0]["content"]
+    assert "reason must correspond to the issue the customer reported" in prompt
 
 
 @pytest.mark.parametrize("setup_id", ALL)
@@ -261,6 +280,207 @@ def test_multi_graph_goes_to_a_person_when_the_supervisor_gives_up_after_a_part(
     assert output.status == "awaiting_human"   # not the resolved first part: the refund was never asked
     assert output.note.startswith("the supervisor stopped: ask_specialist failed 3 times in a row")
     assert [part["outcome"] for part in output.parts] == ["resolved"]
+
+
+GRAPH = [setup_id for setup_id in ALL if load_config(setup=setup_id)["setup"]["control"] == "graph"]
+
+
+def worker_role(setup_id: str) -> str:
+    return "agent" if load_config(setup=setup_id)["setup"]["agents"] == "single" else "specialist"
+
+
+@pytest.mark.parametrize("setup_id", [setup_id for setup_id in GRAPH if worker_strategy(setup_id) == "plan_execute"])
+def test_a_planner_gathering_again_after_a_refusal_keeps_its_evidence(setup_id):
+    write = {**refund(20, "ITM-2", mode(setup_id)), "cited_clauses": ["REF-Invented-9.9"]}
+    llm = script(setup_id, Scenario(reads=[policy_read(mode(setup_id))], writes=[write]))
+    llm.push(worker_role(setup_id), plan(), as_json({"outcome": "resolved", "note": "Explained."}))
+    run(setup_id, llm)
+    payloads = (json.loads(messages[-1]["content"]) for role, messages, _ in llm.calls if role == worker_role(setup_id))
+    gather = next(payload for payload in payloads if payload.get("feedback"))   # the first call after the refusal
+    assert [item["tool"] for item in gather["evidence"]] == ["policy", "backend_write"]
+
+
+@pytest.mark.parametrize("setup_id", GRAPH)
+def test_a_gather_stage_that_gives_up_goes_to_a_person_without_a_proposal(setup_id):
+    role = worker_role(setup_id)
+    llm = script(setup_id, Scenario(reads=[shipments()], specialist="orders_shipping"))
+    llm.queues[role].clear()
+    if worker_strategy(setup_id) == "react":
+        llm.push(role, *[tool_call("get_shipments_for_order", order_id="")] * 3)
+    else:
+        llm.push(role, text("not a plan"), text("still not a plan"))
+    output, db = run(setup_id, llm)
+    assert (output.status, db.writes) == ("awaiting_human", [])
+    assert "could not gather the facts" in output.handoff_packet["reason"]
+    assert not llm.queues[role]
+    assert llm.roles().count(role) == (3 if worker_strategy(setup_id) == "react" else 2)   # no proposal was asked for
+
+
+@pytest.mark.parametrize("setup_id", ["s7-a", "s7-b", "s8-c", "s8-d"])
+def test_a_request_neither_specialist_covers_reaches_a_person_through_a_specialist(setup_id):
+    llm = script(setup_id, Scenario(reads=[shipments()], outcome="awaiting_human", specialist="orders_shipping",
+                                    note="The customer wants their account email changed."))
+    output, db = run(setup_id, llm, "Please change the email on my account.")
+    assert (output.status, db.writes) == ("awaiting_human", [])
+    assert [part["specialist"] for part in output.parts] == ["orders_shipping"]
+    assert output.handoff_packet["reason"] == "The customer wants their account email changed."
+    system = [messages for role, messages, _ in llm.calls if role == "supervisor"][0][0]["content"]
+    assert "still goes to orders_shipping" in system and "customer accounts" in system
+
+
+class FlakyDatabase(FakeDatabase):
+    """A write fails `failures` times the way a lost connection does, then works."""
+
+    def __init__(self, failures: int):
+        super().__init__()
+        self.failures = failures
+
+    def apply(self, *args, **kwargs):
+        if self.failures > 0:
+            self.failures -= 1
+            raise psycopg.OperationalError("connection lost")
+        return super().apply(*args, **kwargs)
+
+
+def provider_down(*_):
+    raise ProviderError("RateLimitError")
+
+
+@pytest.mark.parametrize("setup_id", ["s1-a", "s3-b", "s5-a", "s6-b", "s7-a", "s8-c"])
+def test_a_write_that_fails_once_is_retried_as_one_tool_call(setup_id):
+    llm = script(setup_id, Scenario(reads=[policy_read(mode(setup_id))], writes=[refund(20, "ITM-2", mode(setup_id))]))
+    working = sum(1 for _ in llm.queues[worker_role(setup_id)])
+    output, db = run(setup_id, llm, db=FlakyDatabase(1))
+    assert (output.status, len(db.writes)) == ("resolved", 1)
+    assert llm.roles().count(worker_role(setup_id)) == working              # no agent was asked again
+    assert len(output.trace.of_kind("tool_retry")) == 1
+    assert [item["result"]["status"] for item in output.evidence if item["tool"] == "backend_write"] == ["executed"]
+
+
+def script_a_failed_write(setup_id: str) -> tuple[ScriptedLLM, Scenario]:
+    """The working agent tries a write, and after it fails calls the ticket resolved all the same."""
+    write = refund(20, "ITM-2", mode(setup_id))
+    scenario = Scenario(reads=[policy_read(mode(setup_id))], writes=[write], note="Refund recorded.")
+    llm = script(setup_id, scenario)
+    if load_config(setup=setup_id)["setup"]["control"] == "graph":
+        llm.push(worker_role(setup_id), text("Nothing to add.") if worker_strategy(setup_id) == "react" else plan(),
+                 as_json({"outcome": "resolved", "note": "Refund recorded."}))
+    return llm, scenario
+
+
+@pytest.mark.parametrize("setup_id", ["s1-a", "s3-a", "s5-a", "s5-b", "s7-a", "s7-b", "s8-c"])
+def test_a_write_that_keeps_failing_cannot_end_resolved(setup_id):
+    llm, scenario = script_a_failed_write(setup_id)
+    output, db = run(setup_id, llm, db=FlakyDatabase(99))
+    assert (output.status, output.reply, db.writes) == ("in_progress", INTERRUPTED_REPLY, [])
+    assert output.note == "a tool failed: connection lost"
+    assert db.ticket_saves[-1]["status"] == "in_progress" and db.ticket_saves[-1]["resolution"] is None
+    assert "reply_writer" not in llm.roles()
+
+    db.failures = 0   # the database is back: the customer sends the message again
+    output, db = run(setup_id, script(setup_id, scenario), db=db,
+                     history=[{"role": "customer", "content": "Please refund my order."},
+                              {"role": "agent", "content": output.reply}])
+    assert (output.status, len(db.writes)) == ("resolved", 1)
+
+
+def test_a_write_that_fails_and_then_works_can_end_resolved():
+    write = refund(20, "ITM-2", "rag")
+    llm = script("s1-a", Scenario(reads=[policy_read("rag")]))
+    llm.queues["agent"].clear()
+    llm.push("agent", tool_call("policy", **policy_read("rag")[1]), tool_call("backend_write", **write),
+             tool_call("backend_write", **write), tool_call("finish", outcome="resolved", note="Done."))
+    output, db = run("s1-a", llm, db=FlakyDatabase(2))     # both tries of the first call fail
+    assert (output.status, len(db.writes)) == ("resolved", 1)
+
+
+def test_a_write_the_rules_refuse_can_still_end_resolved():
+    write = refund(5000, "ITM-2", "rag") | {"amount": 99}   # within the limit, above what was paid for the item
+    llm = script("s5-a", Scenario(reads=[policy_read("rag")], writes=[write]))
+    llm.push("agent", text("Nothing to add."), as_json({"outcome": "resolved", "note": "Explained the limit."}))
+    output, db = run("s5-a", llm)
+    assert (output.status, db.writes) == ("resolved", [])   # a decision, not a failure
+
+
+def test_a_read_that_keeps_failing_cannot_end_resolved():
+    class DownDatabase(FakeDatabase):
+        def shipments_for_order(self, order_id):
+            raise psycopg.OperationalError("connection lost")
+
+    llm = script("s1-a", Scenario(reads=[shipments()], note="Your order is on the way."))
+    output, db = run("s1-a", llm, db=DownDatabase())
+    assert (output.status, db.ticket_saves[-1]["status"]) == ("in_progress", "in_progress")
+
+
+def test_a_failure_with_a_person_or_the_customer_keeps_that_status():
+    llm = script("s1-a", Scenario(reads=[shipments()], outcome="awaiting_customer", note="Which order?"))
+    class DownDatabase(FakeDatabase):
+        def shipments_for_order(self, order_id):
+            raise psycopg.OperationalError("connection lost")
+
+    output, _ = run("s1-a", llm, db=DownDatabase())
+    assert output.status == "awaiting_customer"
+
+
+def test_a_specialist_ask_that_fails_for_good_cannot_end_resolved(monkeypatch):
+    from support_ops.setups import multi_graph
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("specialist could not start")
+
+    monkeypatch.setattr(multi_graph, "PartFlow", broken)
+    llm = script("s7-a", Scenario(reads=[shipments()], specialist="orders_shipping"))
+    llm.queues["specialist"].clear()
+    output, db = run("s7-a", llm)
+    assert (output.status, output.parts) == ("in_progress", [])
+    assert db.ticket_saves[-1]["status"] == "in_progress"
+
+
+@pytest.mark.parametrize("setup_id", ALL)
+def test_a_provider_failure_mid_turn_saves_the_ticket_in_progress(setup_id):
+    role = worker_role(setup_id)
+    llm = script(setup_id, Scenario(reads=[shipments()], specialist="orders_shipping"))
+    llm.queues[role].clear()
+    llm.on(role, provider_down)
+    output, db = run(setup_id, llm)
+    assert (output.status, output.reply, output.handoff_packet) == ("in_progress", INTERRUPTED_REPLY, None)
+    assert output.note == "provider unavailable: RateLimitError"
+    assert db.ticket_saves[-1]["status"] == "in_progress" and db.ticket_saves[-1]["resolution"] is None
+
+
+def test_a_provider_failure_at_the_guard_saves_the_ticket_in_progress():
+    llm = script("s7-a", Scenario(reads=[shipments()]))
+    llm.on("guard", provider_down)
+    output, db = run("s7-a", llm)
+    assert (output.status, output.reply) == ("in_progress", INTERRUPTED_REPLY)
+    assert set(llm.roles()) == {"guard"} and db.ticket_saves[-1]["status"] == "in_progress"
+
+
+@pytest.mark.parametrize("setup_id", ["s1-a", "s3-a", "s5-a", "s7-a", "s7-b", "s8-c"])
+def test_sending_the_message_again_after_a_cut_off_turn_does_not_write_twice(setup_id):
+    write = refund(20, "ITM-2", mode(setup_id))
+    scenario = Scenario(reads=[policy_read(mode(setup_id))], writes=[write], note="Refund recorded.")
+    llm = script(setup_id, scenario)
+    llm.on("reply_writer", provider_down)
+    first, db = run(setup_id, llm)
+    assert (first.status, len(first.writes), len(db.writes)) == ("in_progress", 1, 1)   # the write is kept
+    assert db.ticket_saves[-1]["status"] == "in_progress"
+    again = script(setup_id, scenario)
+    second, db = run(setup_id, again, db=db, history=[{"role": "customer", "content": "Please refund my order."},
+                                                      {"role": "agent", "content": first.reply}])
+    assert (second.status, second.writes, len(db.writes)) == ("resolved", [], 1)
+    assert db.ticket_saves[-1]["status"] == "resolved"
+    assert [item["result"].get("replayed") for item in second.evidence if item["tool"] == "backend_write"] == [True]
+
+
+def test_a_provider_failure_writing_the_reply_keeps_a_handoff_with_the_person():
+    db = FakeDatabase()
+    db.tables["returns"]["RET-1"]["dispute_status"] = "open"
+    llm = script("s7-a", Scenario(reads=[policy_read("rag")], writes=[refund(20, "ITM-2", "rag")]))
+    llm.on("reply_writer", provider_down)
+    output, db = run("s7-a", llm, db=db)
+    assert (output.status, output.reply) == ("awaiting_human", HOLD_REPLY)
+    assert output.handoff_packet["reason"] == "Conflicting facts require human review."
 
 
 def test_signed_in_tools_see_only_the_account():

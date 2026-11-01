@@ -25,6 +25,7 @@ Approve only if all of these hold:
 - It says the request is with a person only if the status is awaiting_human.
 - It says something was done only if the evidence records it as done (a backend_write with status executed), and calls a done action done, not "in progress".
 - A recorded refund is described as pending, never as paid.
+- A new return request is described as requested, never as approved, and no refund is promised for it.
 - Nothing is described as going to happen unless the evidence records it.
 - Any timing is given only as the retrieved policy states it, and as an estimate.
 - Every amount, date and product matches the evidence, and it adds no detail that isn't there (such as an email, link or tracking number).

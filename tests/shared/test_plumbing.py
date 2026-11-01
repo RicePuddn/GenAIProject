@@ -84,6 +84,11 @@ def _llm_raising(error):
     return llm
 
 
+def test_a_bug_in_our_own_call_is_not_reported_as_a_provider_failure():
+    with pytest.raises(TypeError):
+        _llm_raising(TypeError("bad argument")).chat("agent", [{"role": "user", "content": "hi"}])
+
+
 def test_a_tool_call_groq_rejects_is_recovered_for_our_own_validation():
     # The call from a real S4 run: order_item_id is an alias our models accept, but not in the schema.
     attempt = {"name": "route", "arguments": {"action": "return", "order_id": "ORD-2026-00031",
@@ -96,15 +101,15 @@ def test_a_tool_call_groq_rejects_is_recovered_for_our_own_validation():
     assert tracer.of_kind("tool_call_recovered")[0]["tools"] == ["route"]
 
 
-def test_other_provider_errors_still_raise():
-    from openai import BadRequestError
+def test_other_provider_errors_raise_as_a_provider_error():
+    from support_ops.shared.llm import ProviderError
 
     for error in (_groq_error("context_length_exceeded", ""), _groq_error("tool_use_failed", "not json")):
         llm = _llm_raising(error)
-        with pytest.raises(BadRequestError):
+        with pytest.raises(ProviderError, match="BadRequestError"):
             llm.chat("specialist", [{"role": "user", "content": "hi"}], tools=[{"type": "function"}])
     llm = _llm_raising(_groq_error("tool_use_failed", '{"name": "route", "arguments": {}}'))
-    with pytest.raises(BadRequestError):   # no tools were offered, so there is nothing to recover
+    with pytest.raises(ProviderError):     # no tools were offered, so there is nothing to recover
         llm.chat("supervisor", [{"role": "user", "content": "hi"}])
 
 
@@ -153,12 +158,12 @@ def test_recovered_turns_count_the_tool_schemas():
 
 
 def test_a_json_reply_groq_rejects_comes_back_for_our_own_parsing():
-    from openai import BadRequestError
+    from support_ops.shared.llm import ProviderError
 
     llm = _llm_raising(_groq_error("json_validate_failed", '{"calls": [ {"name": "policy"'))
     tracer = Tracer("T1")
     result = llm.chat("agent", [{"role": "user", "content": "plan"}], json_mode=True, tracer=tracer)
     assert (result.content, result.tool_calls) == ('{"calls": [ {"name": "policy"', [])
     assert tracer.of_kind("json_rejected_by_provider")[0]["role"] == "agent"
-    with pytest.raises(BadRequestError):   # outside json_mode the same error still raises
+    with pytest.raises(ProviderError):     # outside json_mode the same error still raises
         _llm_raising(_groq_error("json_validate_failed", "{")).chat("agent", [{"role": "user", "content": "hi"}])

@@ -55,7 +55,7 @@ def plan_execute(ctx: TurnContext, agent: Agent, tools: Toolset, brief: dict[str
         try:
             plan = chat_json(ctx, agent.role, [
                 {"role": "system", "content": system},
-                {"role": "user", "content": json.dumps({**brief, "evidence": run.calls,
+                {"role": "user", "content": json.dumps({**brief, "evidence": [*brief.get("evidence", []), *run.calls],
                                                         "previous_error": previous_error}, default=str)},
             ], Plan, before_call=ctx.budget.agent_step)
         except ValueError as exc:

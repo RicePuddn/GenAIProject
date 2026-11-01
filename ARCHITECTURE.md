@@ -21,6 +21,11 @@ setups, each specialist's report. Everything the agents did is in the turn's `Tu
 (`shared/context.py`): the evidence (every data tool call, in order), the writes, the trace and the
 budget. The guard, the reply and the ticket save never depend on which setup ran.
 
+If the LLM provider fails at any step, `run_turn` ends the turn `in_progress`: it saves the ticket and sends a
+fixed reply asking the customer to try again. A tool call that fails for good and never works later does the
+same to a turn that would otherwise end `resolved`, whatever the agent concluded. Sending the message again
+on the same ticket is safe, because each write replays by its idempotency key.
+
 ## The four code paths
 
 | File | Setups | Body |
@@ -70,7 +75,7 @@ and the specialists. An agent is a prompt plus a `Toolset`.
 
 | What | Where |
 |---|---|
-| Tools | `shared/tools.py`: one `ToolRegistry`; `Toolset.call` applies the budget, the retry policy, tracing and evidence for every tool call. |
+| Tools | `shared/tools.py`: one `ToolRegistry`; `Toolset.call` applies the budget, tracing and evidence for every tool call; `run_with_retries` is the one retry policy, also used by the graph's write stages. |
 | Rules | `shared/rules.py`: `Rules` (from `data/policy/rules.json`) and `BackendFacts` (recorded facts, never the model's). |
 | Writes | `shared/gates/write_gate.py`: `WriteGate` decides (rules, then citations, then review), `WriteExecutor` writes once per idempotency key. |
 | Review and reply check | `shared/gates/approver.py`, one prompt each in `prompts/approver.md`. |

@@ -24,7 +24,7 @@ from support_ops import prompts
 from support_ops.shared.context import TurnContext, chat_json
 from support_ops.shared.gates.write_gate import WriteExecutor, WriteGate
 from support_ops.shared.strategies import Agent, run_agent
-from support_ops.shared.tools import BackendWriteArguments, Toolset, validate_arguments
+from support_ops.shared.tools import BackendWriteArguments, Toolset, run_with_retries, validate_arguments
 
 NonEmpty = Annotated[str, Field(min_length=1)]
 # Keys a model may add for its own reasoning; never part of a proposal.
@@ -48,7 +48,9 @@ class ProposedWrite(AgentOutput):
     order_id: NonEmpty
     amount: float | None = Field(default=None, gt=0, allow_inf_nan=False, description="Refunds only.")
     items: list[ProposedLine] = Field(default_factory=list)
-    reason: NonEmpty = Field(description="Why, in a short phrase such as damaged_item or order_cancellation.")
+    reason: NonEmpty = Field(description=(
+        "Why, in a short phrase such as order_cancellation. For a return_request, exactly one of change_of_mind, "
+        "damaged, faulty, wrong_item or missing_item."))
     cited_clauses: list[NonEmpty] = Field(default_factory=list)
     policy_exception: bool = Field(default=False, description="True when it relies on an exception to the main rule.")
     route: Literal["approver", "human"] | None = Field(default=None, description=(
@@ -136,7 +138,9 @@ class PartFlow:
         brief = dict(self.brief)
         if state["feedback"]:
             brief.update(evidence=self._own_evidence(), feedback=state["feedback"])
-        run_agent(self.strategy, self.ctx, self.agent, self.tools, brief)
+        run = run_agent(self.strategy, self.ctx, self.agent, self.tools, brief)
+        if run.error:   # the facts may be incomplete, so no proposal can rest on them
+            self.ctx.stop(f"{self.agent.name} could not gather the facts: {run.error}")
         return {"next": "done" if self.ctx.stopped else "propose"}
 
     def _propose(self, state: PartState) -> dict[str, Any]:
@@ -167,13 +171,13 @@ class PartFlow:
     def _check(self, state: PartState) -> dict[str, Any]:
         args = state["pending"][0]
         attempt = self._begin(args)
-        try:
-            if (previous := self.executor.replay(args)) is not None:
-                return self._end(attempt, args, previous, state)
-            checked = self.gate.check(args)
-        except ValueError as exc:
-            return self._end(attempt, args, {"error": str(exc)}, state)
-        if checked["status"] != "allowed":
+
+        def replay_or_check() -> dict[str, Any]:
+            previous = self.executor.replay(args)
+            return previous if previous is not None else self.gate.check(args)
+
+        checked = run_with_retries(self.ctx, attempt["call_id"], "backend_write", args, replay_or_check)
+        if checked.get("status") != "allowed":
             return self._end(attempt, args, checked, state)
         decision = checked["policy_check"]
         return {"attempt": attempt, "decision": decision,
@@ -187,7 +191,9 @@ class PartFlow:
 
     def _write(self, state: PartState) -> dict[str, Any]:
         args = state["pending"][0]
-        return self._end(state["attempt"], args, self.executor.apply(args, state["decision"]), state)
+        written = run_with_retries(self.ctx, state["attempt"]["call_id"], "backend_write", args,
+                                   lambda: self.executor.apply(args, state["decision"]))
+        return self._end(state["attempt"], args, written, state)
 
     # ------------------------------------------------------------- a write as a backend_write call
 

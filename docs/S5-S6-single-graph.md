@@ -22,7 +22,8 @@ graph decides what happens next.
    - **Review**, on the approver route only.
    - **Write**.
 5. Anything refused goes back to gather with the reason (`feedback`): a block, a citation that wasn't
-   retrieved, unseen returns or refunds, or a fixable review rejection. A handoff ends the turn. The budget
+   retrieved, unseen returns or refunds, or a fixable review rejection. A handoff, or an agent that gives
+   up while gathering, ends the turn. The budget
    ends a loop of refusals.
 6. The shared reply, reply check and ticket save run.
 

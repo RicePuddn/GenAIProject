@@ -24,6 +24,11 @@ from .tracing import Tracer
 _ENC = tiktoken.get_encoding("o200k_base")
 
 
+class ProviderError(Exception):
+    """The LLM provider failed after the client's own retries (rate limit, outage, rejected request). No
+    agent can fix it, so it ends the turn, and the ticket waits to be sent again."""
+
+
 def count_tokens(text: str) -> int:
     # Customer text may contain special-token strings such as <|endoftext|>; count them as plain text.
     return len(_ENC.encode(text, disallowed_special=()))
@@ -111,6 +116,10 @@ class OpenAICompatLLM:
                 recovered = _recover_tool_calls(exc, key) if tools else None
                 rejected_json = _rejected_json(exc) if json_mode and recovered is None else None
                 if recovered is None and rejected_json is None:
+                    from openai import OpenAIError
+
+                    if isinstance(exc, OpenAIError):
+                        raise ProviderError(type(exc).__name__) from exc
                     raise
                 # Not cached: the provider rejected it, so the same request may succeed next time. The
                 # estimate counts what was sent (messages and tool schemas) and what it generated.

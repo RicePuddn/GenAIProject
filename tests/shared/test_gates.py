@@ -1,6 +1,6 @@
 """The shared gates: guard, approver, reply wording and reply check, ticket save, handoff packet, prompts."""
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -12,7 +12,7 @@ from support_ops.shared.gates.handoff import handoff_packet
 from support_ops.shared.gates.reply import (internal_id_issue, problems, refund_wording_issue, wording_issues,
                                             write_reply)
 from support_ops.shared.gates.ticket import category, confirmed_order, save_ticket
-from tests.fakes import ORDER, FakeDatabase, ScriptedLLM, as_json, reject, services, text
+from tests.fakes import NOW, ORDER, FakeDatabase, ScriptedLLM, as_json, reject, services, text
 
 RECORDED = [{"tool": "backend_write", "result": {"operation": "refund", "status": "executed"}}]
 
@@ -224,3 +224,64 @@ def test_the_reply_writer_and_the_reply_check_both_see_the_problems():
                                                         specialist="returns_refunds")))
     ticket = llm.user_payload("reply_writer")["ticket"]
     assert "problems" in ticket and llm.user_payload("approver")["ticket"]["problems"] == ticket["problems"]
+
+
+# ----------------------------------------------------------------------------- first return requests
+
+
+def first_return(reason, *, item="ITM-1", db=None):
+    db = db if db is not None else FakeDatabase()
+    db.tables["returns"].clear()
+    return services(db), {"operation": "return_request", "order_id": ORDER, "reason": reason,
+                          "items": [{"item_id": item, "quantity": 1}], "cited_clauses": ["refunds.md"]}
+
+
+@pytest.mark.parametrize("reason", ["change_of_mind", "damaged", "faulty", "wrong_item", "missing_item"])
+def test_a_first_return_request_passes_on_the_rules_alone(reason):
+    service, args = first_return(reason)
+    facts = service.gate.facts.read("return_request", ORDER, ["ITM-1"], stated_reason=reason)
+    decision = service.gate.rules.check("return_request", facts=facts)
+    assert (decision["check"], decision["route"]) == ("return_request.new_request", "auto")
+
+
+def test_a_first_return_request_for_an_unknown_reason_can_be_corrected():
+    service, args = first_return("damaged_item")
+    with pytest.raises(ValueError, match="exactly one of"):
+        service.gate.check(args)
+    assert not service.ctx.stopped
+
+
+def test_a_change_of_mind_on_final_sale_goods_is_refused_but_a_fault_is_not():
+    db = FakeDatabase()
+    db.tables["order_items"]["ITM-1"]["final_sale"] = True
+    service, args = first_return("change_of_mind", db=db)
+    assert service.gate.check(args)["policy_check"]["check"] == "return_request.final_sale"
+    service, args = first_return("faulty", db=db)
+    facts = service.gate.facts.read("return_request", ORDER, ["ITM-1"], stated_reason="faulty")
+    assert service.gate.rules.check("return_request", facts=facts)["allowed"]
+
+
+def test_a_first_return_request_past_the_window_or_for_a_digital_item_goes_to_a_person():
+    db = FakeDatabase()
+    db.tables["shipments"]["SHP-1"]["delivered_at"] = NOW - timedelta(days=31)
+    service, args = first_return("faulty", db=db)
+    assert service.gate.check(args)["status"] == "awaiting_human"
+    db = FakeDatabase()
+    db.tables["order_items"]["ITM-1"]["product_type"] = "digital"
+    service, args = first_return("faulty", db=db)
+    assert service.gate.check(args)["status"] == "awaiting_human"
+
+
+def test_a_counterfeit_claim_on_a_first_return_request_goes_to_a_person():
+    service, args = first_return("counterfeit")
+    assert service.gate.check(args)["status"] == "awaiting_human"
+
+
+def test_a_refund_waits_for_the_return_to_be_approved():
+    db = FakeDatabase()
+    db.tables["returns"]["RET-1"].update(status="requested", approved_at=None, reviewed_at=None,
+                                         inspection_status="pending", evidence_status="pending")
+    service = services(db)
+    facts = service.gate.facts.read("refund", ORDER, ["ITM-1", "ITM-2"])
+    decision = service.gate.rules.check("refund", 20, facts)
+    assert (decision["check"], decision["allowed"]) == ("refund.request_not_accepted", False)
