@@ -81,6 +81,12 @@ class BackendWriteArguments(ToolArguments):
     cited_clauses: list[NonEmpty] = Field(default_factory=list, description=(
         "Clause IDs or policy files a policy search or read returned in this ticket that support the action. "
         "At least one is required; citing anything else is refused."))
+    policy_exception: bool = Field(default=False, description=(
+        "True when the action relies on an exception to the main rule, e.g. a defective item a clause on unused "
+        "items does not cover. The write then gets an independent review."))
+    route: Literal["approver", "human"] | None = Field(default=None, description=(
+        "Ask for stricter handling than the rules require: approver for an independent review, human for an "
+        "operator to decide instead of writing. It can never make a write less strict."))
 
     @model_validator(mode="after")
     def required_for_operation(self) -> Self:

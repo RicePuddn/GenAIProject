@@ -20,7 +20,7 @@ from support_ops.shared.db.accounts import for_account
 from support_ops.shared.gates.approver import Approver
 from support_ops.shared.gates.guard import screen
 from support_ops.shared.gates.handoff import HOLD_REPLY, handoff_packet
-from support_ops.shared.gates.reply import write_reply
+from support_ops.shared.gates.reply import problems, write_reply
 from support_ops.shared.gates.ticket import TicketLog, save_ticket
 from support_ops.shared.gates.write_gate import WriteExecutor, WriteGate
 from support_ops.shared.llm import LLM
@@ -102,7 +102,8 @@ def run_turn(setup: Setup, llm: LLM, *, ticket_id: str, message: str, history: l
 
     reply, review = HOLD_REPLY, None
     if not result.hold:
-        ticket = {"status": result.status, "note": result.note, "evidence": ctx.evidence}
+        ticket = {"status": result.status, "note": result.note, "evidence": ctx.evidence,
+                  "problems": problems(ctx.evidence, clock.now().date())}
         try:
             drafted, review = write_reply(ctx, approver, brief, ticket)
         except BudgetExceeded as exc:

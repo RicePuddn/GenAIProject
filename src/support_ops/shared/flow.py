@@ -50,6 +50,9 @@ class ProposedWrite(AgentOutput):
     items: list[ProposedLine] = Field(default_factory=list)
     reason: NonEmpty = Field(description="Why, in a short phrase such as damaged_item or order_cancellation.")
     cited_clauses: list[NonEmpty] = Field(default_factory=list)
+    policy_exception: bool = Field(default=False, description="True when it relies on an exception to the main rule.")
+    route: Literal["approver", "human"] | None = Field(default=None, description=(
+        "Stricter handling than the rules require: approver for a review, human for an operator to decide."))
 
 
 class Proposal(AgentOutput):

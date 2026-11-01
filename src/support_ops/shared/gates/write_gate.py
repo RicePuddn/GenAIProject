@@ -18,7 +18,10 @@ from support_ops.shared.db import PostgresWriter, WriteRefused
 from support_ops.shared.gates.ticket import TicketLog
 from support_ops.shared.policy.citations import unread_citations
 from support_ops.shared.policy.provider import PolicyProvider
-from support_ops.shared.rules import WRITE_OPERATIONS, BackendFacts, Rules
+from support_ops.shared.rules import (AWAITING_STORE_RETURN_STATUSES, VOID_REFUND_STATUSES, VOID_RETURN_STATUSES,
+                                      WRITE_OPERATIONS, BackendFacts, Rules)
+
+ROUTES = ("auto", "approver", "human")   # least to most strict
 
 # Takes {"write", "rule_check", "evidence"}; returns a decision (approve, reject or escalate), issues and reason.
 Reviewer = Callable[[dict[str, Any]], dict[str, Any]]
@@ -39,6 +42,7 @@ class WriteGate:
         self.max_rejections = ctx.cfg["review"]["max_rejections"]   # rejections the agent may fix
         self.rejections = 0
         self.approved: set[str] = set()   # writes request_review approved, by approval_key
+        self.shown: set[str] = set()      # orders whose unseen returns and refunds a refusal already listed
 
     def evidence(self) -> list[dict[str, Any]]:
         """The successful reads and policy results of this turn: what the reviewer checks a write against."""
@@ -78,7 +82,50 @@ class WriteGate:
                              "cite only clause IDs or files a policy search or read returned. A policy check "
                              "names its rule's sources without their text, so they cannot be cited: search "
                              "or read the policy for them first")
+        if unseen := self.unseen_requests(order_id):
+            # Deciding without knowing about a pending return or an earlier refund gets eligibility wrong, so
+            # the agent sees them once before the write can go on.
+            self.shown.add(order_id.casefold())
+            return {"status": "blocked", "existing_requests": unseen, "policy_check": decision,
+                    "reason": f"order {order_id} already has returns or refunds on record. Take them into "
+                              "account (for example, report a pending return's status rather than opening a "
+                              "duplicate, and count earlier refunds), then write again if it is still right."}
+        decision = self.stricter(args, decision)
+        if decision["route"] == "human":
+            return self.handoff(args, f"a person was asked to decide: {args['reason']}")
         return {"status": "allowed", "policy_check": decision}
+
+    @staticmethod
+    def stricter(args: dict[str, Any], decision: dict[str, Any]) -> dict[str, Any]:
+        """The rules' route, made stricter by the agent's own route or a claimed policy exception, never looser."""
+        wanted = [route for route in (args.get("route"), "approver" if args.get("policy_exception") else None) if route]
+        route = max([decision["route"], *wanted], key=ROUTES.index)
+        if route == decision["route"]:
+            return decision
+        why = "the agent asked for it" if args.get("route") == route else "the write relies on a policy exception"
+        return {**decision, "route": route, "rules_route": decision["route"], "stricter_because": why}
+
+    def unseen_requests(self, order_id: str) -> list[dict[str, Any]]:
+        """The order's returns and refunds that still count and that the agent has not seen this turn: not
+        looked up with get_returns_for_order, not written by this turn, not shown already. An approved return
+        is left out: it is what a refund usually rests on."""
+        key = order_id.casefold()
+        looked_up = {str(item["arguments"].get("order_id", "")).casefold() for item in self.ctx.evidence
+                     if item["tool"] == "get_returns_for_order" and "error" not in item["result"]
+                     and isinstance(item["arguments"], dict)}
+        if key in looked_up or key in self.shown:
+            return []
+        written = {write["write_id"] for write in self.ctx.writes}
+        history = self.facts.reader.returns_for_order(order_id)
+        requests = [{"kind": "return", "id": row.get("id"), "status": row["status"], "reason": row.get("reason"),
+                     "requested": str(row.get("requested_at") or "")[:10] or None,
+                     "awaiting_the_store": row["status"] in AWAITING_STORE_RETURN_STATUSES}
+                    for row in history.get("returns", []) if row.get("status") not in VOID_RETURN_STATUSES
+                    and row["status"] != "approved"]
+        requests += [{"kind": "refund", "id": row.get("id"), "status": row["status"], "amount": str(row.get("amount")),
+                      "requested": str(row.get("requested_at") or "")[:10] or None}
+                     for row in history.get("refunds", []) if row.get("status") not in VOID_REFUND_STATUSES]
+        return [request for request in requests if request["id"] not in written]
 
     def review(self, args: dict[str, Any], decision: dict[str, Any]) -> dict[str, Any] | None:
         """The independent review of a write on the approver route: None when it approves, else the result

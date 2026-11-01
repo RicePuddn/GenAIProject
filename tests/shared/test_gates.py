@@ -1,5 +1,6 @@
 """The shared gates: guard, approver, reply wording and reply check, ticket save, handoff packet, prompts."""
 import json
+from datetime import date, datetime, timezone
 
 import pytest
 
@@ -8,7 +9,8 @@ from support_ops.shared.flow import Proposal
 from support_ops.shared.gates.approver import Approver
 from support_ops.shared.gates.guard import screen
 from support_ops.shared.gates.handoff import handoff_packet
-from support_ops.shared.gates.reply import internal_id_issue, refund_wording_issue, wording_issues, write_reply
+from support_ops.shared.gates.reply import (internal_id_issue, problems, refund_wording_issue, wording_issues,
+                                            write_reply)
 from support_ops.shared.gates.ticket import category, confirmed_order, save_ticket
 from tests.fakes import ORDER, FakeDatabase, ScriptedLLM, as_json, reject, services, text
 
@@ -197,3 +199,28 @@ def test_a_proposal_survives_the_usual_model_habits():
     assert (write.amount, write.items[0].item_id, write.items[0].quantity) == (20.0, "ITM-1", 1)
     with pytest.raises(ValueError):
         Proposal.model_validate({"outcome": "resolved", "note": "x", "route": "auto"})   # unknown fields
+
+
+def test_problems_come_from_what_the_agents_looked_up():
+    today = date(2026, 10, 1)
+    evidence = [
+        {"tool": "get_shipments_for_order", "result": {"shipments": [
+            {"status": "in_transit", "estimated_delivery": date(2026, 9, 28), "delivered_at": None},
+            {"status": "delivered", "estimated_delivery": date(2026, 9, 20), "delivered_at": datetime(2026, 9, 21)},
+            {"status": "in_transit", "estimated_delivery": "2026-10-03", "delivered_at": None}]}},
+        {"tool": "get_returns_for_order", "result": {"returns": [
+            {"status": "received", "requested_at": datetime(2026, 9, 25, tzinfo=timezone.utc)},
+            {"status": "approved", "requested_at": datetime(2026, 9, 20)}], "refunds": []}},
+        {"tool": "get_shipments_for_order", "result": {"error": "timeout"}},
+    ]
+    assert problems(evidence, today) == ["A shipment is past its estimated delivery date (2026-09-28).",
+                                         "A return the customer requested on 2026-09-25 has not been processed by the store yet."]
+    assert problems([], today) == []   # nothing looked up, nothing listed
+
+
+def test_the_reply_writer_and_the_reply_check_both_see_the_problems():
+    from tests.setups.scripts import Scenario, run, script
+    output, _ = run("s7-a", llm := script("s7-a", Scenario(reads=[("get_returns_for_order", {"order_id": ORDER})],
+                                                        specialist="returns_refunds")))
+    ticket = llm.user_payload("reply_writer")["ticket"]
+    assert "problems" in ticket and llm.user_payload("approver")["ticket"]["problems"] == ticket["problems"]

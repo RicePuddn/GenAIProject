@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date, datetime
 from typing import Any
 
 from support_ops import prompts
 from support_ops.shared.context import TurnContext
 from support_ops.shared.gates.approver import ApprovalResult, Approver
+from support_ops.shared.rules import AWAITING_STORE_RETURN_STATUSES
 
 # "has been refunded", "refund has been processed", "the money has been returned", and the like.
 PAID_CLAIM = re.compile(
@@ -69,6 +71,33 @@ def internal_id_issue(reply: str) -> str | None:
 def wording_issues(reply: str, evidence: list[dict[str, Any]]) -> list[str]:
     """Every wording rule the reply breaks; empty when it may go on to the reply check."""
     return [issue for issue in (refund_wording_issue(reply, evidence), internal_id_issue(reply)) if issue]
+
+
+def problems(evidence: list[dict[str, Any]], today: date) -> list[str]:
+    """What has gone wrong on the store's side, found by code in the records the agents looked up this turn,
+    so the apology does not depend on a model noticing. Only lookups count: a setup whose agents never
+    looked at the shipments or returns has nothing listed."""
+    found: list[str] = []
+    for item in evidence:
+        result = item["result"]
+        if "error" in result:
+            continue
+        if item["tool"] == "get_shipments_for_order":
+            for shipment in result.get("shipments", []):
+                estimated = shipment.get("estimated_delivery")
+                if estimated and not shipment.get("delivered_at") and shipment.get("status") != "cancelled"                         and _day(estimated) < today:
+                    found.append(f"A shipment is past its estimated delivery date ({_day(estimated)}).")
+        if item["tool"] == "get_returns_for_order":
+            for request in result.get("returns", []):
+                if request.get("status") in AWAITING_STORE_RETURN_STATUSES:
+                    requested = _day(request["requested_at"]) if request.get("requested_at") else None
+                    found.append("A return the customer requested" + (f" on {requested}" if requested else "")
+                                 + " has not been processed by the store yet.")
+    return list(dict.fromkeys(found))
+
+
+def _day(value: Any) -> date:
+    return value.date() if isinstance(value, datetime) else value if isinstance(value, date)         else date.fromisoformat(str(value)[:10])
 
 
 def write_reply(ctx: TurnContext, approver: Approver, brief: dict[str, Any],

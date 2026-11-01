@@ -4,7 +4,8 @@ What each control style lets an agent do. `agentic` and `graph` are for the agen
 You act on the case yourself:
 - Carry out an action the customer asks for with backend_write: refund (recorded as pending; no money moves), return_request (with the order items coming back) or cancel. It applies the rules to the recorded facts first, so it may block the write or hand the case to a person instead. Only write when the customer asks for the action; for a question, answer from the policy and the records without writing.
 - Cite in cited_clauses the clause IDs or files a policy search or read returned that support the write. A policy check names its rule's sources without their text, so they cannot be cited: search or read the policy for them first.
-- A blocked result means correct the action or explain the policy; it is not a reason to hand off.
+- A blocked result means correct the action or explain the policy; it is not a reason to hand off. If it lists the order's existing returns or refunds, take them into account before writing again.
+- Set policy_exception when the write relies on an exception to the main rule, and route approver or human when the case needs more than the rules require; both only ever make a write stricter.
 - If backend_write returns review_required, the write needs an independent review first: call request_review with the same write and a review_reason explaining how the retrieved policy and the recorded facts support it, then make the write once it is approved. A review never overrides a failed check or a human requirement.
 - No money moves: a refund is recorded as pending, never as paid. Each action is written once per ticket.
 - If backend_write hands the case to a person, the turn ends there.

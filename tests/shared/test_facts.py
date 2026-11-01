@@ -117,7 +117,11 @@ class BackendFactTests(unittest.TestCase):
         request = backend.returns_for_order.return_value["returns"][0]
         request["items"] = [{**request["items"][0], "approved_refund_amount": "30.00"}]
         self.assertEqual(BackendFacts(backend, Clock(NOW)).read("refund", ORDER, ["ITM-1"])["approved_refund_amount"], 20)
-        self.assertEqual(self.write(self.tools(backend))["status"], "executed")
+        tools = self.tools(backend)
+        first = self.write(tools)   # the earlier refunds were never looked up: shown once before writing
+        self.assertEqual(first["status"], "blocked")
+        self.assertEqual([request["status"] for request in first["existing_requests"]], ["processed", "processed"])
+        self.assertEqual(self.write(tools)["status"], "executed")
 
     def test_partial_refund_allocation_stays_unknown_for_a_multi_item_return(self):
         backend = reader(total=100, refunds=[{"return_id": "RET-APPROVED", "status": "processed", "amount": "20.00"}])
@@ -250,6 +254,37 @@ class WriteGateTests(unittest.TestCase):
                 self.assertEqual(tools.gate.request_review({**self.args, "review_reason": "Override."})["status"],
                                  expected)
                 self.assertEqual(tools.reviews, [])
+
+    def test_an_agent_can_ask_for_stricter_handling_but_never_looser(self):
+        small = {**self.args, "amount": 20}
+        for extra, route in (({"route": "approver"}, "approver"), ({"policy_exception": True}, "approver"),
+                             ({}, "auto")):
+            decision = self.gate().gate.check({**small, **extra})["policy_check"]
+            self.assertEqual(decision["route"], route)
+            if extra:
+                self.assertEqual(decision["rules_route"], "auto")
+        tools = self.gate()
+        self.assertEqual(tools.gate.check({**small, "route": "human"})["status"], "awaiting_human")
+        self.assertEqual(tools.ctx.stop_reason, "a person was asked to decide: damaged_item")
+        self.assertEqual(self.gate().gate.check({**self.args, "amount": 120, "route": "approver"})["status"],
+                         "awaiting_human")   # the rules' human route stays human
+
+    def test_a_write_on_unseen_returns_or_refunds_is_shown_them_once(self):
+        backend = reader()
+        backend.returns_for_order.return_value["returns"].append(
+            {"id": "RET-OPEN", "status": "requested", "reason": "faulty", "requested_at": NOW, "items": []})
+        tools = services(backend, writer=FakeDatabase())
+        tools.call("policy", action="read", skill="returns-and-refunds", file="refunds.md")
+        with patch.object(tools.gate.facts, "read", return_value=REFUND):
+            first = tools.gate.check({**self.args, "amount": 20})
+            self.assertEqual((first["status"], [r["id"] for r in first["existing_requests"]]), ("blocked", ["RET-OPEN"]))
+            self.assertTrue(first["existing_requests"][0]["awaiting_the_store"])
+            self.assertEqual(tools.gate.check({**self.args, "amount": 20})["status"], "allowed")   # once only
+            looked = services(backend, writer=FakeDatabase())
+            looked.call("policy", action="read", skill="returns-and-refunds", file="refunds.md")
+            looked.call("get_returns_for_order", order_id=ORDER)
+            with patch.object(looked.gate.facts, "read", return_value=REFUND):
+                self.assertEqual(looked.gate.check({**self.args, "amount": 20})["status"], "allowed")
 
     def test_an_unsupported_operation_goes_to_a_person(self):
         tools = self.gate()

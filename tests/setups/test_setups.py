@@ -267,3 +267,13 @@ def test_a_reply_that_never_passes_review_becomes_the_hold_reply():
     assert (output.status, output.reply) == ("awaiting_human", HOLD_REPLY)
     assert output.handoff_packet["reason"] == "reply failed review"
     assert db.ticket_saves[-1]["resolution"] is None
+
+
+@pytest.mark.parametrize("setup_id", ["s1-a", "s3-b", "s5-a", "s8-c"])
+def test_a_small_refund_on_a_claimed_exception_is_reviewed(setup_id):
+    write = {**refund(20, "ITM-2", mode(setup_id)), "policy_exception": True}
+    llm = script(setup_id, Scenario(reads=[policy_read(mode(setup_id))], writes=[write], review=True))
+    output, db = run(setup_id, llm)
+    assert output.status == "resolved" and len(db.writes) == 1
+    review = llm.user_payload("approver", 0)
+    assert (review["rule_check"]["route"], review["rule_check"]["rules_route"]) == ("approver", "auto")

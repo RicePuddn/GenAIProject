@@ -304,6 +304,8 @@ class Rules:
 
 VOID_REFUND_STATUSES = {"failed", "cancelled", "rejected"}
 VOID_RETURN_STATUSES = {"cancelled", "rejected", "closed"}
+# Returns the store still has to act on.
+AWAITING_STORE_RETURN_STATUSES = {"requested", "received"}
 # Rule-engine operations (also the `backend_write` tool's) and the writer's name for each.
 WRITE_OPERATIONS = {"refund": "refund", "return_request": "return", "cancel": "order_change"}
 
