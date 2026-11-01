@@ -268,6 +268,21 @@ def test_multi_graph_ends_on_the_strictest_part():
     assert [part["outcome"] for part in output.parts] == ["resolved", "awaiting_customer"]
 
 
+def test_multi_agentic_cannot_end_milder_than_a_part():
+    llm = script("s3-a", Scenario(reads=[shipments()], specialist="orders_shipping"))
+    llm.queues["supervisor"].clear()
+    llm.queues["specialist"].clear()
+    llm.push("supervisor", tool_call("ask_specialist", specialist="orders_shipping", request="Track it."),
+             tool_call("ask_specialist", specialist="returns_refunds", request="Refund the bottle."),
+             tool_call("finish", outcome="resolved", note="All done."))
+    llm.push("specialist", tool_call("get_shipments_for_order", order_id=ORDER),
+             tool_call("finish", outcome="resolved", note="Delivered."),
+             tool_call("finish", outcome="awaiting_human", note="The refund is outside the policy."))
+    output, _ = run("s3-a", llm)
+    assert output.status == "awaiting_human" and output.note == "The refund is outside the policy."
+    assert [part["outcome"] for part in output.parts] == ["resolved", "awaiting_human"]
+
+
 def test_multi_graph_goes_to_a_person_when_the_supervisor_gives_up_after_a_part():
     llm = script("s7-a", Scenario(reads=[shipments()], specialist="orders_shipping"))
     llm.queues["supervisor"].clear()

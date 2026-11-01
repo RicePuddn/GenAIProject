@@ -6,11 +6,12 @@ does (S1/S2), finishing with a report back to the supervisor.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
-from support_ops.setups.base import Setup, Turn, TurnResult, finished
+from support_ops.setups.base import STRICTNESS, Setup, Turn, TurnResult, finished
 from support_ops.setups.multi_common import (SPECIALIST_TOOLS, ask_tool, report, specialist, specialist_brief,
-                                             supervisor)
+                                             strictest, supervisor)
 from support_ops.shared.strategies import run_agent
 from support_ops.shared.tools import WRITE_TOOLS, Toolset, finish_tool
 
@@ -36,4 +37,12 @@ class MultiAgentic(Setup):
 
         tools = Toolset([ask_tool(ask, parts), finish_tool()], terminal="finish")
         run = run_agent(self.strategy["supervisor"], turn.ctx, supervisor(turn, "agentic"), tools, turn.brief)
-        return finished(turn, run, parts)
+        result = finished(turn, run, parts)
+        # The supervisor cannot end the ticket milder than a specialist reported, as in S7/S8: a part that
+        # needs a person or the customer is never closed as resolved.
+        floor = strictest(parts)
+        if result.status in STRICTNESS and STRICTNESS.index(floor) > STRICTNESS.index(result.status):
+            notes = [part.get("note") or part.get("error") for part in parts if part["outcome"] == floor]
+            turn.ctx.log("outcome_raised", finished=result.status, outcome=floor)
+            result = replace(result, status=floor, note=" ".join(filter(None, notes)) or result.note)
+        return result
