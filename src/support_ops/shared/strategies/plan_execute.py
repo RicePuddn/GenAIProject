@@ -1,5 +1,8 @@
 """plan_execute: plan every call up front and run the plan; replan only on an error or for a missing step.
 
+One loop on two levels: a supervisor plans the parts of the message (its calls are ask_specialist, one
+per part), a working agent plans its own tool calls. Only the planning text differs.
+
 A correction (after an invalid plan or a failed call) is a replan, up to `limits.max_replans`. After a
 plan has run in full, the agent is asked once more, with the results, for anything still missing (a
 completion check, up to `limits.max_plan_checks`): that is where a plan that needed a value it had not
@@ -26,13 +29,15 @@ def plan_execute(ctx: TurnContext, agent: Agent, tools: Toolset, brief: dict[str
     previous_error: str | None = None
     checking = False
     end = prompts.load("strategies", "plan_finish" if tools.terminal else "plan_stop")
-    plan_prompt = prompts.load("strategies", "plan", tools=json.dumps(tools.schemas, separators=(",", ":")),
+    level = "parts" if agent.role == "supervisor" else "calls"
+    plan_prompt = prompts.load("strategies", "plan", level=prompts.load("strategies", f"plan_{level}"),
+                               tools=json.dumps(tools.schemas, separators=(",", ":")),
                                context=agent.planner_context, end=end)
     while not ctx.stopped:
         ctx.budget.agent_step()
         system = f"{agent.prompt}\n\n{plan_prompt}"
         if checking:
-            system += "\n" + prompts.load("strategies", "plan_check")
+            system += "\n" + prompts.load("strategies", f"plan_check_{level}")
         reply = ctx.chat(agent.role, [
             {"role": "system", "content": system},
             {"role": "user", "content": json.dumps({**brief, "evidence": run.calls,

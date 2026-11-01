@@ -142,3 +142,14 @@ def test_the_planner_sees_the_agents_context_and_the_tool_schemas():
 def test_an_unknown_strategy_is_an_error():
     with pytest.raises(ValueError, match="react, plan_execute"):
         run("plan_and_execute", ScriptedLLM(), toolset())
+
+
+def test_the_supervisor_plans_parts_and_a_worker_plans_its_calls_with_the_same_loop():
+    for role, words, check in (("supervisor", "one ask_specialist call per part", "Plan only the parts still open"),
+                               ("agent", "Plan the tool calls you need for this case", "Plan only the calls still needed")):
+        llm = ScriptedLLM().push(role, plan(("lookup", {"order_id": "O1"})),
+                                 plan(("finish", {"outcome": "resolved", "note": "x"})))
+        ctx = services(llm=llm).ctx
+        run_agent("plan_execute", ctx, Agent("a", role, "You help."), toolset(), {"message": "hi"})
+        first, second = (messages[0]["content"] for _, messages, _ in llm.calls)
+        assert words in first and check in second and check not in first
