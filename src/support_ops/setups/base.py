@@ -37,10 +37,12 @@ class Turn:
     policy: PolicyProvider
     customer_id: str | None
 
-    def facts(self) -> str:
-        """How every working agent checks facts and policy (prompts/facts.md)."""
+    def facts(self, policy: PolicyProvider | None = None) -> str:
+        """How every working agent checks facts and policy (prompts/facts.md), with `policy`'s hint (by
+        default the turn's own provider)."""
         signed_in = "\n" + prompts.load("facts", "signed_in", account=self.customer_id) if self.customer_id else ""
-        return prompts.load("facts", "facts", policy_hint=self.policy.prompt_hint, signed_in=signed_in)
+        return prompts.load("facts", "facts", policy_hint=(policy or self.policy).prompt_hint,
+                            signed_in=signed_in)
 
     @property
     def today(self) -> str:

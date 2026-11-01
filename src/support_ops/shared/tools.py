@@ -229,17 +229,24 @@ class ToolRegistry:
                  lambda args: self._own_orders()),
             *(Tool(name, OrderArguments, description, lambda args, run=run: run(args["order_id"]))
               for name, (description, run) in lookups.items()),
-            Tool("policy", policy.arguments, policy.description, self._policy),
+            Tool("policy", policy.arguments, policy.description, lambda args: self._policy(args)),
             Tool("backend_write", BackendWriteArguments, BackendWriteArguments.__doc__, self._backend_write),
             Tool("request_review", RequestReviewArguments, RequestReviewArguments.__doc__, gate.request_review),
         ]
         self.tools = {tool.name: tool for tool in tools}
         assert tuple(self.tools) == ALL_TOOLS
 
-    def toolset(self, names: Sequence[str], *, extra: Sequence[Tool] = (), terminal: str | None = None) -> Toolset:
+    def toolset(self, names: Sequence[str], *, extra: Sequence[Tool] = (), terminal: str | None = None,
+                policy: PolicyProvider | None = None) -> Toolset:
+        """The named tools, plus `extra`. `policy` replaces the policy tool's provider, e.g. with a
+        specialist's scoped view of it."""
         if unknown := sorted(set(names) - set(self.tools)):
             raise ValueError(f"unknown tools: {unknown}")
-        return Toolset([self.tools[name] for name in names] + list(extra), terminal)
+        tools = {name: self.tools[name] for name in names}
+        if policy is not None and "policy" in tools:
+            tools["policy"] = Tool("policy", policy.arguments, policy.description,
+                                   lambda args: self._policy(args, policy))
+        return Toolset([*tools.values(), *extra], terminal)
 
     def _own_orders(self) -> dict[str, Any]:
         # Only an account-scoped reader can list orders, and only its own customer's.
@@ -248,12 +255,13 @@ class ToolRegistry:
                              "ask the customer for the order number")
         return {"orders": self.reader.own_orders()}
 
-    def _policy(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _policy(self, args: dict[str, Any], policy: PolicyProvider | None = None) -> dict[str, Any]:
+        policy = policy or self.policy
         if args["action"] != "check":
-            return self.policy.run(args)
+            return policy.run(args)
         # The argument models allow only the delivery check: each parcel is checked on its own.
         parcels = self.gate.facts.deliveries(args["order_id"])
-        checks = [self.policy.run({**args, "facts": parcel}) for parcel in parcels or [{}]]
+        checks = [policy.run({**args, "facts": parcel}) for parcel in parcels or [{}]]
         decision = next((check for check in checks if check["requires_human"]), checks[0])
         return {**decision, "parcel_checks": checks, "note": CHECK_NOTE}
 

@@ -24,8 +24,9 @@ class MultiGraph(Setup):
         parts: list[dict[str, Any]] = []
 
         def ask(name: str, request: str) -> dict[str, Any]:
-            flow = PartFlow(turn.ctx, self.strategy["specialists"], specialist(turn, name, "graph"),
-                            turn.registry.toolset(SPECIALIST_TOOLS[name]), turn.gate, turn.executor)
+            agent, policy = specialist(turn, name, "graph")
+            flow = PartFlow(turn.ctx, self.strategy["specialists"], agent,
+                            turn.registry.toolset(SPECIALIST_TOOLS[name], policy=policy), turn.gate, turn.executor)
             part = flow.run(specialist_brief(turn, request))
             return report(part.status, part.note, part.writes)
 

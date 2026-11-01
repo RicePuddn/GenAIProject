@@ -29,8 +29,10 @@ budget. The guard, the reply and the ticket save never depend on which setup ran
 | `setups/multi_agentic.py` | S3, S4 | The supervisor calls `ask_specialist`; each specialist acts like S1's agent on its part and finishes with `finish`. |
 | `setups/multi_graph.py` | S7, S8 | The supervisor calls `ask_specialist`; each part runs `shared/flow.py` with the specialist in the gather stage. No triage. |
 
-`setups/multi_common.py` holds what the multi-agent setups share: the specialists' tool subsets and
-prompts, and the `ask_specialist` tool. A setup file imports only from `shared/`, `prompts/` and
+`setups/multi_common.py` holds what the multi-agent setups share: the specialists' tool subsets,
+policy scopes and prompts, and the `ask_specialist` tool. A specialist's `policy` tool is the same provider
+as the single agent's, seen through `scoped(...)`: by default it keeps to the specialist's own sections
+(RAG) or skill folders (skills), and a call with `scope: all` reaches the rest. A setup file imports only from `shared/`, `prompts/` and
 `multi_common.py`. `setups/__init__.py::build_setup("s3-c")` picks the class from the setup's agents
 and control style; the policy mode and strategies are config.
 

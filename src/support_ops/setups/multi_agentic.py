@@ -23,10 +23,10 @@ class MultiAgentic(Setup):
 
         def ask(name: str, request: str) -> dict[str, Any]:
             start = len(turn.ctx.evidence)
+            agent, policy = specialist(turn, name, "agentic")
             tools = turn.registry.toolset((*SPECIALIST_TOOLS[name], *WRITE_TOOLS), extra=[finish_tool()],
-                                          terminal="finish")
-            run = run_agent(self.strategy["specialists"], turn.ctx, specialist(turn, name, "agentic"), tools,
-                            specialist_brief(turn, request))
+                                          terminal="finish", policy=policy)
+            run = run_agent(self.strategy["specialists"], turn.ctx, agent, tools, specialist_brief(turn, request))
             writes = [item["result"] for item in turn.ctx.evidence[start:] if item["tool"] == "backend_write"
                       and item["result"].get("status") == "executed"]
             if run.finished is None:

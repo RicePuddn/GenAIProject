@@ -1,6 +1,7 @@
 """The contract both policy modes (RAG and skills) meet, and the choice between them from `policy.mode`."""
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
@@ -27,6 +28,11 @@ class PolicyProvider(Protocol):
 
     def warm_up(self) -> None:
         """Prepare policy retrieval before ticket timing begins."""
+        ...
+
+    def scoped(self, scope: Sequence[str]) -> PolicyProvider:
+        """The same tool for a specialist, keeping by default to `scope` (RAG: section names; skills: skill
+        folders), with scope all reaching the rest."""
         ...
 
 

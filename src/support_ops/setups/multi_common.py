@@ -10,10 +10,17 @@ from typing import Any, Callable, Literal
 
 from support_ops import prompts
 from support_ops.setups.base import STRICTNESS, Turn
+from support_ops.shared.policy.provider import PolicyProvider
 from support_ops.shared.strategies import Agent
 from support_ops.shared.tools import NonEmpty, Tool, ToolArguments
 
 SpecialistName = Literal["orders_shipping", "returns_refunds"]
+# Each specialist's own part of the policy, by policy mode: RAG section names, or skill folders. Its policy
+# tool keeps to it unless a call says scope all.
+POLICY_SCOPE: dict[str, dict[str, tuple[str, ...]]] = {
+    "rag": {"orders_shipping": ("Orders and shipping",), "returns_refunds": ("Returns and refunds",)},
+    "skills": {"orders_shipping": ("orders-and-shipping",), "returns_refunds": ("returns-and-refunds",)},
+}
 # Shipments are in returns_refunds for the delivery date a return window is counted from.
 SPECIALIST_TOOLS: dict[str, tuple[str, ...]] = {
     "orders_shipping": ("read_record", "get_orders_for_customer", "get_shipments_for_order",
@@ -35,11 +42,13 @@ def supervisor(turn: Turn, control: str) -> Agent:
                  prompts.load("supervisor", control=prompts.load("control", f"supervisor_{control}")))
 
 
-def specialist(turn: Turn, name: str, control: str) -> Agent:
+def specialist(turn: Turn, name: str, control: str) -> tuple[Agent, PolicyProvider]:
+    """The specialist, and its scoped policy tool, which its toolset must use."""
+    policy = turn.policy.scoped(POLICY_SCOPE[turn.ctx.cfg["policy"]["mode"]][name])
     prompt = prompts.load("specialists", "common", title=name.replace("_", " and "), today=turn.today,
-                          scope=prompts.load("specialists", name), facts=turn.facts(),
+                          scope=prompts.load("specialists", name), facts=turn.facts(policy),
                           control=prompts.load("control", control))
-    return Agent(name, "specialist", prompt, turn.policy.planner_context())
+    return Agent(name, "specialist", prompt, policy.planner_context()), policy
 
 
 def specialist_brief(turn: Turn, request: str) -> dict[str, Any]:

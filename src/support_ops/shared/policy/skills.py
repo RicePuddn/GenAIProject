@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Literal, Self
 
@@ -34,6 +35,12 @@ class PolicyArguments(ToolArguments):
         if self.action == "check" and not (self.operation and self.order_id):
             raise ValueError("check requires operation delivery and order_id")
         return self
+
+
+class ScopedPolicyArguments(PolicyArguments):
+    __doc__ = (PolicyArguments.__doc__ + " scope own (the default) keeps to your skills; use all when the case "
+               "crosses into another area.")
+    scope: Literal["own", "all"] = "own"
 
 
 class SkillsPolicy:
@@ -123,3 +130,53 @@ class SkillsPolicy:
         ids = {match.group(1) for match in MARKDOWN_CLAUSE.finditer(result["content"])}
         names = {f"{result['skill']}/{result['file']}"} | ({result["file"]} if result["file"] != "SKILL.md" else set())
         return names | ids
+
+    def has_skill(self, name: str) -> bool:
+        """Whether `name` is a skill folder with a SKILL.md, without reading every skill."""
+        base = (self.root / name).resolve()
+        return base.parent == self.root and not (self.root / name).is_symlink() and (base / "SKILL.md").is_file()
+
+    def scoped(self, scope: Sequence[str]) -> ScopedSkillsPolicy:
+        """The same tool for a specialist: by default only its own skill folders."""
+        if missing := [skill for skill in scope if not self.has_skill(skill)]:
+            raise ValueError(f"policy scope names skills that do not exist: {missing}")
+        return ScopedSkillsPolicy(self, tuple(scope))
+
+
+class ScopedSkillsPolicy:
+    """A specialist's view of the skills: list, open and read keep to `scope` unless the call says scope all."""
+    arguments = ScopedPolicyArguments
+    description = ScopedPolicyArguments.__doc__
+
+    def __init__(self, policy: SkillsPolicy, scope: tuple[str, ...]):
+        self.policy, self.scope = policy, scope
+        self.prompt_hint = (policy.prompt_hint + " Your policy skills cover your own area; use scope all when the "
+                            "case crosses into another area.")
+        self.citable, self.warm_up = policy.citable, policy.warm_up
+
+    def _own(self, catalog: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [item for item in catalog if item["skill"] in self.scope]
+
+    def planner_context(self) -> str:
+        # Only the specialist's own skills, so a plan does not list reads the default scope refuses.
+        return ("Your policy skills (contents must still be read with tools; scope all reaches the others): "
+                + json.dumps(self._own(self.policy.catalog())))
+
+    def run(self, args: dict[str, Any]) -> dict[str, Any]:
+        everything = args.get("scope", "own") == "all"
+        action = args["action"]
+        if action == "check":
+            return self.policy.run(args)
+        if action == "list":
+            catalog = self.policy.catalog() if everything else self._own(self.policy.catalog())
+            return {"skills": [item["skill"] for item in catalog], "catalog": catalog,
+                    "scope": "all" if everything else "own"}
+        skill = args.get("skill") or args.get("file", "")
+        if not self.policy.has_skill(skill):
+            # A guessed name: offer only names that exist, never another area's.
+            choices = ([item["skill"] for item in self.policy.catalog()] if everything else list(self.scope))
+            raise ValueError(f"no policy skill named {skill!r}; your skills: {choices}")
+        if not everything and skill not in self.scope:
+            raise ValueError(f"{skill} is outside your policy skills {list(self.scope)}; "
+                             "use scope all if the case crosses into another area")
+        return self.policy.run({key: value for key, value in args.items() if key != "scope"})
