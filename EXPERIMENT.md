@@ -36,10 +36,12 @@ S7/S8 have **no triage step**: the supervisor does not classify or redirect the 
 **Single agent.** One agent does all the work.
 
 **Multi-agent.** A supervisor plus two specialists, `orders_shipping` and `returns_refunds`, each with its own subset of the tools.
-The supervisor delegates parts of the ticket. Only the specialists call data tools.
+The supervisor delegates parts of the ticket. Only the specialists call data tools. Each specialist's `policy` tool
+keeps by default to its own part of the policy (RAG: its sections; SKILL: its skill folder) and reaches the rest with
+`scope: all`; it is the same provider as the single agent's, not a separate implementation.
 
 **RAG.** The `policy` tool searches the Pinecone index of the policy PDFs (`policy.rag` settings).
-**SKILL.** The `policy` tool opens `SKILL.md` files under `policy/skills/` and reads the clause files they point to.
+**SKILL.** The `policy` tool opens `SKILL.md` files under `data/policy/skills/` and reads the clause files they point to.
 Both modes cover the same policy text.
 
 **Strategies.**
@@ -48,7 +50,8 @@ Both modes cover the same policy text.
 - `plan_execute`: plan all steps up front, run them, then replan only on an error or for a missing step.
 
 For a multi-agent setup, the supervisor's strategy decides how it delegates (one part at a time, or all parts planned first).
-The specialists' strategy decides how they call tools.
+The specialists' strategy decides how they call tools. Both use the same loop; a supervisor's plan is the parts of the
+message, a working agent's plan is its tool calls.
 
 ## Variants
 
@@ -61,7 +64,7 @@ The same variants apply to the agentic setup and its graph counterpart.
 | c | –            | react        | plan_execute |
 | d | –            | plan_execute | react |
 
-Config files are named by setup and variant: `s1-a.yaml`, `s3-c.yaml`, and so on.
+Each variant has a setup ID such as `s1-a` or `s3-c`, resolved from the one matrix in `configs/setups.yaml` (no file per variant).
 
 ## Held constant across all setups
 
@@ -69,14 +72,15 @@ Config files are named by setup and variant: `s1-a.yaml`, `s3-c.yaml`, and so on
 |---|---|
 | Model (all roles except the guard) | `openai/gpt-oss-120b` on Groq, temperature 0, `reasoning_effort: medium` for every role |
 | Prompt attack guard | `llama-prompt-guard-2-86m`, threshold 0.5, screens every turn including history |
-| Data tools | One tool registry. Multi-agent setups give each specialist a subset; they never get different implementations |
+| Data tools | One tool registry (`shared/tools.py`). Multi-agent setups give each specialist a subset; they never get different implementations (a specialist's `policy` tool is a scoped view of the same provider) |
 | Business rules | One rules engine, reading `data/policy/rules.json` |
-| Write path | One write gate (`gateway/write_gate.py`): rule check → cited clauses must be ones retrieved in this ticket → independent approver review when required. Agentic setups reach it through the `backend_write` tool; graph setups call it as a node |
+| Write path | One write gate (`shared/gates/write_gate.py`): rule check → cited clauses must be ones retrieved in this ticket → the order's returns and refunds not yet looked up are shown once → the route is the stricter of the rules' and the agent's own (`route`, `policy_exception`), never looser → independent approver review when required. Agentic setups reach it through `backend_write` and ask for the review themselves with `request_review`; graph setups call it as nodes |
 | Write review and reply check | Same approver prompts and limits (`review.max_rejections: 1`, `review.max_reply_drafts: 2`) |
-| Reply | Same reply prompt and the same wording checks |
+| Reply | Same reply prompt and the same wording checks, written from the ticket's status, the agent's note, the evidence and the problems code finds in what the agents looked up |
 | Ticket save | Saved in code at the end of every turn, the same way in every setup |
-| Budgets | 40 tool calls, 12 agent steps and US$0.05 per ticket |
-| Clock | Fixed at `run.clock_start` (2026-10-01 09:00 +08:00) |
+| Budgets | 40 tool calls, 12 agent steps and US$0.05 per ticket, shared by every agent in it; one retry policy (`retries`) |
+| Clock | Fixed at `run.clock_start` (2026-10-01 09:00 +08:00); only an explicit `clock_start` in an API request (the demo's "use today's date") overrides it |
+| LLM cache | Off (`llm.cache_dir: null`); when on, the trial number (`run.trial`) is part of the key |
 
 ## Recommended repo structure
 
@@ -87,6 +91,7 @@ so only the four combinations of agent count and control style get their own cod
 GenAIProject/
 ├── EXPERIMENT.md              study design (this file, the source of truth)
 ├── ARCHITECTURE.md            how the code fits together, one page
+├── docs/                      one walkthrough and draw.io diagram per setup pair
 ├── README.md                  install and run only
 ├── .gitattributes             *.pdf binary
 ├── configs/
@@ -111,8 +116,11 @@ GenAIProject/
 │   │   ├── policy/            provider.py, rag/, skills.py, citations.py
 │   │   ├── gates/             guard.py, write_gate.py, approver.py, reply.py, ticket.py, handoff.py
 │   │   ├── strategies/        react.py, plan_execute.py (one loop for every agent)
+│   │   ├── context.py         TurnContext: one turn's LLM, trace, clock, budget and evidence
+│   │   ├── flow.py            the graph setups' stages (gather → propose → check → review → write)
 │   │   └── pipeline.py        run_turn(): guard → setup body → reply check → save ticket
-│   ├── prompts/               one .md per role: agent, supervisor, specialists, approver, reply writer
+│   ├── prompts/               one .md per role: agent, supervisor, specialists, approver, reply writer;
+│   │                          plus shared facts, control, strategies and propose text
 │   ├── setups/
 │   │   ├── base.py            Setup interface and TurnResult (same shape for every setup)
 │   │   ├── multi_common.py    supervisor and specialist definitions shared by S3/S4/S7/S8
@@ -128,13 +136,14 @@ GenAIProject/
 ├── tests/
 │   ├── fakes.py               scripted LLM, fake database, fake retriever
 │   ├── shared/                unit tests for gates, rules, tools, policy
-│   └── setups/                behaviour tests: message in → expected outcome and writes, for every setup
+│   ├── setups/                behaviour tests: message in → expected outcome and writes, for every setup
+│   └── test_api.py, test_demo.py
 └── results/                   run outputs (gitignored except summaries)
 ```
 
 Rules for the structure:
 
-- A setup file imports only from `shared/`, `prompts/` and `multi_common.py`, never from another setup file.
+- A setup file imports only from `shared/`, `prompts/`, `setups/base.py` and `multi_common.py`, never from another setup file.
 - A setup implements only its body. It never calls the guard, the reply check or the ticket save itself.
 
 Suggested code moves:
@@ -160,65 +169,52 @@ Suggested code moves:
 | `data/backend_seed/` | `data/db/` |
 | `src/support_ops/eval/rag_evaluation.ipynb` | `notebooks/` |
 | `configs/experiments/` | `configs/setups.yaml` |
-| `docs/multi-agent.md`, `docs/multi-agent-flow.drawio` | `ARCHITECTURE.md` |
+| `docs/multi-agent.md`, `docs/multi-agent-flow.drawio` | `ARCHITECTURE.md`, and `docs/` per setup pair |
 
-## Current code status (2026-11-01)
+## Code status (2026-11-01, after the refactor on branch `refactor`)
 
-### A. Skews the comparison
+All 19 issues listed before the refactor are resolved:
 
-These make setups differ in ways other than the factor being tested.
+| # | Issue | Resolution |
+|---|---|---|
+| 1 | Two write paths | S7/S8 write through the one write gate; the route tool, approval tokens and `gateway/writes.py` are removed |
+| 2 | Shared gates copied per workflow | `shared/pipeline.py::run_turn` runs guard → body → reply and reply check → ticket save for every setup |
+| 3 | `plan_execute` meant three things | One react and one plan_execute loop (`shared/strategies/`) for every agent |
+| 4 | Multi-agent got larger step budgets | One budget per ticket, shared by all its agents (`shared/budget.py`) |
+| 5 | Only multi-agent retried | One `retries` policy, applied to every tool call and JSON reply |
+| 6 | Citation check could be off for specialists | Always on, in the write gate |
+| 7 | Specialists had extra tools | Every tool comes from the one registry; specialists get subsets |
+| 8 | Triage in S7/S8 | Removed: the supervisor's only tool is `ask_specialist` |
+| 9 | LLM cache made trials identical | Cache off by default; `run.trial` is part of the key |
+| 10 | S5/S6 not built | `setups/single_graph.py` on `shared/flow.py` |
+| 11 | No per-variant config | `configs/setups.yaml`; `load_config(setup="s3-c")` |
+| 12 | Wrong setup labels | Code and docs use S1–S8 as in this file |
+| 13 | S3/S4 subclassed S7/S8 | Four independent setup classes sharing `multi_common.py` |
+| 14 | Two APIs and two demos | One `api.py` (setup per request or `run.setup`) and one `apps/demo.py` |
+| 15 | Code defaults disagreed with config | Every value lives in `base.yaml`; code reads no key with a default |
+| 16 | Dead or one-setup config keys | `system`, `review.trigger` and `multi_agent.*` are removed |
+| 17 | Demo and experiments used different dates | `run.clock_start` everywhere; an API request can override it explicitly |
+| 18 | Prompts inside code | `prompts/*.md` |
+| 19 | No `.gitattributes` | `*.pdf binary` |
 
-1. **Two write paths.** The fixed multi-agent workflow writes through `route` → approval tokens (`gateway/approvals.py`,
-   `gateway/writes.py`). Every other setup writes through `gateway/write_gate.py`. Move S7/S8 onto the write gate.
-2. **The shared gates are copied rather than shared.** Guard, reply check and ticket save are re-implemented in each
-   workflow. Wrap every setup as `guard → setup body → reply check → save ticket`, so setups implement only the body.
-3. **`plan_execute` means three different things.**
-   - Single agent: plans every call including writes, then gets up to 3 completion checks and 2 replans (`systems/single_agent.py`).
-   - Specialists: plan only reads and policy calls, then write one proposal (`agents/specialist.py`).
-   - Supervisor: plans a list of tasks, one per specialist.
+### Decisions made during the refactor (owners to confirm)
 
-   Implement `react` and `plan_execute` once and use the same loop for every agent.
-4. **Multi-agent setups get far larger step budgets.** The single agent has 12 agent steps per ticket. Each specialist
-   run gets its own 12 (`agents/specialist.py:65`), the agentic supervisor another 12 (`max_supervisor_steps`) and the fixed
-   workflow 4 delegations (`max_orchestration_steps`). Only the 40-tool-call and US$0.05 caps are shared, and the cost cap
-   cuts off multi-agent setups sooner because they make more LLM calls. Budgets should be per ticket and equal.
-5. **Only the multi-agent setups retry.** Specialists re-run a failed tool once and re-ask after malformed JSON
-   (`multi_agent.retries`). The single agent does not retry failed tools. Use one retry policy for every setup.
-6. **The citation check can be switched off for specialists only** (`multi_agent.check_citations`). The single agent
-   always checks. Make it fixed and on for every setup.
-7. **Specialists get tools the single agent does not have** (for example the extra returns lookup in `agents/toolbox.py`).
-   Every tool should come from the one registry, with specialists getting subsets.
-8. **Triage still exists in the fixed multi-agent workflow** (the supervisor classifies and can redirect). Remove it for S7/S8.
-9. **The LLM response cache makes repeated trials identical.** The cache key is the exact request (`helpers/llm.py:102`),
-   with temperature 0 and a fixed seed. With the cache on (the default, `llm.cache_dir: results/cache`), repeat trials replay
-   the first one, so every setup looks perfectly consistent (H2), and cached calls take no time and cost nothing (H1).
-   Turn the cache off for experiment runs, or add the trial number to the key.
-
-### B. Missing
-
-10. **S5/S6 are not built.**
-11. **No per-variant config files.** Only `multi_agent_rag.yaml` and `multi_agent_skills.yaml` exist. Define the 24
-    variants, ideally as one matrix (`configs/setups.yaml`) that a setup ID such as `s3-c` resolves from, not 24 hand-written files.
-
-### C. Confusing code and config
-
-12. **The setup labels in the code are wrong.** `systems/multi_agent.py` and `docs/multi-agent.md` call the fixed
-    workflow "S3/S4". In this plan it is S7/S8. `systems/supervisor_agent.py` is the agentic S3/S4.
-13. **The agentic multi-agent class inherits from the fixed one.** `SupervisorAgentWorkflow` (S3/S4) subclasses
-    `MultiAgentWorkflow` (S7/S8) and replaces its graph. Separate them, sharing code through the common pieces instead.
-14. **Two APIs and two demo apps** (`api.py` on port 8000, `api_multi.py` on 8001) with different request schemas.
-    Merge them into one, with the setup and variant chosen by config.
-15. **Code defaults disagree with the config.** The single agent falls back to `policy.mode: skills` while `base.yaml` says
-    `rag`. `api_multi.py` falls back to `design: workflow` while the configs say `supervisor`. A missing key silently
-    gives a different setup. Defaults should live only in `base.yaml`, and a missing key should be an error.
-16. **Config keys that do nothing or apply to one setup only.** `system: multi_agent` is read by no code.
-    `review.trigger` is read only by the agentic multi-agent workflow. Remove them or make them apply everywhere.
-17. **The demo and the experiments use different dates.** Both APIs use today's date, while programmatic runs use
-    `run.clock_start`. Return-window answers in the demo differ from experiment runs, and seeded orders drift out of
-    their 30-day windows as real time passes. Use `run.clock_start` everywhere, with an explicit override for the demo.
-18. **Prompts are long strings inside the code.** Move each role's prompt to its own file so it can be read and compared across setups.
-
-### D. Environment and repo
-
-19. **No `.gitattributes`.** On Windows, `core.autocrlf` rewrites the policy PDFs and breaks the rules fingerprint
-    check. Add `*.pdf binary`.
+- **Who asks for a review in agentic setups.** The agent calls `request_review`; `backend_write` refuses an
+  approver-route write until that exact write is approved. In graph setups the graph runs the review.
+- **How an agentic agent ends a turn.** It calls `finish` (resolved, awaiting_customer or awaiting_human, with a
+  note). An agent that stops without it is nudged once, then handed off. The S3/S4 supervisor's `reply`,
+  `ask_customer` and `hand_off` became this one `finish`.
+- **Ticket fields.** The ticket save in code derives the category from the turn's writes and lookups, sets
+  priority "normal", and uses the first customer message as the subject. The `update_ticket` tool is gone.
+- **Handoffs end the turn.** When the write gate hands a write to a person, the whole turn ends `awaiting_human`
+  in every setup, so in a multi-part message later parts may not run. In the graph setups a proposal of
+  `awaiting_human` does the same; S7/S8 otherwise end on the strictest outcome of their parts.
+- **What S7/S8's route tool did, kept for every setup.** A write may ask for a stricter route, a claimed policy
+  exception gets a review, unseen returns and refunds are shown once, and code-found problems reach the reply.
+  Default routes per action (exchange to the approver, account changes to a person) are not kept: those are
+  unsupported writes and go to a person.
+- **Replies.** Every setup's reply is written from the evidence by the `reply_writer` role; the multi-agent
+  outcome summary (`tell_customer`) is removed.
+- **Specialists' writes.** They are not limited per specialist; the prompts say which operations are whose.
+- **Triage.** Removed as defined above (classifying the message and redirecting it). The S7/S8 supervisor still
+  decides which specialist handles each part.
