@@ -80,7 +80,7 @@ and the specialists. An agent is a prompt plus a `Toolset`.
 | Writes | `shared/gates/write_gate.py`: `WriteGate` decides (rules, then citations, then review), `WriteExecutor` writes once per idempotency key. |
 | Review and reply check | `shared/gates/approver.py`, one prompt each in `prompts/approver.md`. |
 | Reply | `shared/gates/reply.py`: the reply writer (`prompts/reply_writer.md`), code wording checks, then the reply check. |
-| Guard | `shared/gates/guard.py`: every turn, history included. |
+| Guard | `shared/gates/guard.py`: screens the new customer message once per turn. |
 | Ticket save and handoff | `shared/gates/ticket.py`, `shared/gates/handoff.py`, in code at the end of every turn. |
 | Budgets and retries | `shared/budget.py`: one budget per ticket, shared by every agent in it. |
 | Policy | `shared/policy/`: the `policy` tool's RAG and skills providers and the citation check. |

@@ -15,7 +15,7 @@ One page and one draw.io diagram per code path. Each pair of setups runs the sam
 Every turn runs `shared/pipeline.py::run_turn`: **guard → setup body → reply writer → wording checks →
 reply check → ticket save**. Only the body differs between setups. The rest is the same code everywhere:
 
-- **Guard.** Prompt Guard screens the message and every history turn. A flagged turn gets the fixed hold
+- **Guard.** Prompt Guard screens the new customer message. A flagged turn gets the fixed hold
   reply, and no agent runs.
 - **Write gate**, the only write path, in this order:
   1. The rules on the recorded facts.

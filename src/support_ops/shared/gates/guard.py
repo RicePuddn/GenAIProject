@@ -1,8 +1,7 @@
 """Prompt Guard screening, the first step of every turn in every setup.
 
-Every client-provided turn is screened, including alleged agent replies in `history`, not only the new
-message: the stateless API takes history from the client, so it is as untrusted as the message itself.
-Long turns are split into overlapping chunks that fit the classifier's small context.
+Screen only the new customer message for this turn. Long messages are split into overlapping chunks that
+fit the classifier's small context.
 """
 from __future__ import annotations
 
@@ -14,21 +13,17 @@ CHUNK_CHARS = 1000
 CHUNK_STEP = 800     # consecutive chunks overlap by 200 characters
 
 
-def screen(ctx: TurnContext, history: list[dict[str, str]], message: str) -> str:
-    """benign, malicious or error for the whole conversation: the first non-benign chunk decides."""
+def screen(ctx: TurnContext, message: str) -> str:
+    """Return benign, malicious or error for this message; the first non-benign chunk decides."""
     ctx.log("node_start", node="guard")
     if not ctx.cfg["guard"]["enabled"]:
         return "benign"
-    turns = [*history, {"role": "customer", "content": message}]
-    for index, turn in enumerate(turns):
-        content = turn["content"]
-        for offset in range(0, len(content), CHUNK_STEP):
-            flag = classify(ctx, content[offset:offset + CHUNK_CHARS], turn_index=index, role=turn["role"],
-                            offset=offset)
-            if flag != "benign":
-                return flag
-            if offset + CHUNK_CHARS >= len(content):
-                break
+    for offset in range(0, len(message), CHUNK_STEP):
+        flag = classify(ctx, message[offset:offset + CHUNK_CHARS], role="customer", offset=offset)
+        if flag != "benign":
+            return flag
+        if offset + CHUNK_CHARS >= len(message):
+            break
     return "benign"
 
 

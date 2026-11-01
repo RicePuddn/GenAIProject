@@ -27,7 +27,7 @@ specialist; the prompts say which are whose.
 
 ## A turn
 
-1. The guard screens the message and history.
+1. The guard screens the new customer message.
 2. The supervisor asks specialists for parts. Each specialist runs with the brief plus `your_task`.
 3. A specialist's writes go through the same write gate as S1/S2, with `request_review` for the approver route.
 4. The supervisor's `finish` ends the turn. If a specialist's write is handed to a person, the whole turn

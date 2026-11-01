@@ -18,7 +18,7 @@ is finished. Code only enforces the budget and the shared gates.
 
 ## A turn
 
-1. The guard screens the message and history.
+1. The guard screens the new customer message.
 2. The agent works by its strategy with: `read_record`, `get_orders_for_customer`, the five order
    lookups, `policy` (search or read, plus the delivery check), `backend_write`, `request_review`, `finish`.
 3. `backend_write` returns one of:

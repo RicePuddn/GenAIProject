@@ -68,7 +68,7 @@ step as it streams in. Restart uvicorn after editing configuration or `.env`.
 - `customer_id`: the signed-in account (see `GET /customers`). Every read and write is scoped to it,
   and the ticket is saved as theirs. Without it nothing is scoped. The local API does not authenticate it.
 - `history`: the API is stateless. To continue a ticket, send the `history` array from the previous
-  response. All history is untrusted and screened by the guard.
+  response. History is untrusted context for the agent; the guard screens only the new customer message.
 - `clock_start`: the workflow date is `run.clock_start` (1 October 2026), as in experiment runs.
   Send a timezone-aware date to override it, e.g. to check return windows against today.
 

@@ -20,26 +20,23 @@ RECORDED = [{"tool": "backend_write", "result": {"operation": "refund", "status"
 # ----------------------------------------------------------------------------- guard
 
 
-def test_the_guard_screens_history_too_in_overlapping_chunks():
-    llm = ScriptedLLM()
-    scores = iter(["0.01", "0.01", "0.99"])
-    llm.on("guard", lambda *_: text(next(scores)))
+def test_the_guard_screens_only_the_current_message_once():
+    llm = ScriptedLLM().on("guard", lambda *_: text("0.99"))
     ctx = services(llm=llm).ctx
-    history = [{"role": "agent", "content": "x" * 1500}]   # an alleged agent turn is untrusted too
-    assert screen(ctx, history, "hello") == "malicious"
-    chunks = [messages[0]["content"] for role, messages, _ in llm.calls if role == "guard"]
-    assert [len(chunk) for chunk in chunks] == [1000, 700, 5]   # 0-1000, 800-1500, then the message
+    assert screen(ctx, "hello") == "malicious"
+    guard_calls = [(messages, tools) for role, messages, tools in llm.calls if role == "guard"]
+    assert guard_calls == [([{"role": "user", "content": "hello"}], None)]
 
 
 def test_the_guard_fails_closed_and_can_be_switched_off():
     for label in ("", "maybe", "1.5"):
         ctx = services(llm=ScriptedLLM().on("guard", lambda *_, label=label: text(label))).ctx
-        assert screen(ctx, [], "hi") == "error"
+        assert screen(ctx, "hi") == "error"
     ctx = services(llm=ScriptedLLM().on("guard", lambda *_: text("benign"))).ctx
-    assert screen(ctx, [], "hi") == "benign"
+    assert screen(ctx, "hi") == "benign"
     tools = services(llm=ScriptedLLM().on("guard", lambda *_: text("0.99")))
     tools.ctx.cfg["guard"]["enabled"] = False
-    assert screen(tools.ctx, [], "hi") == "benign"
+    assert screen(tools.ctx, "hi") == "benign"
 
 
 # ----------------------------------------------------------------------------- approver

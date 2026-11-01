@@ -100,7 +100,12 @@ def plan_execute(ctx: TurnContext, agent: Agent, tools: Toolset, brief: dict[str
 
 
 def _validated(ctx: TurnContext, tools: Toolset, plan: Plan) -> list[tuple[str, dict[str, Any]]]:
-    calls = [(call.name, tools.validate(call.name, call.arguments)) for call in plan.calls]
+    calls = []
+    for call in plan.calls:
+        name, arguments = tools.resolve_terminal_call(call.name, call.arguments)
+        if name != call.name:
+            ctx.log("terminal_tool_name_repaired", generated=call.name, resolved=name)
+        calls.append((name, tools.validate(name, arguments)))
     if sum(tools.tools[name].data for name, _ in calls) > ctx.budget.tool_calls_left:
         raise ValueError("the plan exceeds the remaining tool budget")
     if tools.terminal:

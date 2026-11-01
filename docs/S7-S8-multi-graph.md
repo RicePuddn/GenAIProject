@@ -21,7 +21,7 @@ plan_execute/react, supervisor first).
 
 ## A turn
 
-1. The guard screens the message and history.
+1. The guard screens the new customer message.
 2. The supervisor asks for parts. Each part's report (outcome, note, writes) goes back to it.
 3. When the supervisor stops asking, the strictest outcome decides the status.
 4. A handoff in any part (a failed gather, a proposal of awaiting_human, or the write gate) ends the whole turn.

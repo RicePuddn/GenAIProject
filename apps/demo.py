@@ -109,6 +109,8 @@ def show_event(event: dict[str, Any]) -> None:
     elif kind == "llm_response" and event.get("reasoning"):
         st.markdown(f"**Thought ({event['role']})**")
         st.info(event["reasoning"])
+    elif kind == "terminal_tool_name_repaired":
+        st.caption(f"Resolved `{event['generated']}` as `{event['resolved']}` using the terminal tool schema.")
     elif kind == "plan":
         label = "Plan (completion check)" if event.get("check") else "Plan"
         st.markdown(f"**{label}:** " + (" → ".join(f"`{name}`" for name, _ in event["calls"])

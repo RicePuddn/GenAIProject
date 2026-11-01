@@ -203,6 +203,27 @@ class Toolset:
             raise ValueError(f"unknown tool: {name!r}; available tools: {', '.join(self.tools)}")
         return validate_arguments(self.tools[name].arguments, arguments)
 
+    def resolve_terminal_call(self, name: Any, arguments: Any) -> tuple[Any, Any]:
+        """Repair an unknown tool name only when its arguments exactly validate as the terminal control
+        tool. This handles a model that emits a generic name (for example, `json`) with a valid finish
+        payload, without aliasing names or redirecting malformed calls to data or write tools."""
+        if isinstance(name, str) and name in self.tools:
+            return name, arguments
+        if self.terminal is None or self.tools[self.terminal].data:
+            return name, arguments
+        if not isinstance(arguments, dict):
+            return name, arguments
+        schema = self.tools[self.terminal].arguments.model_json_schema()
+        properties = set(schema.get("properties", {}))
+        required = set(schema.get("required", []))
+        if not required.issubset(arguments) or not set(arguments).issubset(properties):
+            return name, arguments
+        try:
+            validated = self.validate(self.terminal, arguments)
+        except (TypeError, ValueError, ValidationError):
+            return name, arguments
+        return self.terminal, validated
+
     def call(self, ctx: TurnContext, agent: str, call_id: str, name: str, arguments: Any) -> dict[str, Any]:
         """Run one tool call for `agent`. A data tool runs under the retry policy; a control tool is not
         re-run, because asking a specialist again would repeat its whole part."""

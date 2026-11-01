@@ -71,7 +71,7 @@ Each variant has a setup ID such as `s1-a` or `s3-c`, resolved from the one matr
 | Item | Value / where |
 |---|---|
 | Model (all roles except the guard) | `openai/gpt-oss-120b` on Groq, temperature 0, `reasoning_effort: medium` for every role |
-| Prompt attack guard | `llama-prompt-guard-2-86m`, threshold 0.5, screens every turn including history |
+| Prompt attack guard | `llama-prompt-guard-2-86m`, threshold 0.5, screens the new customer message once per turn |
 | Data tools | One tool registry (`shared/tools.py`). Multi-agent setups give each specialist a subset; they never get different implementations (a specialist's `policy` tool is a scoped view of the same provider) |
 | Business rules | One rules engine, reading `data/policy/rules.json` |
 | Write path | One write gate (`shared/gates/write_gate.py`): rule check → cited clauses must be ones retrieved in this ticket → the order's returns and refunds not yet looked up are shown once → the route is the stricter of the rules' and the agent's own (`route`, `policy_exception`), never looser → independent approver review when required. Agentic setups reach it through `backend_write` and ask for the review themselves with `request_review`; graph setups call it as nodes |

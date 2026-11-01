@@ -33,6 +33,11 @@ def react(ctx: TurnContext, agent: Agent, tools: Toolset, brief: dict[str, Any])
             run.summary = (reply.content or "").strip() or None
             return run
         chosen = reply.tool_calls[0]
+        resolved_name, resolved_arguments = tools.resolve_terminal_call(chosen.name, chosen.arguments)
+        if resolved_name != chosen.name:
+            ctx.log("terminal_tool_name_repaired", agent=agent.name, generated=chosen.name,
+                    resolved=resolved_name)
+            chosen = ToolCall(chosen.id, resolved_name, resolved_arguments)
         if len(reply.tool_calls) > 1:
             ctx.log("tool_calls_deferred", agent=agent.name, tools=[call.name for call in reply.tool_calls[1:]])
         call_id = ctx.next_call_id()

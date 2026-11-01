@@ -101,7 +101,7 @@ def run_turn(setup: Setup, llm: LLM, *, ticket_id: str, message: str, history: l
 
     ctx.log("workflow_start", setup=cfg["setup"]["id"], strategy=cfg["strategy"], history_turns=len(history))
     try:
-        flag = screen(ctx, history, message)
+        flag = screen(ctx, message)
         if flag != "benign":
             result = TurnResult("awaiting_human", f"guard: {flag}", hold=True)
         else:

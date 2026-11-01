@@ -12,7 +12,7 @@ graph decides what happens next.
 
 ## A turn
 
-1. The guard screens the message and history.
+1. The guard screens the new customer message.
 2. **Gather.** The agent reads by its strategy (`read_record`, `get_orders_for_customer`, the order lookups,
    `policy`). React ends when it stops calling tools; plan_execute ends when its completion check plans nothing more.
 3. **Propose.** One structured output: `outcome` (resolved, awaiting_customer or awaiting_human), `note`,
