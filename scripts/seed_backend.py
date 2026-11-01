@@ -1008,7 +1008,7 @@ def seed_records(cur) -> None:
 def seed(dsn: str, *, reset: bool = False) -> None:
     """Create the tables and insert the seed rows; `reset` first deletes everything, including agent writes."""
     with psycopg.connect(dsn, connect_timeout=5) as conn, conn.cursor() as cur:
-        cur.execute((ROOT / "data/backend_seed/schema.sql").read_text())
+        cur.execute((ROOT / "data/db/schema.sql").read_text())
         if reset:
             tables = [sql.Identifier(table) for table in (*SEED_TABLES, "backend_writes")]
             cur.execute(sql.SQL("TRUNCATE {} CASCADE").format(sql.SQL(", ").join(tables)))

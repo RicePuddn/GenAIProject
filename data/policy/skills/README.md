@@ -25,7 +25,7 @@ skill. Unknown clause filenames return an error listing available files so the
 agent can correct its call. Paths must stay inside the selected skill directory.
 
 The `check` action uses the same deterministic rules as `ticket_state`, defined in
-[`rules.json`](../../src/support_ops/policy/rules/rules.json). Supply recorded facts
+[`rules.json`](../../data/policy/rules.json). Supply recorded facts
 with the operation and amount; missing facts or mandatory-review cases need a human.
 
 Configure `policy.skills_dir` to select another skill set. Relative paths resolve

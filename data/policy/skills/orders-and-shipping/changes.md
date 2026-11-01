@@ -1,4 +1,4 @@
-<!-- Generated from policy/raw_policy/pdf; run scripts/sync_policy_skills.py to refresh. -->
+<!-- Generated from data/policy/pdf; run scripts/sync_policy_skills.py to refresh. -->
 
 ## ODR-OrderChangeCancel-4.1 Changes before fulfillment
 

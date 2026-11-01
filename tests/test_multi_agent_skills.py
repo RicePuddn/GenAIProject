@@ -200,7 +200,7 @@ class ApiTests(unittest.TestCase):
         with patch.dict(os.environ, {"SUPPORT_OPS_MULTI_CONFIG": "configs/experiments/multi_agent_skills.yaml"}), \
                 TestClient(app) as client:
             info = client.get("/info").json()
-        self.assertEqual((info["policy_mode"], info["corpus"]), ("skills", "policy/skills"))
+        self.assertEqual((info["policy_mode"], info["corpus"]), ("skills", "data/policy/skills"))
 
 
 class CitationTests(SkillsBase):

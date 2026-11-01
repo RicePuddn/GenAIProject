@@ -37,9 +37,9 @@ agent:
 
 policy:
   mode: rag              # skills | rag
-  rules_file: src/support_ops/policy/rules/rules.json   # shared hard limits
-  skills_dir: policy/skills
-  corpus_dir: policy/raw_policy/pdf  # fixed policy corpus; PDF only
+  rules_file: data/policy/rules.json   # shared hard limits
+  skills_dir: data/policy/skills
+  corpus_dir: data/policy/pdf  # fixed policy corpus; PDF only
   rag:                      # organisation selection; notebook compares the three approaches
     dense: true             # Nomic embeddings, cosine
     bm25: true              # keyword search; with dense, fused by reciprocal rank fusion

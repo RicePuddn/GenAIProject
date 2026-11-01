@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 from support_ops.helpers.config import ROOT
 
-DEFAULT_RULES_FILE = Path(__file__).with_name("rules.json")
+DEFAULT_RULES_FILE = ROOT / "data/policy/rules.json"
 OPERATIONS = ("refund", "return_request", "return_dispatch", "cancel", "delivery")
 GROUPS = ("human_review", *OPERATIONS)
 
@@ -116,7 +116,7 @@ class Rules:
             if sources != set(config["policy_documents"]):
                 raise ValueError("policy fingerprints must cover every referenced PDF")
             for name, expected in config["policy_documents"].items():
-                source = ROOT / "policy/raw_policy/pdf" / name
+                source = ROOT / "data/policy/pdf" / name
                 if hashlib.sha256(source.read_bytes()).hexdigest() != expected:
                     raise ValueError(f"{name} changed: review its hard rules before updating the fingerprint")
         except (KeyError, TypeError, AttributeError) as exc:

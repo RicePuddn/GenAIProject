@@ -25,7 +25,7 @@ REFUND_FACTS = {
 
 
 def write_rules(directory: str, limit: str) -> Path:
-    data = json.loads((ROOT / "src/support_ops/policy/rules/rules.json").read_text())
+    data = json.loads((ROOT / "data/policy/rules.json").read_text())
     data["groups"]["refund"].update(rule_id="test_limit", max_reviewed_amount=limit, max_auto_amount="10.00")
     path = Path(directory) / "rules.json"
     path.write_text(json.dumps(data))
@@ -134,7 +134,7 @@ class RulesTests(unittest.TestCase):
 
     def test_rules_reference_existing_clauses_and_match_the_policy_numbers(self):
         rules = Rules.load()
-        clauses = {c.id: c.text for c in load_corpus(ROOT / "policy/raw_policy/pdf")}
+        clauses = {c.id: c.text for c in load_corpus(ROOT / "data/policy/pdf")}
         for key in ("refund", "return_request", "return_dispatch", "cancel", "delivery", "human_review"):
             self.assertTrue(set(rules.data[key]["sources"]) <= clauses.keys())
         for key, section, field in (("return_request", "RET-ReturnEligibility-2.1", "window_calendar_days"),
@@ -148,11 +148,11 @@ class RulesTests(unittest.TestCase):
     def test_policy_change_blocks_stale_rules_until_they_are_reviewed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            data = json.loads((ROOT / "src/support_ops/policy/rules/rules.json").read_text())
-            folder = root / "policy/raw_policy/pdf"
+            data = json.loads((ROOT / "data/policy/rules.json").read_text())
+            folder = root / "data/policy/pdf"
             folder.mkdir(parents=True)
             for name in data["policy_documents"]:
-                (folder / name).write_bytes((ROOT / "policy/raw_policy/pdf" / name).read_bytes())
+                (folder / name).write_bytes((ROOT / "data/policy/pdf" / name).read_bytes())
             (folder / "returns-and-refunds-policy.pdf").write_bytes(b"changed")
             path = root / "rules.json"
             path.write_text(json.dumps(data))
@@ -161,7 +161,7 @@ class RulesTests(unittest.TestCase):
 
 
     def test_json_outcomes_are_used_and_both_true_is_rejected(self):
-        original = json.loads((ROOT / "src/support_ops/policy/rules/rules.json").read_text())
+        original = json.loads((ROOT / "data/policy/rules.json").read_text())
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "rules.json"
             outcome = original["groups"]["cancel"]["checks"]["already_cancelled"]["outcome"]

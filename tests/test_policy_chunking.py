@@ -39,7 +39,7 @@ class PolicyChunkingTests(unittest.TestCase):
                 split_clauses(text, "Returns", "returns.pdf")
 
     def test_pdf_sources_produce_complete_serializable_chunks(self):
-        chunks = load_corpus(ROOT / "policy/raw_policy/pdf")
+        chunks = load_corpus(ROOT / "data/policy/pdf")
         self.assertEqual(len(chunks), 52)
         self.assertTrue(all(c.source.endswith(".pdf") and c.text and c.domain for c in chunks))
         ids = {c.id for c in chunks}
@@ -100,7 +100,7 @@ class ReferenceTests(unittest.TestCase):
             resolve_references(first + second)
 
     def test_evidence_rule_and_exception_reference_each_other(self):
-        clauses = load_corpus(ROOT / "policy/raw_policy/pdf")
+        clauses = load_corpus(ROOT / "data/policy/pdf")
         by_id = {clause.id: clause for clause in clauses}
         rule = "RET-SupportingEvidence-3.1"
         exception = "RET-SupportingEvidence-3.2"

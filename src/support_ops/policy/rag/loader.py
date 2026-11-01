@@ -169,7 +169,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path, help="folder containing the policy PDFs")
-    parser.add_argument("--output", type=Path, default=Path("policy/chunk_policy"))
+    parser.add_argument("--output", type=Path, default=Path("data/policy/chunks"))
     args = parser.parse_args()
     chunks = load_corpus(args.source)
     for path in write_chunks(chunks, args.output):

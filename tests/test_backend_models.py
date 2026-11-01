@@ -72,7 +72,7 @@ class ScenarioTests(unittest.TestCase):
         gold, reader = load_gold(), ScenarioReader()
         self.assertEqual(len(gold["cases"]), 10)
         self.assertEqual(len({case["id"] for case in gold["cases"]}), 10)
-        clauses = {clause.id: clause for clause in load_corpus(ROOT / "policy/raw_policy/pdf")}
+        clauses = {clause.id: clause for clause in load_corpus(ROOT / "data/policy/pdf")}
         for case in gold["cases"]:
             order = reader.read("orders", case["order_id"])
             self.assertEqual(order["customer_id"], case["customer_id"])
@@ -103,8 +103,8 @@ class ScenarioTests(unittest.TestCase):
                     key = "record_id" if architecture in {"s1", "s2"} else "order_id"
                     self.assertEqual(write[key], case["order_id"])
             for name in case["policy"]["skill_files"]:
-                self.assertTrue((ROOT / "policy/skills" / name).is_file())
-            skill_text = "\n".join((ROOT / "policy/skills" / name).read_text()
+                self.assertTrue((ROOT / "data/policy/skills" / name).is_file())
+            skill_text = "\n".join((ROOT / "data/policy/skills" / name).read_text()
                                    for name in case["policy"]["skill_files"])
             for clause_id in case["policy"]["clause_ids"]:
                 self.assertIn(clause_id, skill_text)

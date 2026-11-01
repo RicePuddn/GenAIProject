@@ -10,7 +10,7 @@ from unittest.mock import patch
 from support_ops.policy.routing import RoutingRules, at_least, strictest
 
 NOW = datetime(2026, 10, 1, 9, tzinfo=timezone.utc)
-DEFAULT_RULES = Path(__file__).resolve().parents[1] / "src/support_ops/policy/rules/rules.json"
+DEFAULT_RULES = Path(__file__).resolve().parents[1] / "data/policy/rules.json"
 REFUND = {
     "payment_id": "PAY-1", "payment_status": "captured", "currency": "SGD", "captured_amount": 200,
     "refunded_amount": 0, "pending_refund_amount": 0, "approved_refund_amount": 200,

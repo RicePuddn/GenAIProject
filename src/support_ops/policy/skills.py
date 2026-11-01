@@ -46,7 +46,7 @@ class SkillsPolicy:
     scope_setting = "policy_skills"
     strict_scope = True   # a configured skill folder that does not exist is a setup error
 
-    def __init__(self, root: str | Path = ROOT / "policy/skills", rules: Rules | None = None):
+    def __init__(self, root: str | Path = ROOT / "data/policy/skills", rules: Rules | None = None):
         path = Path(root)
         self.root = (path if path.is_absolute() else ROOT / path).resolve()
         self.rules = rules or Rules.load()

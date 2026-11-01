@@ -10,7 +10,7 @@ from support_ops.helpers.config import ROOT
 from support_ops.policy.rag.loader import load_corpus, write_chunks
 from support_ops.policy.rag.models import DIMENSION, EMBEDDING_MODEL, Embedder, load_embedder
 
-EMBEDDING_DIR = ROOT / "policy/embed_chunk"
+EMBEDDING_DIR = ROOT / "data/policy/embeddings"
 EMBEDDING_RECIPE = {
     "embedding_model": EMBEDDING_MODEL,
     "dimension": DIMENSION,
@@ -33,7 +33,7 @@ def prepare_embeddings(source: Path, output: Path = EMBEDDING_DIR,
                        embedder: Embedder | None = None) -> dict:
     # Step 1: Create the current section chunks and their resolved reference IDs.
     clauses = load_corpus(source)
-    paths = write_chunks(clauses, ROOT / "policy/chunk_policy")
+    paths = write_chunks(clauses, ROOT / "data/policy/chunks")
     records = [json.loads(line) for path in paths for line in path.read_text().splitlines()]
     corpus_hash = corpus_fingerprint(records)
     output.mkdir(parents=True, exist_ok=True)
