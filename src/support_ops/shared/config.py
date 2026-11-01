@@ -8,6 +8,7 @@ and variant), `policy.mode` and `strategy` (each role's react or plan_execute).
 from __future__ import annotations
 
 import copy
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -76,8 +77,10 @@ def resolve_setup(setup_id: str) -> dict[str, Any]:
 
 def load_config(path: str | Path | None = None, overrides: dict[str, Any] | None = None, *,
                 setup: str | None = None) -> dict:
-    """base.yaml, then the file at `path`, then the setup (`setup`, else `run.setup`), then `overrides`."""
+    """base.yaml, then `path` or SUPPORT_OPS_CONFIG, then setup resolution and dotted overrides."""
     load_env()
+    if path is None:
+        path = os.environ.get("SUPPORT_OPS_CONFIG")
     overrides = dict(overrides or {})
     cfg = yaml.safe_load((ROOT / "configs" / "base.yaml").read_text())
     if path is not None:

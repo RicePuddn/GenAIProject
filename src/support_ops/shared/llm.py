@@ -84,9 +84,13 @@ class OpenAICompatLLM:
         self.trial = cfg["run"]["trial"]
         cache_dir = llm["cache_dir"]
         self.cache = (ROOT / cache_dir).resolve() if cache_dir else None
-        api_key = os.environ.get(llm["api_key_env"])
+        api_key_env = llm.get("api_key_env")
+        api_key = os.environ.get(api_key_env) if api_key_env else None
+        if not api_key and self.provider == "ollama":
+            # Ollama's local OpenAI-compatible endpoint requires a value the server ignores.
+            api_key = "ollama"
         if not api_key:
-            raise RuntimeError(f"set {llm['api_key_env']} (see .env.example)")
+            raise RuntimeError(f"set {api_key_env or 'the configured provider API key'} (see .env.example)")
         self.client = OpenAI(base_url=llm["base_url"], api_key=api_key, max_retries=4)
 
     def _cost(self, model: str, tin: int, tout: int) -> float:
