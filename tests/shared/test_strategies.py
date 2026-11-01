@@ -3,7 +3,7 @@ import pytest
 
 from support_ops.shared.budget import BudgetExceeded
 from support_ops.shared.strategies import Agent, run_agent
-from support_ops.shared.tools import FinishArguments, OrderArguments, Tool, Toolset, finish_tool
+from support_ops.shared.tools import OrderArguments, Tool, Toolset, finish_tool
 from tests.fakes import ScriptedLLM, as_json, plan, services, text, tool_call
 
 AGENT = Agent("agent", "agent", "You help.")
@@ -135,8 +135,8 @@ def test_the_planner_sees_the_agents_context_and_the_tool_schemas():
     ctx = services(llm=ScriptedLLM().push("agent", plan(("finish", {"outcome": "resolved", "note": "x"})))).ctx
     run_agent("plan_execute", ctx, agent, toolset(), {"message": "hi"})
     system = ctx.llm.calls[0][1][0]["content"]
-    assert "Policy sections: Returns." in system and '"name": "lookup"' in system
-    assert FinishArguments.model_json_schema()["title"] in system
+    assert "Policy sections: Returns." in system and '"name":"lookup"' in system
+    assert '"title"' not in system   # pydantic's generated titles only cost tokens
 
 
 def test_an_unknown_strategy_is_an_error():

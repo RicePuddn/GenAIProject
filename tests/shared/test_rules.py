@@ -243,7 +243,8 @@ class WiringTests(unittest.TestCase):
         self.assertNotIn("SKILL.md", system)
         schemas = next(tools for role, _, tools in llm.calls if role == "agent")
         policy_schema = next(schema for schema in schemas if schema["function"]["name"] == "policy")
-        self.assertEqual(policy_schema["function"]["parameters"]["title"], "FakeArguments")
+        self.assertEqual(policy_schema["function"]["description"], "search: find policy clauses for a query.")
+        self.assertEqual(set(policy_schema["function"]["parameters"]["properties"]), {"action", "query"})
 
 
 if __name__ == "__main__":

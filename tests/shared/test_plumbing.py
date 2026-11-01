@@ -150,3 +150,15 @@ def test_recovered_turns_count_the_tool_schemas():
             "specialist", messages, tools=tools).input_tokens
 
     assert input_tokens("Record a proposal " * 50) > input_tokens("Record") + 100
+
+
+def test_a_json_reply_groq_rejects_comes_back_for_our_own_parsing():
+    from openai import BadRequestError
+
+    llm = _llm_raising(_groq_error("json_validate_failed", '{"calls": [ {"name": "policy"'))
+    tracer = Tracer("T1")
+    result = llm.chat("agent", [{"role": "user", "content": "plan"}], json_mode=True, tracer=tracer)
+    assert (result.content, result.tool_calls) == ('{"calls": [ {"name": "policy"', [])
+    assert tracer.of_kind("json_rejected_by_provider")[0]["role"] == "agent"
+    with pytest.raises(BadRequestError):   # outside json_mode the same error still raises
+        _llm_raising(_groq_error("json_validate_failed", "{")).chat("agent", [{"role": "user", "content": "hi"}])

@@ -127,7 +127,19 @@ class Tool:
     @property
     def schema(self) -> dict[str, Any]:
         return {"type": "function", "function": {"name": self.name, "description": " ".join(self.description.split()),
-                                                 "parameters": self.arguments.model_json_schema()}}
+                                                 "parameters": _untitled(self.arguments.model_json_schema())}}
+
+
+def _untitled(schema: Any) -> Any:
+    """A JSON schema without pydantic's generated titles ("Order Id"), which only cost tokens. A property
+    that is itself named title would be kept: only a title alongside a schema keyword is dropped."""
+    if isinstance(schema, dict):
+        return {key: _untitled(value) for key, value in schema.items()
+                if not (key == "title" and isinstance(value, str) and ("type" in schema or "properties" in schema
+                                                                        or "anyOf" in schema or "$ref" in schema))}
+    if isinstance(schema, list):
+        return [_untitled(item) for item in schema]
+    return schema
 
 
 def finish_tool() -> Tool:

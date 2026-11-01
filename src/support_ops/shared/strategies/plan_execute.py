@@ -26,7 +26,7 @@ def plan_execute(ctx: TurnContext, agent: Agent, tools: Toolset, brief: dict[str
     previous_error: str | None = None
     checking = False
     end = prompts.load("strategies", "plan_finish" if tools.terminal else "plan_stop")
-    plan_prompt = prompts.load("strategies", "plan", tools=json.dumps(tools.schemas),
+    plan_prompt = prompts.load("strategies", "plan", tools=json.dumps(tools.schemas, separators=(",", ":")),
                                context=agent.planner_context, end=end)
     while not ctx.stopped:
         ctx.budget.agent_step()

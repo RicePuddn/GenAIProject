@@ -109,15 +109,21 @@ class OpenAICompatLLM:
                 resp = self.client.chat.completions.create(**req)
             except Exception as exc:
                 recovered = _recover_tool_calls(exc, key) if tools else None
-                if recovered is None:
+                rejected_json = _rejected_json(exc) if json_mode and recovered is None else None
+                if recovered is None and rejected_json is None:
                     raise
                 # Not cached: the provider rejected it, so the same request may succeed next time. The
-                # estimate counts what was sent (messages and tool schemas) and the call it generated.
-                result = ChatResult(None, recovered, count_tokens(json.dumps([messages, tools], default=str)),
-                                    count_tokens(json.dumps([[call.name, call.arguments] for call in recovered],
-                                                            default=str)))
-                if tracer is not None:
-                    tracer.log("tool_call_recovered", role=role, tools=[call.name for call in recovered])
+                # estimate counts what was sent (messages and tool schemas) and what it generated.
+                sent = count_tokens(json.dumps([messages, tools], default=str))
+                if recovered is not None:
+                    result = ChatResult(None, recovered, sent, count_tokens(json.dumps(
+                        [[call.name, call.arguments] for call in recovered], default=str)))
+                    if tracer is not None:
+                        tracer.log("tool_call_recovered", role=role, tools=[call.name for call in recovered])
+                else:
+                    result = ChatResult(rejected_json, [], sent, count_tokens(rejected_json))
+                    if tracer is not None:
+                        tracer.log("json_rejected_by_provider", role=role)
             else:
                 msg = resp.choices[0].message
                 calls = [
@@ -182,16 +188,32 @@ def _parse_args(raw: str | None) -> dict[str, Any]:
         return {"_raw": raw}  # surfaced to the agent as a tool error, not a crash
 
 
+def _error_body(exc: Exception) -> dict[str, Any] | None:
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict) and isinstance(body.get("error"), dict):
+        body = body["error"]
+    return body if isinstance(body, dict) else None
+
+
+def _rejected_json(exc: Exception) -> str | None:
+    """Groq checks a json_mode reply and rejects the whole response (400 json_validate_failed) when it is
+    not valid JSON. The error carries what the model wrote, so it comes back as the reply: the caller's
+    own parsing then reports it as invalid and asks again, as for any malformed reply. None for any
+    other error."""
+    body = _error_body(exc)
+    if body is None or body.get("code") != "json_validate_failed":
+        return None
+    return str(body.get("failed_generation") or "")
+
+
 def _recover_tool_calls(exc: Exception, request_key: str = "") -> list[ToolCall] | None:
     """Groq checks tool arguments against the schema and rejects the whole response (400 tool_use_failed)
     on a mismatch, e.g. an alias such as order_item_id. The error carries the attempted call, so it comes
     back as an ordinary tool call: the tool's own validation then accepts it or returns an error the agent
     can fix. None for any other error. IDs come from `request_key` (the request's hash) and the call's
     position, so a replayed ticket gets the same IDs and its later turns still hit the cache."""
-    body = getattr(exc, "body", None)
-    if isinstance(body, dict) and isinstance(body.get("error"), dict):
-        body = body["error"]
-    if not isinstance(body, dict) or body.get("code") != "tool_use_failed":
+    body = _error_body(exc)
+    if body is None or body.get("code") != "tool_use_failed":
         return None
     try:
         generated = json.loads(body.get("failed_generation") or "")
