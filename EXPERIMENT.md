@@ -70,7 +70,7 @@ Config files are named by setup and variant: `s1-a.yaml`, `s3-c.yaml`, and so on
 | Model (all roles except the guard) | `openai/gpt-oss-120b` on Groq, temperature 0, `reasoning_effort: medium` for every role |
 | Prompt attack guard | `llama-prompt-guard-2-86m`, threshold 0.5, screens every turn including history |
 | Data tools | One tool registry. Multi-agent setups give each specialist a subset; they never get different implementations |
-| Business rules | One rules engine, reading `src/support_ops/policy/rules/rules.json` |
+| Business rules | One rules engine, reading `data/policy/rules.json` |
 | Write path | One write gate (`gateway/write_gate.py`): rule check → cited clauses must be ones retrieved in this ticket → independent approver review when required. Agentic setups reach it through the `backend_write` tool; graph setups call it as a node |
 | Write review and reply check | Same approver prompts and limits (`review.max_rejections: 1`, `review.max_reply_drafts: 2`) |
 | Reply | Same reply prompt and the same wording checks |

@@ -1,6 +1,6 @@
 # Skills-style policy retrieval
 
-The single-agent flow currently uses these fictional policy skills:
+The skills setups (S2, S4, S6, S8) use these fictional policy skills:
 
 ```text
 orders-and-shipping/
@@ -24,9 +24,9 @@ The tool also accepts a skill directory as `file` when reading an entrypoint.
 skill. Unknown clause filenames return an error listing available files so the
 agent can correct its call. Paths must stay inside the selected skill directory.
 
-The `check` action uses the same deterministic rules as `ticket_state`, defined in
-[`rules.json`](../../data/policy/rules.json). Supply recorded facts
-with the operation and amount; missing facts or mandatory-review cases need a human.
+The `check` action runs the delivery rules for an order's parcels, from
+[`rules.json`](../rules.json), with the recorded shipment facts. Writes need no check: `backend_write`
+applies the rules itself.
 
 Configure `policy.skills_dir` to select another skill set. Relative paths resolve
 from the repository root. For future RAG/skills comparisons, keep the same policy

@@ -36,9 +36,10 @@ The seed contains 60 background orders for the demos plus the 10 gold orders
 See the [case overview](../cases/agents/README.md) for scenarios and expected results.
 Gold cases use a fixed clock of 31 October 2026, 09:00 UTC.
 
-All four systems write to these tables, and each write is recorded in `backend_writes`: S1 and S2
-through the `backend_write` tool, S3 and S4 through the gateway. Conversations also save a row in `support_tickets` (multi-agent in code each turn, S1 and S2 when
-the agent calls `update_ticket`), under the signed-in `customer_id`, or `dummy_00` when none is sent. To go back to the seed rows, which deletes everything else:
+Every setup writes to these tables through the one write gate, and each write is recorded in
+`backend_writes`. Every turn also saves the conversation's row in `support_tickets`, in code, under the
+signed-in `customer_id`, or `dummy_00` when none is sent. To go back to the seed rows, which deletes
+everything else:
 
 ```bash
 .venv/bin/python scripts/seed_db.py --reset
