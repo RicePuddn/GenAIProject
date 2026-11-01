@@ -1,0 +1,250 @@
+"""The one rules engine: the JSON rules, their checks, and the configured file reaching every setup."""
+import json
+import re
+import tempfile
+import unittest
+from pathlib import Path
+from typing import Literal
+from unittest.mock import patch
+
+from support_ops.shared.config import ROOT, load_config
+from support_ops.shared.policy.rag.loader import load_corpus
+from support_ops.shared.rules import Rules
+from support_ops.shared.tools import NonEmpty, ToolArguments
+from tests.fakes import ORDER, ScriptedLLM, services, tool_call
+from tests.setups.scripts import run
+
+REFUND_FACTS = {
+    "payment_id": "PAY-1", "payment_status": "captured", "currency": "SGD", "captured_amount": "150.00",
+    "refunded_amount": "0.00", "pending_refund_amount": "0.00", "approved_refund_amount": "100.00",
+    "request_accepted": True, "inspection_or_waiver": True,
+}
+
+
+def write_rules(directory: str, limit: str) -> Path:
+    data = json.loads((ROOT / "data/policy/rules.json").read_text())
+    data["groups"]["refund"].update(rule_id="test_limit", max_reviewed_amount=limit, max_auto_amount="10.00")
+    path = Path(directory) / "rules.json"
+    path.write_text(json.dumps(data))
+    return path
+
+
+class RulesTests(unittest.TestCase):
+    def test_refund_limit_boundary_comes_from_rules_file(self):
+        rules = Rules.load()
+        self.assertEqual(rules.refund_limit, 100)
+        decision = rules.check("refund", 100, REFUND_FACTS)
+        self.assertTrue(decision["allowed"])
+        self.assertEqual((decision["rule"], decision["limit"], decision["currency"]),
+                         ("refund_approval_requirements", 100.0, "SGD"))
+        above = rules.check("refund", 100.01)
+        self.assertFalse(above["allowed"])
+        self.assertTrue(above["requires_human"])
+
+    def test_unknown_operations_missing_facts_and_invalid_amounts(self):
+        rules = Rules.load()
+        self.assertTrue(rules.check("cancel")["requires_human"])
+        self.assertTrue(rules.check("exchange")["requires_human"])
+        for amount in (None, 0, -1, float("nan"), float("inf")):
+            with self.subTest(amount=amount), self.assertRaises(ValueError):
+                rules.check("refund", amount)
+
+    def test_invalid_rules_files_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for limit in ("0", "-5", "abc"):
+                with self.subTest(limit=limit), self.assertRaises(ValueError):
+                    Rules.load(write_rules(directory, limit))
+            path = Path(directory) / "missing.json"
+            path.write_text(json.dumps({"version":"x"}))
+            with self.assertRaises(ValueError):
+                Rules.load(path)
+
+    def test_refund_requires_verified_financial_and_approval_facts(self):
+        rules = Rules.load()
+        self.assertTrue(rules.check("refund", 50)["requires_human"])
+        for change in ({"payment_status": "failed"},
+                       {"request_accepted": False}, {"inspection_or_waiver": False},
+                       {"pending_refund_amount": 110}, {"approved_refund_amount": 40}):
+            with self.subTest(change=change):
+                result = rules.check("refund", 50, {**REFUND_FACTS, **change})
+                self.assertFalse(result["allowed"])
+                self.assertEqual(result["requires_human"], not any(
+                    key in change for key in ("pending_refund_amount", "approved_refund_amount")))
+
+    def test_return_window_day_30_is_included_and_late_requests_get_review(self):
+        rules = Rules.load()
+        facts = {"delivered_at": "2026-10-01", "requested_at": "2026-10-31",
+                 "reason": "faulty", "evidence_status": "verified"}
+        self.assertTrue(rules.check("return_request", facts=facts)["allowed"])
+        self.assertTrue(rules.check("return_request", facts={**facts, "requested_at": "2026-11-01"})["requires_human"])
+        # UTC delivery is 2 October in Singapore, so 1 November is still day 30.
+        result = rules.check("return_request", facts={**facts, "delivered_at": "2026-10-01T16:30:00Z",
+                                                     "requested_at": "2026-11-01"})
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["deadline"], "2026-11-01")
+
+    def test_final_sale_and_evidence_exceptions_do_not_become_automatic_rejections(self):
+        rules = Rules.load()
+        facts = {"delivered_at": "2026-10-01", "requested_at": "2026-10-02", "reason": "change_of_mind",
+                 "evidence_status": "verified", "final_sale": True, "unused": True,
+                 "original_packaging": True, "tags_complete": True, "accessories_complete": True}
+        rejected = rules.check("return_request", facts=facts)
+        self.assertFalse(rejected["allowed"])
+        self.assertFalse(rejected["requires_human"])
+        self.assertTrue(rules.check("return_request", facts={**facts, "reason": "faulty", "original_packaging": False})["allowed"])
+        for change in ({"evidence_status": "unavailable"}, {"evidence_status": "inaccessible"},
+                       {"evidence_status": "unsafe"}, {"reason": "counterfeit"}, {"disputed": True}):
+            with self.subTest(change=change):
+                result = rules.check("return_request", facts={**facts, **change})
+                self.assertFalse(result["allowed"])
+                self.assertTrue(result["requires_human"])
+
+    def test_return_dispatch_requires_handover_and_an_approved_extension(self):
+        rules = Rules.load()
+        facts = {"authorized_at": "2026-10-01", "handed_over_at": "2026-10-08", "carrier_accepted": True}
+        self.assertTrue(rules.check("return_dispatch", facts=facts)["allowed"])
+        late = {**facts, "handed_over_at": "2026-10-09"}
+        self.assertTrue(rules.check("return_dispatch", facts=late)["requires_human"])
+        extended = {**late, "extension_until": "2026-10-10", "extension_approved": True}
+        self.assertTrue(rules.check("return_dispatch", facts=extended)["allowed"])
+        self.assertTrue(rules.check("return_dispatch", facts={**extended, "extension_approved": False})["requires_human"])
+        self.assertTrue(rules.check("return_dispatch", facts={**facts, "carrier_accepted": False})["requires_human"])
+
+    def test_cancellation_checks_label_packing_fulfillment_and_pickup(self):
+        rules = Rules.load()
+        facts = {"order_status": "processing",
+                 **{name: False for name in rules.data["cancel"]["blockers"]}}
+        self.assertTrue(rules.check("cancel", facts=facts)["allowed"])
+        for name in rules.data["cancel"]["blockers"]:
+            with self.subTest(blocker=name):
+                self.assertTrue(rules.check("cancel", facts={**facts, name: True})["requires_human"])
+        self.assertTrue(rules.check("cancel", facts={"order_status": "processing"})["requires_human"])
+
+    def test_delivery_escalation_is_after_day_3_with_immediate_exceptions(self):
+        rules = Rules.load()
+        facts = {"delivery_status": "in_transit", "estimated_delivery": "2026-10-01", "as_of": "2026-10-04"}
+        self.assertFalse(rules.check("delivery", facts=facts)["requires_human"])
+        self.assertTrue(rules.check("delivery", facts={**facts, "as_of": "2026-10-05"})["requires_human"])
+        for status in rules.data["delivery"]["immediate_human_statuses"]:
+            with self.subTest(status=status):
+                self.assertTrue(rules.check("delivery", facts={"delivery_status": status})["requires_human"])
+
+    def test_rules_reference_existing_clauses_and_match_the_policy_numbers(self):
+        rules = Rules.load()
+        clauses = {c.id: c.text for c in load_corpus(ROOT / "data/policy/pdf")}
+        for key in ("refund", "return_request", "return_dispatch", "cancel", "delivery", "human_review"):
+            self.assertTrue(set(rules.data[key]["sources"]) <= clauses.keys())
+        for key, section, field in (("return_request", "RET-ReturnEligibility-2.1", "window_calendar_days"),
+                                    ("return_dispatch", "RET-ReturnProcedure-4.2", "window_calendar_days"),
+                                    ("delivery", "SHP-DeliveryProblems-7.1", "investigate_after_calendar_days")):
+            days = int(re.search(r"\((\d+)\) calendar days", clauses[section]).group(1))
+            self.assertEqual(days, rules.data[key][field])
+        amount = max(float(value) for value in re.findall(r"SGD ([0-9.]+)", clauses["REF-Refunds-6.6"]))
+        self.assertEqual(float(amount), float(rules.refund_limit))
+
+    def test_policy_change_blocks_stale_rules_until_they_are_reviewed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            data = json.loads((ROOT / "data/policy/rules.json").read_text())
+            folder = root / "data/policy/pdf"
+            folder.mkdir(parents=True)
+            for name in data["policy_documents"]:
+                (folder / name).write_bytes((ROOT / "data/policy/pdf" / name).read_bytes())
+            (folder / "returns-and-refunds-policy.pdf").write_bytes(b"changed")
+            path = root / "rules.json"
+            path.write_text(json.dumps(data))
+            with patch("support_ops.shared.rules.ROOT", root), self.assertRaisesRegex(ValueError, "review its hard rules"):
+                Rules.load(path)
+
+
+    def test_json_outcomes_are_used_and_both_true_is_rejected(self):
+        original = json.loads((ROOT / "data/policy/rules.json").read_text())
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "rules.json"
+            outcome = original["groups"]["cancel"]["checks"]["already_cancelled"]["outcome"]
+            outcome.update(requires_human=True, route="human", reason="Review the recorded cancellation.")
+            path.write_text(json.dumps(original))
+            result = Rules.load(path).check("cancel", facts={"order_status":"cancelled"})
+            self.assertEqual(result["check"], "cancel.already_cancelled")
+            self.assertTrue(result["requires_human"])
+            self.assertEqual(result["reason"], outcome["reason"])
+            outcome["allowed"] = True
+            path.write_text(json.dumps(original))
+            with self.assertRaisesRegex(ValueError, "together"):
+                Rules.load(path)
+
+    def test_currency_review_is_separate_from_numeric_input_validation(self):
+        rules = Rules.load()
+        result = rules.check("refund", 50, {**REFUND_FACTS, "currency":"USD"})
+        self.assertEqual(result["check"], "refund.currency_mismatch")
+        self.assertFalse(result["allowed"])
+        self.assertTrue(result["requires_human"])
+        self.assertTrue(rules.check("refund", "50.00", REFUND_FACTS)["allowed"])
+        with self.assertRaises(ValueError):
+            rules.check("refund", "not-a-number", REFUND_FACTS)
+        with self.assertRaises(ValueError):
+            rules.check("return_request", facts={"delivered_at":"invalid", "requested_at":"2026-10-31"})
+
+
+class FakeArguments(ToolArguments):
+    """search: find policy clauses for a query."""
+    action: Literal["search"]
+    query: NonEmpty
+
+
+class FakePolicy:
+    arguments = FakeArguments
+    description = FakeArguments.__doc__
+    prompt_hint = "Search the policy before advising."
+
+    def __init__(self):
+        self.calls = []
+
+    def planner_context(self) -> str:
+        return ""
+
+    def run(self, args):
+        self.calls.append(args)
+        return {"clauses": [{"id": "RET-1", "text": "30-day returns."}]}
+
+    @staticmethod
+    def citable(result):
+        return {clause["id"] for clause in result.get("clauses", [])}
+
+
+class WiringTests(unittest.TestCase):
+    def test_the_configured_rules_file_reaches_the_write_gate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cfg = load_config(setup="s2-a", overrides={"policy.rules_file": str(write_rules(directory, "20"))})
+            tools = services(cfg=cfg)
+            tools.call("policy", action="read", skill="returns-and-refunds", file="refunds.md")
+            result = tools.call("backend_write", operation="refund", order_id=ORDER, amount=30,
+                                items=[{"item_id": "ITM-1", "quantity": 1}], reason="damaged_item",
+                                cited_clauses=["refunds.md"])
+        self.assertEqual(result["status"], "awaiting_human")   # above the file's 20.00 limit
+        self.assertEqual(tools.ctx.stop_reason, Rules.load(ROOT / "data/policy/rules.json").data["refund"]["checks"]
+                         ["limit_exceeded"]["outcome"]["reason"])
+
+    def test_an_unknown_policy_mode_is_rejected(self):
+        from support_ops.shared.policy.provider import policy_from_config
+        cfg = load_config(overrides={"policy.mode": "telepathy"})
+        with self.assertRaises(ValueError):
+            policy_from_config(cfg, Rules.load())
+
+    def test_a_different_policy_provider_changes_only_the_policy_tool_and_hint(self):
+        policy = FakePolicy()
+        llm = ScriptedLLM().push("agent", tool_call("policy", action="search", query="return window"),
+                                 tool_call("finish", outcome="resolved", note="30 days."))
+        output, _ = run("s1-a", llm, "Can I return it?", policy=policy)
+        self.assertEqual(policy.calls, [{"action": "search", "query": "return window"}])
+        self.assertEqual(output.evidence[0]["result"]["clauses"][0]["id"], "RET-1")
+        system = [messages for role, messages, _ in llm.calls if role == "agent"][0][0]["content"]
+        self.assertIn("Search the policy before advising.", system)
+        self.assertNotIn("SKILL.md", system)
+        schemas = next(tools for role, _, tools in llm.calls if role == "agent")
+        policy_schema = next(schema for schema in schemas if schema["function"]["name"] == "policy")
+        self.assertEqual(policy_schema["function"]["parameters"]["title"], "FakeArguments")
+
+
+if __name__ == "__main__":
+    unittest.main()

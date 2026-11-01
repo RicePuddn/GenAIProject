@@ -552,20 +552,5 @@
         }
       }
     }
-  },
-  "routing": {
-    "rule_id": "approval_routing_v2",
-    "awaiting_shop_return_statuses": [
-      "requested",
-      "received"
-    ],
-    "operations": {
-      "none": "auto",
-      "refund": "auto",
-      "return": "auto",
-      "exchange": "approver",
-      "order_change": "auto",
-      "account_change": "human"
-    }
   }
 }

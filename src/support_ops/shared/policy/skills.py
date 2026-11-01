@@ -3,37 +3,36 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Literal, Self
 
 import yaml
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
-from support_ops.helpers.arguments import NonEmpty, ToolArguments
 from support_ops.shared.config import ROOT
-from support_ops.shared.policy.provider import ScopedPolicyTool
 from support_ops.shared.rules import Rules
-from support_ops.systems.tools import PolicyArguments
+from support_ops.shared.tools import CHECK_DESCRIPTION, NonEmpty, ToolArguments
 
 # Clause headings belong to skills Markdown; the RAG loader reads numbered PDF sections.
 MARKDOWN_CLAUSE = re.compile(r"^#{1,6}\s+([A-Z]+(?:-[A-Za-z0-9]+)+(?:\.[0-9]+)*)\s+\S.*$", re.MULTILINE)
 
 
-class PolicySkillsArguments(ToolArguments):
-    """list: your policy skills; open: read a skill's SKILL.md; read: read one file of that skill. scope own
-    (the default) keeps to your skills; use all when the case crosses into another area."""
-    action: Literal["list", "open", "read"]
+class PolicyArguments(ToolArguments):
+    __doc__ = "list: discover skills; open: read SKILL.md; read: read a discovered clause; " + CHECK_DESCRIPTION
+    action: Literal["list", "open", "read", "check"]
     skill: NonEmpty | None = None
     file: NonEmpty | None = None
-    scope: Literal["own", "all"] = "own"
+    operation: Literal["delivery"] | None = None
+    order_id: NonEmpty | None = Field(default=None, description="The order whose parcels a delivery check covers.")
 
     @model_validator(mode="after")
     def required_for_action(self) -> Self:
-        if self.action in {"open", "read"} and not self.skill:
-            raise ValueError(f"{self.action} requires skill")
-        if self.action == "read" and not self.file:
-            raise ValueError("read requires file")
+        if self.action == "open" and not self.skill:
+            raise ValueError("open requires skill")
+        if self.action == "read" and not (self.skill or self.file):
+            raise ValueError("read requires skill or file")
+        if self.action == "check" and not (self.operation and self.order_id):
+            raise ValueError("check requires operation delivery and order_id")
         return self
 
 
@@ -42,9 +41,6 @@ class SkillsPolicy:
     description = PolicyArguments.__doc__
     prompt_hint = ("Discover policies, open the matching SKILL.md, then read the relevant clause "
                    "before advising. Never invent policy filenames or missing facts.")
-    scope_hint = "Your policy skills cover your own area; use scope all when the case crosses into another area."
-    scope_setting = "policy_skills"
-    strict_scope = True   # a configured skill folder that does not exist is a setup error
 
     def __init__(self, root: str | Path = ROOT / "data/policy/skills", rules: Rules | None = None):
         path = Path(root)
@@ -61,14 +57,6 @@ class SkillsPolicy:
             raise ValueError(f"no policy skills (folders with a SKILL.md) in {self.root}")
         if broken := [item["skill"] for item in catalog if item.get("error")]:
             raise ValueError(f"unreadable SKILL.md front matter in {broken}")
-
-    def has_skill(self, name: str) -> bool:
-        """Whether `name` is a skill folder with a SKILL.md, without reading every skill."""
-        base = (self.root / name).resolve()
-        return base.parent == self.root and not (self.root / name).is_symlink() and (base / "SKILL.md").is_file()
-
-    def check_scope(self, scope: Sequence[str] | None) -> list[str]:
-        return [skill for skill in scope or [] if not self.has_skill(skill)]
 
     def planner_context(self) -> str:
         return ("Available policy filenames (contents must still be read with tools): "
@@ -135,38 +123,3 @@ class SkillsPolicy:
         ids = {match.group(1) for match in MARKDOWN_CLAUSE.finditer(result["content"])}
         names = {f"{result['skill']}/{result['file']}"} | ({result["file"]} if result["file"] != "SKILL.md" else set())
         return names | ids
-
-    def scoped_tool(self, scope: Sequence[str] | None) -> ScopedPolicyTool:
-        """list/open/read without `check`, limited by default to the specialist's `scope` skill folders."""
-        def own(skills: list[dict[str, Any]]) -> list[dict[str, Any]]:
-            return [item for item in skills if not scope or item["skill"] in scope]
-
-        def run(ticket_id: str, args: dict[str, Any]) -> dict[str, Any]:
-            everything = args.get("scope", "own") == "all" or not scope
-            if args["action"] == "list":
-                catalog = self.catalog() if everything else own(self.catalog())
-                result = {"skills": [item["skill"] for item in catalog], "catalog": catalog,
-                          "scope": "all" if everything else "own"}
-                if not catalog:
-                    result["note"] = "No policy skills are available here; hand the case over rather than guess."
-                return result
-            skill = args["skill"]
-            if not self.has_skill(skill):
-                # A guessed name: offer only names that exist, never another area's.
-                choices = ([item["skill"] for item in self.catalog()] if everything
-                           else [name for name in scope if self.has_skill(name)])
-                raise ValueError(f"no policy skill named {skill!r}; "
-                                 + (f"your skills: {choices}" if choices else "no policy skills are available"))
-            if not everything and skill not in scope:
-                raise ValueError(f"{skill} is outside your policy skills {list(scope)}; "
-                                 "use scope all if the case crosses into another area")
-            return self.run({"action": args["action"], "skill": skill,
-                             **({"file": args["file"]} if args.get("file") else {})})
-
-        def context() -> str:
-            # Only the specialist's own skills, so a plan does not list reads the default scope refuses.
-            return ("Your policy skills (contents must still be read with tools; scope all reaches the "
-                    "others): " + json.dumps(own(self.catalog())))
-
-        return ScopedPolicyTool(PolicySkillsArguments, PolicySkillsArguments.__doc__, run,
-                                self.prompt_hint, self.scope_hint, context, self.citable)

@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import json
-import re
-from collections.abc import Sequence
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, Self
 
-from support_ops.helpers.arguments import NonEmpty, ToolArguments
-from support_ops.shared.policy.provider import ScopedPolicyTool
+from pydantic import Field, model_validator
+
 from support_ops.shared.policy.rag.retriever import RagSettings, shared_retriever
 from support_ops.shared.rules import Rules
-from support_ops.systems.tools import RagPolicyArguments
+from support_ops.shared.tools import CHECK_DESCRIPTION, NonEmpty, ToolArguments
 
 
 class Retriever(Protocol):
@@ -28,35 +26,21 @@ class Retriever(Protocol):
         ...
 
 
-class PolicySearchArguments(ToolArguments):
-    """Retrieve the policy clauses most relevant to a query, with their exceptions. scope own (the
-    default) keeps clauses from your policy sections; use all when the case crosses sections."""
-    action: Literal["search"] = "search"
-    query: NonEmpty
-    scope: Literal["own", "all"] = "own"
+class RagPolicyArguments(ToolArguments):
+    __doc__ = ("search: retrieve the policy clauses most relevant to a query, with their exceptions; "
+               + CHECK_DESCRIPTION)
+    action: Literal["search", "check"]
+    query: NonEmpty | None = None
+    operation: Literal["delivery"] | None = None
+    order_id: NonEmpty | None = Field(default=None, description="The order whose parcels a delivery check covers.")
 
-
-# Compare policy titles and stored domain names using the same format.
-def section_key(section: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", section.casefold()).strip("-").removesuffix("-policy")
-
-
-def own_sections(result: dict[str, Any], sections: Sequence[str]) -> dict[str, Any]:
-    """Keep search hits in the specialist's scope and their direct references."""
-    wanted = {section_key(section) for section in sections}
-    clauses = result.get("clauses", [])
-    kept_ids = {clause["id"] for clause in clauses
-                if clause["via"] == "search" and section_key(clause["section"]) in wanted}
-    references = {ref for clause in clauses if clause["id"] in kept_ids for ref in clause.get("references", [])}
-    kept = [clause for clause in clauses if clause["id"] in kept_ids
-            or clause["id"] in references]
-    filtered = {**result, "clauses": kept, "scope": "own", "sections": list(sections)}
-    if dropped := len(clauses) - len(kept):
-        filtered["filtered_out"] = dropped
-    if not kept:
-        filtered["note"] = ("No clause from your sections matched. If the case crosses into another area, "
-                            "search again with scope all.")
-    return filtered
+    @model_validator(mode="after")
+    def required_for_action(self) -> Self:
+        if self.action == "search" and not self.query:
+            raise ValueError("search requires query")
+        if self.action == "check" and not (self.operation and self.order_id):
+            raise ValueError("check requires operation delivery and order_id")
+        return self
 
 
 class RagPolicy:
@@ -64,10 +48,6 @@ class RagPolicy:
     description = RagPolicyArguments.__doc__
     prompt_hint = ("Search the policy for the relevant clauses before advising. "
                    "Never invent policy terms or missing facts.")
-    scope_hint = ("Policy search covers your own policy sections; search with scope all when the case crosses "
-                  "into another area.")
-    scope_setting = "policy_sections"
-    strict_scope = False   # a section missing from the corpus is logged per run instead
 
     def __init__(self, retriever: Retriever, rules: Rules | None = None):
         self.retriever = retriever
@@ -75,8 +55,7 @@ class RagPolicy:
 
     @classmethod
     def from_config(cls, cfg: dict[str, Any], rules: Rules) -> RagPolicy:
-        policy = cfg["policy"]
-        settings = RagSettings.from_config(policy.get("rag", {}))
+        settings = RagSettings.from_config(cfg["policy"]["rag"])
         return cls(shared_retriever(settings), rules)
 
     # Preload the same cached retriever later used by the agent tool.
@@ -98,23 +77,3 @@ class RagPolicy:
     def citable(result: dict[str, Any]) -> set[str]:
         """A search can be cited by the IDs of the clauses it returned, references included."""
         return {clause["id"] for clause in result.get("clauses", [])}
-
-    def scoped_tool(self, scope: Sequence[str] | None) -> ScopedPolicyTool:
-        """Search only, limited by default to the specialist's `scope` sections. The retriever's top-k is
-        filtered afterwards; a native section filter in the retriever would return k clauses from the
-        section instead (see docs/multi-agent.md, vector DB notes)."""
-        def run(ticket_id: str, args: dict[str, Any]) -> dict[str, Any]:
-            result = self.run({"action": "search", "query": args["query"]})
-            if args.get("scope", "own") == "all" or not scope:
-                return {**result, "scope": "all"}
-            return own_sections(result, scope)
-
-        return ScopedPolicyTool(PolicySearchArguments, PolicySearchArguments.__doc__, run,
-                                self.prompt_hint, self.scope_hint, self.planner_context, self.citable)
-
-    def check_scope(self, scope: Sequence[str] | None) -> list[str]:
-        try:
-            known = {section_key(section) for section in self.retriever.sections()}
-        except Exception:   # the corpus cannot be read: nothing to compare with
-            return []
-        return [section for section in scope or [] if known and section_key(section) not in known]

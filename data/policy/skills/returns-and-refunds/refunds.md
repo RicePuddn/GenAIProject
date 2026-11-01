@@ -1,4 +1,4 @@
-<!-- Generated from data/policy/pdf; run scripts/sync_policy_skills.py to refresh. -->
+<!-- Generated from data/policy/pdf; run scripts/sync_skills.py to refresh. -->
 
 ## REF-Refunds-6.1 Conditions for payment
 

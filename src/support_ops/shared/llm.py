@@ -1,8 +1,8 @@
 """LLM access behind one small interface.
 
 `OpenAICompatLLM` talks to any OpenAI-compatible endpoint (Groq by default), so the
-model family can be swapped from config without touching agent code. `ScriptedLLM`
-returns pre-written responses, which lets the whole pipeline run in tests with no API key.
+model family can be swapped from config without touching agent code. Tests use the scripted
+double in tests/fakes.py.
 """
 
 from __future__ import annotations
@@ -11,11 +11,10 @@ import hashlib
 import json
 import os
 import time
-from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 import tiktoken
 
@@ -68,14 +67,16 @@ class OpenAICompatLLM:
 
         llm = cfg["llm"]
         self.models: dict[str, str] = llm["models"]
-        self.pricing: dict[str, dict[str, float]] = llm.get("pricing", {})
-        self.temperature = llm.get("temperature", 0.0)
-        self.reasoning_effort = llm.get("reasoning_effort")
-        self.max_tokens = llm.get("max_tokens", 2048)
-        self.max_tokens_by_role: dict[str, int] = llm.get("max_tokens_by_role", {})
-        self.cache_enabled_by_role: dict[str, bool] = llm.get("cache_enabled_by_role", {})
+        self.pricing: dict[str, dict[str, float]] = llm["pricing"]
+        self.temperature = llm["temperature"]
+        self.reasoning_effort = llm["reasoning_effort"]
+        self.max_tokens = llm["max_tokens"]
+        self.max_tokens_by_role: dict[str, int] = llm["max_tokens_by_role"]
+        self.cache_enabled_by_role: dict[str, bool] = llm["cache_enabled_by_role"]
         self.seed = cfg["run"]["seed"]
-        cache_dir = llm.get("cache_dir")
+        # With temperature 0 and a fixed seed, the request alone would make every trial replay the first.
+        self.trial = cfg["run"]["trial"]
+        cache_dir = llm["cache_dir"]
         self.cache = (ROOT / cache_dir).resolve() if cache_dir else None
         api_key = os.environ.get(llm["api_key_env"])
         if not api_key:
@@ -99,7 +100,7 @@ class OpenAICompatLLM:
         if self.reasoning_effort and "gpt-oss" in model:
             req["reasoning_effort"] = self.reasoning_effort
 
-        key = hashlib.sha256(json.dumps(req, sort_keys=True, default=str).encode()).hexdigest()
+        key = hashlib.sha256(json.dumps({**req, "trial": self.trial}, sort_keys=True, default=str).encode()).hexdigest()
         cache_enabled = self.cache_enabled_by_role.get(role, True)
         cached = self._cache_get(key) if cache_enabled else None
         t0 = time.perf_counter()
@@ -209,48 +210,3 @@ def _recover_tool_calls(exc: Exception, request_key: str = "") -> list[ToolCall]
         call_id = hashlib.sha256(f"{request_key}:{index}".encode()).hexdigest()[:12]
         calls.append(ToolCall(f"recovered_{call_id}", attempt["name"], arguments))
     return calls or None
-
-
-Responder = Callable[[list[dict[str, Any]], list[dict] | None], ChatResult]
-
-
-class ScriptedLLM:
-    """Test double. Register, per role, either a queue of ChatResults or a function
-    that builds one from the conversation. Token counts are estimated with tiktoken."""
-
-    def __init__(self) -> None:
-        self.queues: dict[str, deque[ChatResult]] = defaultdict(deque)
-        self.responders: dict[str, Responder] = {}
-        self.calls: list[tuple[str, list[dict[str, Any]]]] = []
-
-    def push(self, role: str, *results: ChatResult) -> "ScriptedLLM":
-        self.queues[role].extend(results)
-        return self
-
-    def on(self, role: str, fn: Responder) -> "ScriptedLLM":
-        self.responders[role] = fn
-        return self
-
-    def chat(self, role, messages, tools=None, tracer=None, json_mode=False) -> ChatResult:
-        self.calls.append((role, messages))
-        if self.queues[role]:
-            r = self.queues[role].popleft()
-        elif role in self.responders:
-            r = self.responders[role](messages, tools)
-        else:
-            raise AssertionError(f"ScriptedLLM has no response left for role {role!r}")
-        r.input_tokens = r.input_tokens or count_tokens(json.dumps(messages, default=str))
-        r.output_tokens = r.output_tokens or count_tokens(
-            (r.content or "") + json.dumps([tc.arguments for tc in r.tool_calls]))
-        if tracer is not None:
-            tracer.record_llm(role, "scripted", r.input_tokens, r.output_tokens, 0.0, 0.0, False)
-        return r
-
-
-def tool_call(name: str, _id: str | None = None, **arguments: Any) -> ChatResult:
-    """Shorthand for scripting a single tool call in tests."""
-    return ChatResult(None, [ToolCall(_id or f"call_{name}", name, arguments)])
-
-
-def text(content: str) -> ChatResult:
-    return ChatResult(content)

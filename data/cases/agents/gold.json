@@ -1,7 +1,7 @@
 {
   "version": "2026-10-31",
   "clock_start": "2026-10-31T09:00:00+00:00",
-  "seed_file": "scripts/seed_backend.py",
+  "seed_file": "scripts/seed_db.py",
   "architectures": {
     "s1": {
       "system": "single_agent",

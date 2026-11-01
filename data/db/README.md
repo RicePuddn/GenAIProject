@@ -1,12 +1,12 @@
 # Backend data
 
 - `schema.sql`: tables, columns, constraints and indexes.
-- [`scripts/seed_backend.py`](../../scripts/seed_backend.py): hardcoded rows grouped by table.
+- [`scripts/seed_db.py`](../../scripts/seed_db.py): hardcoded rows grouped by table.
 - [`gold.json`](../cases/agents/gold.json): 10 labelled cases linked to the seeded records.
 
 ```bash
 docker compose up -d --wait postgres
-.venv/bin/python scripts/seed_backend.py
+.venv/bin/python scripts/seed_db.py
 ```
 
 The script uses `SUPPORT_OPS_DATABASE_URL` from `.env` and preserves existing rows.
@@ -41,7 +41,7 @@ through the `backend_write` tool, S3 and S4 through the gateway. Conversations a
 the agent calls `update_ticket`), under the signed-in `customer_id`, or `dummy_00` when none is sent. To go back to the seed rows, which deletes everything else:
 
 ```bash
-.venv/bin/python scripts/seed_backend.py --reset
+.venv/bin/python scripts/seed_db.py --reset
 ```
 
 To test real database reads and writes, seed an isolated database and set

@@ -29,7 +29,7 @@ rag = [
     "pandas>=2.2",                 # evaluation tables
     "ranx>=0.3,<0.4",               # retrieval evaluation metrics
 ]
-demo = ["streamlit>=1.50"]   # scripts/demo_app.py, a chat page that shows each agent step
+demo = ["streamlit>=1.50"]   # apps/demo.py, a chat page that shows each agent step
 
 [build-system]
 requires = ["hatchling"]
