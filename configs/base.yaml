@@ -63,7 +63,7 @@ review:                     # the write review and the reply check
 
 limits:                     # per ticket, shared by every agent in it
   max_tool_calls: 40        # data tool executions, writes included
-  max_agent_steps: 12       # LLM calls by the agent, supervisor or specialists
+  max_agent_steps: 30       # LLM calls by the agent, supervisor or specialists. 
   max_cost_usd: 0.05        # checked before each LLM call; one call can still go over
   max_replans: 2            # plan_execute: corrections after an invalid plan or a failed call
   max_plan_checks: 3        # plan_execute: checks for a missing step after a plan has run in full

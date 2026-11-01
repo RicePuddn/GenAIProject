@@ -30,7 +30,7 @@ reply check → ticket save**. Only the body differs between setups. The rest is
   processed). Code rejects paid-refund claims and internal IDs. Then the approver checks the reply. If no
   draft passes, the customer gets the hold reply.
 - **Ticket save.** The ticket is saved in code at the end of every turn.
-- **Budget.** One per ticket, shared by every agent in it: 40 tool calls, 12 agent steps, US$0.05. Hitting
+- **Budget.** One per ticket, shared by every agent in it: 40 tool calls, 30 agent steps, US$0.05. Hitting
   it ends the turn with the hold reply.
 
 **Strategies.** One loop each, used by every agent:

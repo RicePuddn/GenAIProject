@@ -71,7 +71,8 @@ def test_a_failure_the_agent_cannot_fix_is_retried_once():
 
 
 def test_every_agent_step_and_tool_call_draws_on_the_ticket_budget():
-    llm = ScriptedLLM().push("agent", *[tool_call("lookup", order_id="O1")] * 20)
+    steps = services().ctx.cfg["limits"]["max_agent_steps"]
+    llm = ScriptedLLM().push("agent", *[tool_call("lookup", order_id="O1")] * (steps + 1))
     with pytest.raises(BudgetExceeded, match="agent step limit"):
         run("react", llm, toolset())
     llm = ScriptedLLM().push("agent", plan(*[("lookup", {"order_id": "O1"})] * 41))

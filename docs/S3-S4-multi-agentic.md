@@ -36,5 +36,5 @@ specialist; the prompts say which are whose.
 
 ## Worth knowing
 
-- All agents share the ticket's 12 agent steps, including the supervisor's own decisions.
+- All agents share the ticket's 30 agent steps, including the supervisor's own decisions.
 - A specialist that stops without `finish` reports an error, and the supervisor decides what to do next.

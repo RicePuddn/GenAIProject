@@ -78,7 +78,7 @@ Each variant has a setup ID such as `s1-a` or `s3-c`, resolved from the one matr
 | Write review and reply check | Same approver prompts and limits (`review.max_rejections: 1`, `review.max_reply_drafts: 2`) |
 | Reply | Same reply prompt and the same wording checks, written from the ticket's status, the agent's note, the evidence and the problems code finds in what the agents looked up |
 | Ticket save | Saved in code at the end of every turn, the same way in every setup |
-| Budgets | 40 tool calls, 12 agent steps and US$0.05 per ticket, shared by every agent in it; one retry policy (`retries`) |
+| Budgets | 40 tool calls, 30 agent steps and US$0.05 per ticket, shared by every agent in it; one retry policy (`retries`). The step limit is a safety net set above what a multi-agent ticket needs, so it should rarely end a ticket; budget stops are reported per setup as their own failure type |
 | Clock | Fixed at `run.clock_start` (2026-10-01 09:00 +08:00); only an explicit `clock_start` in an API request (the demo's "use today's date") overrides it |
 | LLM cache | Off (`llm.cache_dir: null`); when on, the trial number (`run.trial`) is part of the key |
 

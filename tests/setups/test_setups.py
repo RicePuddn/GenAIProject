@@ -90,12 +90,13 @@ WORKER_REACT = [setup_id for setup_id in ALL if worker_strategy(setup_id) == "re
 
 @pytest.mark.parametrize("setup_id", WORKER_REACT)
 def test_the_agent_step_budget_is_per_ticket_and_ends_in_a_handoff(setup_id):
-    llm = script(setup_id, Scenario(reads=[shipments()] * 30, specialist="orders_shipping"))
+    steps = load_config(setup=setup_id)["limits"]["max_agent_steps"]
+    llm = script(setup_id, Scenario(reads=[shipments()] * (steps + 5), specialist="orders_shipping"))
     output, db = run(setup_id, llm)
     assert (output.status, output.reply) == ("awaiting_human", HOLD_REPLY)
     assert output.handoff_packet["reason"] == "budget: agent step limit reached"
     working = [role for role in llm.roles() if role in {"agent", "supervisor", "specialist"}]
-    assert len(working) == 12   # limits.max_agent_steps, shared by every agent in the ticket
+    assert len(working) == steps   # limits.max_agent_steps, shared by every agent in the ticket
     assert db.ticket_saves[-1]["status"] == "awaiting_human"
 
 

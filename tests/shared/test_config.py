@@ -82,7 +82,7 @@ def test_the_held_constant_values_are_the_experiment_s():
     assert (cfg["llm"]["temperature"], cfg["llm"]["reasoning_effort"]) == (0.0, "medium")
     assert cfg["guard"]["threshold"] == 0.5
     assert (cfg["review"]["max_rejections"], cfg["review"]["max_reply_drafts"]) == (1, 2)
-    assert (cfg["limits"]["max_tool_calls"], cfg["limits"]["max_agent_steps"], cfg["limits"]["max_cost_usd"]) == (40, 12, 0.05)
+    assert (cfg["limits"]["max_tool_calls"], cfg["limits"]["max_agent_steps"], cfg["limits"]["max_cost_usd"]) == (40, 30, 0.05)
     assert cfg["run"]["clock_start"] == "2026-10-01T09:00:00+08:00"
     assert cfg["llm"]["cache_dir"] is None   # repeat trials must not replay the first
 

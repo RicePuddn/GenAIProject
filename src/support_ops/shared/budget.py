@@ -1,7 +1,7 @@
 """Per-ticket budgets and the retry policy, the same for every setup.
 
 One `Budget` covers the whole ticket, shared by every agent in it: a multi-agent setup's supervisor and
-specialists draw on the same 12 agent steps and 40 tool calls as the single agent, not on their own.
+specialists draw on the same agent steps and tool calls (`limits`) as the single agent, not on their own.
 """
 from __future__ import annotations
 
