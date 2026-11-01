@@ -2,6 +2,7 @@
 
 How the code fits together. The study design (setups, variants, what is held constant) is in
 [EXPERIMENT.md](EXPERIMENT.md); install and run steps are in [README.md](README.md).
+Each setup's walkthrough and draw.io diagram is in [docs/](docs/README.md).
 
 ## One turn
 
