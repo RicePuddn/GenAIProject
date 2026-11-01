@@ -208,7 +208,8 @@ All 19 issues listed before the refactor are resolved:
   priority "normal", and uses the first customer message as the subject. The `update_ticket` tool is gone.
 - **Handoffs end the turn.** When the write gate hands a write to a person, the whole turn ends `awaiting_human`
   in every setup, so in a multi-part message later parts may not run. In the graph setups a proposal of
-  `awaiting_human` does the same; S7/S8 otherwise end on the strictest outcome of their parts.
+  `awaiting_human` does the same; S7/S8 otherwise end on the strictest outcome of their parts, or with a person
+  if the supervisor gives up (as S3/S4 do when the supervisor never calls `finish`).
 - **What S7/S8's route tool did, kept for every setup.** A write may ask for a stricter route, a claimed policy
   exception gets a review, unseen returns and refunds are shown once, and code-found problems reach the reply.
   Default routes per action (exchange to the approver, account changes to a person) are not kept: those are

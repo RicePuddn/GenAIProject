@@ -248,6 +248,20 @@ def test_multi_graph_ends_on_the_strictest_part():
     assert [part["outcome"] for part in output.parts] == ["resolved", "awaiting_customer"]
 
 
+def test_multi_graph_goes_to_a_person_when_the_supervisor_gives_up_after_a_part():
+    llm = script("s7-a", Scenario(reads=[shipments()], specialist="orders_shipping"))
+    llm.queues["supervisor"].clear()
+    llm.queues["specialist"].clear()
+    llm.push("supervisor", tool_call("ask_specialist", specialist="orders_shipping", request="Track it."),
+             *[tool_call("ask_specialist", specialist="nobody", request="Refund it.")] * 3)
+    llm.push("specialist", tool_call("get_shipments_for_order", order_id=ORDER), text("Gathered."),
+             as_json({"outcome": "resolved", "note": "Delivered."}))
+    output, _ = run("s7-a", llm)
+    assert output.status == "awaiting_human"   # not the resolved first part: the refund was never asked
+    assert output.note.startswith("the supervisor stopped: ask_specialist failed 3 times in a row")
+    assert [part["outcome"] for part in output.parts] == ["resolved"]
+
+
 def test_signed_in_tools_see_only_the_account():
     db = FakeDatabase()
     db.tables["orders"][ORDER]["customer_id"] = "CUS-2"
