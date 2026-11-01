@@ -167,3 +167,13 @@ def test_a_json_reply_groq_rejects_comes_back_for_our_own_parsing():
     assert tracer.of_kind("json_rejected_by_provider")[0]["role"] == "agent"
     with pytest.raises(ProviderError):     # outside json_mode the same error still raises
         _llm_raising(_groq_error("json_validate_failed", "{")).chat("agent", [{"role": "user", "content": "hi"}])
+
+
+def test_plain_text_groq_cannot_parse_comes_back_as_a_reply_without_tool_calls():
+    # gpt-oss on Groq: the supervisor wrote a summary instead of calling finish, and Groq returned a 400.
+    llm = _llm_raising(_groq_error("output_parse_failed", "The specialist resolved the refund."))
+    tracer = Tracer("T1")
+    tools = [{"type": "function", "function": {"name": "finish"}}]
+    result = llm.chat("supervisor", [{"role": "user", "content": "refund"}], tools=tools, tracer=tracer)
+    assert (result.content, result.tool_calls) == ("The specialist resolved the refund.", [])
+    assert tracer.of_kind("output_rejected_by_provider")[0]["role"] == "supervisor"

@@ -63,9 +63,13 @@ def test_both_checks_use_their_one_prompt_and_set_the_stage_in_code():
 def test_a_pending_refund_described_as_paid_is_caught():
     for reply in ("The payment of SGD 32.00 has been refunded to the original Visa card.",
                   "Your refund has been processed.", "The money has been returned to your card.",
-                  "Your refund was issued today."):
+                  "Your refund was issued today.",
+                  # gold-01 on s3-c: the code let these through to the reply check
+                  "A refund of SGD 20.00 has been issued to the original payment method.",
+                  "We have issued a refund of SGD 20.00.", "We've processed your refund."):
         assert "only recorded as pending" in refund_wording_issue(reply, RECORDED)
     for reply in ("A refund of SGD 32.00 is recorded and pending.",
+                  "Your refund of SGD 60.00 for the power bank has been recorded and is pending.",
                   "Your refund will go back to the original card; the policy estimates 5 to 10 business days."):
         assert refund_wording_issue(reply, RECORDED) is None
     assert refund_wording_issue("Your refund has been processed.", []) is None   # no refund here

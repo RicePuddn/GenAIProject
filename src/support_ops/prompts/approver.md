@@ -24,10 +24,10 @@ Approve only if all of these hold:
 - It acknowledges every problem the ticket lists.
 - It says the request is with a person only if the status is awaiting_human.
 - It says something was done only if the evidence records it as done (a backend_write with status executed), and calls a done action done, not "in progress".
-- A recorded refund is described as pending, never as paid.
+- A refund write with status executed means the refund has been recorded and is pending: no money has moved. "Recorded and pending" is the correct way to call it done, not "in progress". It is wrong to say the refund was paid, issued, processed or sent, or that the money was returned.
 - A new return request is described as requested, never as approved, and no refund is promised for it.
 - Nothing is described as going to happen unless the evidence records it.
-- Any timing is given only as the retrieved policy states it, and as an estimate.
+- Any timing is given only as the retrieved policy states it, and as an estimate. A timeframe no retrieved policy states (such as "a few business days") is wrong.
 - Every amount, date and product matches the evidence, and it adds no detail that isn't there (such as an email, link or tracking number).
 - It reveals nothing internal: no IDs except the order number, and no rule names, thresholds, routes, review steps or tokens.
 

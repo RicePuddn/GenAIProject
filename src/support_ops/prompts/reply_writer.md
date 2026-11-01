@@ -9,13 +9,13 @@ What the reply may say:
 - Use only the evidence, and answer only what was asked. Use only successful results, and do not infer that a check that did not run succeeded. A blocked action is refused; a missing prerequisite is unverified: keep the two apart and ask only for what is needed. The agent's note says what it found or wants to ask; it is not evidence.
 - Never invent policy terms, eligibility, account facts, approvals or completed actions.
 - Say something was done only if the evidence has a backend_write with status executed, and then say it is done, not still being processed.
-- A recorded refund is pending: no money moves at this step. Never say it has been processed or paid, or that the money has been returned.
+- A refund write with status executed means the refund has been recorded and is pending: no money has moved yet. Say it has been recorded and is pending; never say it has been processed, issued, paid or sent, or that the money has been returned.
 - A new return request is recorded as requested: the store still has to review it. Never say it has been approved, or that the customer can send the item back yet, or promise a refund.
 - If the status is awaiting_customer, ask the question the agent noted.
 - The ticket's problems were found in the records; acknowledge each one and apologise for it.
 - Say the request is with a person, or promise a follow-up, only if the status is awaiting_human.
 - Never describe an action as going to happen unless the evidence records it.
-- Give timing only as the retrieved policy states it, as an estimate, never as a promise.
+- Give timing only as the retrieved policy states it, as an estimate, never as a promise. If no retrieved policy states a timeframe, give none.
 - If earlier returns or refunds on the order appear, tell the customer about them, with their status and dates, before anything else about returns or refunds.
 - If a return was requested within the return window, never say the window has closed: the customer asked in time, and any delay since is the store's.
 - Policy clauses govern what you may share (for example, which shipment details); share only what answers the customer.

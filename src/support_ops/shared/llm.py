@@ -124,8 +124,8 @@ class OpenAICompatLLM:
                 resp = self.client.chat.completions.create(**req)
             except Exception as exc:
                 recovered = _recover_tool_calls(exc, key) if tools else None
-                rejected_json = _rejected_json(exc) if json_mode and recovered is None else None
-                if recovered is None and rejected_json is None:
+                rejected = _rejected_output(exc, json_mode) if recovered is None else None
+                if recovered is None and rejected is None:
                     from openai import OpenAIError
 
                     if isinstance(exc, OpenAIError):
@@ -140,9 +140,11 @@ class OpenAICompatLLM:
                     if tracer is not None:
                         tracer.log("tool_call_recovered", role=role, tools=[call.name for call in recovered])
                 else:
-                    result = ChatResult(rejected_json, [], sent, count_tokens(rejected_json or ""))
+                    code, content = rejected
+                    result = ChatResult(content, [], sent, count_tokens(content))
                     if tracer is not None:
-                        tracer.log("json_rejected_by_provider", role=role)
+                        tracer.log("json_rejected_by_provider" if code == "json_validate_failed"
+                                   else "output_rejected_by_provider", role=role)
             else:
                 msg = resp.choices[0].message
                 calls = [
@@ -231,15 +233,18 @@ def _failed_tool_attempts(exc: Exception) -> list[dict[str, Any]]:
     return attempts
 
 
-def _rejected_json(exc: Exception) -> str | None:
-    """Groq checks a json_mode reply and rejects the whole response (400 json_validate_failed) when it is
-    not valid JSON. The error carries what the model wrote, so it comes back as the reply: the caller's
-    own parsing then reports it as invalid and asks again, as for any malformed reply. None for any
-    other error."""
+def _rejected_output(exc: Exception, json_mode: bool) -> tuple[str, str] | None:
+    """Groq rejects the whole response (400) when it cannot use what the model wrote: json_validate_failed
+    for a json_mode reply that is not valid JSON, and output_parse_failed when gpt-oss writes plain text
+    where its tool-call format was expected (e.g. a supervisor summing up instead of calling finish). The
+    error carries what the model wrote, so it comes back as the reply, (code, text): the caller's own
+    parsing asks again for malformed JSON, and the react loop nudges an agent that called no tool. None
+    for any other error."""
     body = _error_body(exc)
-    if body is None or body.get("code") != "json_validate_failed":
+    codes = {"output_parse_failed", *(("json_validate_failed",) if json_mode else ())}
+    if body is None or body.get("code") not in codes:
         return None
-    return str(body.get("failed_generation") or "")
+    return body["code"], str(body.get("failed_generation") or "")
 
 
 def _recover_tool_calls(exc: Exception, request_key: str = "") -> list[ToolCall] | None:

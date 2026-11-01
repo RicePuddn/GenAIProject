@@ -18,10 +18,13 @@ from support_ops.shared.context import TurnContext
 from support_ops.shared.gates.approver import ApprovalResult, Approver
 from support_ops.shared.rules import AWAITING_STORE_RETURN_STATUSES
 
-# "has been refunded", "refund has been processed", "the money has been returned", and the like.
+# "has been refunded", "refund of SGD 20.00 has been issued", "we have issued your refund", "the money has
+# been returned", and the like.
 PAID_CLAIM = re.compile(
     r"\b(?:has|have|was|were)\s+(?:already\s+)?(?:been\s+)?(?:refunded|credited|reimbursed|paid\s+back)\b"
-    r"|\brefund\s+(?:has|was)\s+(?:already\s+)?(?:been\s+)?(?:processed|issued|completed|paid|sent|credited)\b"
+    r"|\brefunds?\b(?:[^.!?]|\.(?=\d)){0,40}?\b(?:has|have|was|were)\s+(?:already\s+)?(?:been\s+)?"
+    r"(?:processed|issued|completed|paid|sent|credited)\b"
+    r"|\b(?:issued|processed|completed|paid|sent)\s+(?:you\s+)?(?:a|the|your)\s+(?:full\s+)?refund\b"
     r"|\b(?:money|payment|funds|amount)\s+(?:has|have|was|were)\s+(?:already\s+)?(?:been\s+)?"
     r"(?:returned|refunded|credited|sent\s+back|paid\s+back)\b",
     re.IGNORECASE,
