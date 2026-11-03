@@ -166,7 +166,7 @@ def info() -> dict[str, Any]:
         setups[setup_id] = {**{key: resolved["setup"][key] for key in ("name", "variant", "agents", "control")},
                             "policy_mode": resolved["policy"]["mode"], "strategy": resolved["strategy"]}
     return {"default_setup": cfg["setup"]["id"], "setups": setups, "clock_start": cfg["run"]["clock_start"],
-            "models": cfg["llm"]["models"], "reasoning_effort": cfg["llm"]["reasoning_effort"]}
+            "models": cfg["llm"]["models"], "provider": cfg["llm"]["provider"]}
 
 
 @app.get("/customers")

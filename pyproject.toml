@@ -5,7 +5,7 @@ description = "Policy-bound multi-agent customer support operations (IS469 group
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "openai>=1.40",    # OpenAI-compatible client: works with Groq, OpenRouter, vLLM, Ollama
+    "openai>=1.40",    # Ollama's OpenAI-compatible local endpoint
     "langgraph>=0.2,<2",
     "psycopg[binary]>=3.2,<4",
     "fastapi>=0.115,<1",

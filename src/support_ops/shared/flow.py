@@ -68,8 +68,8 @@ class Proposal(AgentOutput):
     @model_validator(mode="before")
     @classmethod
     def tidy_model_output(cls, data: Any) -> Any:
-        """Undo three habits of models writing JSON: reasoning written into the object (gpt-oss puts its
-        analysis channel there in JSON mode on some providers), the proposal nested one level down, and
+        """Undo three habits of models writing JSON: reasoning written into the object,
+                        analysis channel there in JSON mode), the proposal nested one level down, and
         null for an empty list."""
         if not isinstance(data, dict):
             return data

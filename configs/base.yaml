@@ -11,29 +11,26 @@ run:
   clock_start: "2026-10-01T09:00:00+08:00"   # the workflow date for every run; the API can override it
 
 llm:
-  provider: groq
-  base_url: https://api.groq.com/openai/v1
-  api_key_env: GROQ_API_KEY
+  provider: ollama
+  base_url: http://localhost:11434/v1
+  api_key_env: null
   temperature: 0.0
-  reasoning_effort: medium  # gpt-oss only; the same for every role
   max_tokens: 2048
   max_tokens_by_role:
-    guard: 512              # Prompt Guard's Groq limit
+    guard: 512
   # Off for experiment runs: with the cache on, repeat trials replay the first one, and cached calls
   # take no time and cost nothing. Set a folder (e.g. results/cache) only while developing.
   cache_dir: null
   cache_enabled_by_role:
     guard: false            # always classify live
-  models:                   # one model for every role except the guard
-    agent: openai/gpt-oss-120b          # the single agent (S1, S2, S5, S6)
-    supervisor: openai/gpt-oss-120b     # S3, S4, S7, S8
-    specialist: openai/gpt-oss-120b
-    approver: openai/gpt-oss-120b       # the write review and the reply check
-    reply_writer: openai/gpt-oss-120b
-    guard: meta-llama/llama-prompt-guard-2-86m
-  # USD per 1M tokens; check provider pricing page and record the date you checked
-  pricing:
-    openai/gpt-oss-120b: {input: 0.15, output: 0.60}
+  models:                   # one local Ollama model for every role
+    agent: lfm3:latest
+    supervisor: lfm3:latest
+    specialist: lfm3:latest
+    approver: lfm3:latest
+    reply_writer: lfm3:latest
+    guard: lfm3:latest
+  pricing: {}               # local inference has no provider token price
 
 guard:
   enabled: true

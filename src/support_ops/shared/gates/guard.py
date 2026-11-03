@@ -38,9 +38,7 @@ def classify(ctx: TurnContext, text: str, **source: Any) -> str:
     """One chunk: benign, malicious or error. Fails closed: anything unparseable is an error.
     `source` (turn index, role, offset) is recorded on the guard events."""
     messages = [{"role": "user", "content": text}]
-    if ctx.cfg["llm"]["provider"] == "ollama":
-        messages.insert(0, {"role": "system", "content": OLLAMA_GUARD_PROMPT})
-    # Groq's specialized classifier requires exactly one user message.
+    messages.insert(0, {"role": "system", "content": OLLAMA_GUARD_PROMPT})
     label = (ctx.chat("guard", messages).content or "").strip().lower()
     try:
         score = float(label)

@@ -111,12 +111,12 @@ class DemoTests(unittest.TestCase):
                 return io.BytesIO(json.dumps(api.info()).encode())
             if request.full_url.endswith("/customers"):
                 return io.BytesIO(json.dumps(CUSTOMERS).encode())
-            return io.BytesIO(sse("error", {"detail": "set GROQ_API_KEY"}).encode())
+            return io.BytesIO(sse("error", {"detail": "Ollama is unavailable"}).encode())
 
         with patch("urllib.request.urlopen", failing):
             app = self.app().run()
             app.chat_input[0].set_value("Hello").run()
-        self.assertIn("set GROQ_API_KEY", [element.value for element in app.error])
+        self.assertIn("Ollama is unavailable", [element.value for element in app.error])
         self.assertEqual(app.session_state.history, [])
 
     def test_new_ticket_clears_the_conversation(self):

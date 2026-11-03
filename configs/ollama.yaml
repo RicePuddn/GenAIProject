@@ -3,12 +3,11 @@
 llm:
   provider: ollama
   base_url: http://localhost:11434/v1
-  api_key_env: null          # the local endpoint ignores the placeholder key supplied by the client
-  reasoning_effort: null
+  api_key_env: null # the local endpoint ignores the placeholder key supplied by the client
   models:
-    agent: ornith-1.5:9b
-    supervisor: ornith-1.5:9b
-    specialist: ornith-1.5:9b
-    approver: ornith-1.5:9b
-    reply_writer: ornith-1.5:9b
-    guard: ornith-1.5:9b
+    agent: lfm3:latest
+    supervisor: lfm3:latest
+    specialist: lfm3:latest
+    approver: lfm3:latest
+    reply_writer: lfm3:latest
+    guard: lfm3:latest

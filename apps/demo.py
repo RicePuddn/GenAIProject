@@ -237,7 +237,7 @@ with st.sidebar:
     st.button("New ticket", on_click=new_ticket, width="stretch")
     st.caption(f"Ticket: {st.session_state.ticket_id or 'new'} · {len(st.session_state.history)} turns sent as history")
     if info["models"]:
-        st.caption(f"Model: {info['models'].get('agent')} · effort {info.get('reasoning_effort')}")
+        st.caption(f"Model: {info['models'].get('agent')} · provider {info['provider']}")
 
 exchanges = st.session_state.exchanges
 for index, exchange in enumerate(exchanges):

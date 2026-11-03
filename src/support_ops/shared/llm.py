@@ -1,7 +1,6 @@
 """LLM access behind one small interface.
 
-`OpenAICompatLLM` talks to any OpenAI-compatible endpoint (Groq by default), so the
-model family can be swapped from config without touching agent code. Tests use the scripted
+`OpenAICompatLLM` talks to the local Ollama OpenAI-compatible endpoint. Tests use the scripted
 double in tests/fakes.py.
 """
 
@@ -25,7 +24,7 @@ _ENC = tiktoken.get_encoding("o200k_base")
 
 
 class ProviderError(Exception):
-    """The LLM provider failed after the client's own retries (rate limit, outage, rejected request). No
+    """The local Ollama request failed after the client's own retries. No
     agent can fix it, so it ends the turn, and the ticket waits to be sent again."""
 
 
@@ -72,10 +71,11 @@ class OpenAICompatLLM:
 
         llm = cfg["llm"]
         self.provider = llm["provider"]
+        if self.provider != "ollama":
+            raise ValueError("only the local Ollama provider is supported")
         self.models: dict[str, str] = llm["models"]
         self.pricing: dict[str, dict[str, float]] = llm["pricing"]
         self.temperature = llm["temperature"]
-        self.reasoning_effort = llm["reasoning_effort"]
         self.max_tokens = llm["max_tokens"]
         self.max_tokens_by_role: dict[str, int] = llm["max_tokens_by_role"]
         self.cache_enabled_by_role: dict[str, bool] = llm["cache_enabled_by_role"]
@@ -105,16 +105,8 @@ class OpenAICompatLLM:
         }
         if tools:
             req["tools"] = tools
-            if self.provider == "groq":
-                # Let Groq return unknown function names so Toolset can reject them and feed the
-                # validation error back to the agent. Otherwise Groq turns one bad name into a 400,
-                # and the whole turn is interrupted before the agent can recover.
-                req["extra_body"] = {"disable_tool_validation": True}
         if json_mode:
             req["response_format"] = {"type": "json_object"}
-        if self.reasoning_effort and "gpt-oss" in model:
-            req["reasoning_effort"] = self.reasoning_effort
-
         key = hashlib.sha256(json.dumps({**req, "trial": self.trial}, sort_keys=True, default=str).encode()).hexdigest()
         cache_enabled = self.cache_enabled_by_role.get(role, True)
         cached = self._cache_get(key) if cache_enabled else None
@@ -123,28 +115,11 @@ class OpenAICompatLLM:
             try:
                 resp = self.client.chat.completions.create(**req)
             except Exception as exc:
-                recovered = _recover_tool_calls(exc, key) if tools else None
-                rejected = _rejected_output(exc, json_mode) if recovered is None else None
-                if recovered is None and rejected is None:
-                    from openai import OpenAIError
+                from openai import OpenAIError
 
-                    if isinstance(exc, OpenAIError):
-                        raise ProviderError(type(exc).__name__) from exc
-                    raise
-                # Not cached: the provider rejected it, so the same request may succeed next time. The
-                # estimate counts what was sent (messages and tool schemas) and what it generated.
-                sent = count_tokens(json.dumps([messages, tools], default=str))
-                if recovered is not None:
-                    result = ChatResult(None, recovered, sent, count_tokens(json.dumps(
-                        [[call.name, call.arguments] for call in recovered], default=str)))
-                    if tracer is not None:
-                        tracer.log("tool_call_recovered", role=role, tools=[call.name for call in recovered])
-                else:
-                    code, content = rejected
-                    result = ChatResult(content, [], sent, count_tokens(content))
-                    if tracer is not None:
-                        tracer.log("json_rejected_by_provider" if code == "json_validate_failed"
-                                   else "output_rejected_by_provider", role=role)
+                if isinstance(exc, OpenAIError):
+                    raise ProviderError(type(exc).__name__) from exc
+                raise
             else:
                 msg = resp.choices[0].message
                 calls = [
@@ -154,7 +129,6 @@ class OpenAICompatLLM:
                 usage = resp.usage
                 tin = usage.prompt_tokens if usage else count_tokens(json.dumps(req["messages"]))
                 tout = usage.completion_tokens if usage else count_tokens(msg.content or "")
-                # gpt-oss on Groq returns its thinking in a provider-specific `reasoning` field.
                 result = ChatResult(msg.content, calls, tin, tout, getattr(msg, "reasoning", None) or None)
                 if cache_enabled:
                     self._cache_put(key, result)
@@ -207,63 +181,3 @@ def _parse_args(raw: str | None) -> dict[str, Any]:
         return val if isinstance(val, dict) else {"_raw": raw}
     except json.JSONDecodeError:
         return {"_raw": raw}  # surfaced to the agent as a tool error, not a crash
-
-
-def _error_body(exc: Exception) -> dict[str, Any] | None:
-    body = getattr(exc, "body", None)
-    if isinstance(body, dict) and isinstance(body.get("error"), dict):
-        body = body["error"]
-    return body if isinstance(body, dict) else None
-
-
-def _failed_tool_attempts(exc: Exception) -> list[dict[str, Any]]:
-    body = _error_body(exc)
-    if body is None or body.get("code") != "tool_use_failed":
-        return []
-    generated = body.get("failed_generation")
-    if isinstance(generated, str):
-        try:
-            generated = json.loads(generated)
-        except json.JSONDecodeError:
-            return []
-    attempts = generated if isinstance(generated, list) else [generated]
-    if not attempts or any(not isinstance(attempt, dict) or not isinstance(attempt.get("name"), str)
-                           for attempt in attempts):
-        return []
-    return attempts
-
-
-def _rejected_output(exc: Exception, json_mode: bool) -> tuple[str, str] | None:
-    """Groq rejects the whole response (400) when it cannot use what the model wrote: json_validate_failed
-    for a json_mode reply that is not valid JSON, and output_parse_failed when gpt-oss writes plain text
-    where its tool-call format was expected (e.g. a supervisor summing up instead of calling finish). The
-    error carries what the model wrote, so it comes back as the reply, (code, text): the caller's own
-    parsing asks again for malformed JSON, and the react loop nudges an agent that called no tool. None
-    for any other error."""
-    body = _error_body(exc)
-    codes = {"output_parse_failed", *(("json_validate_failed",) if json_mode else ())}
-    if body is None or body.get("code") not in codes:
-        return None
-    return body["code"], str(body.get("failed_generation") or "")
-
-
-def _recover_tool_calls(exc: Exception, request_key: str = "") -> list[ToolCall] | None:
-    """Groq checks tool arguments against the schema and rejects the whole response (400 tool_use_failed)
-    on a mismatch, e.g. an alias such as order_item_id. The error carries the attempted call, so it comes
-    back as an ordinary tool call for local validation. The tool registry remains authoritative and turns
-    unknown names or bad arguments into an error the agent can see. IDs come from `request_key` and the
-    call position for deterministic replay."""
-    attempts = _failed_tool_attempts(exc)
-    if not attempts:
-        return None
-    calls = []
-    for index, attempt in enumerate(attempts):
-        # Some generations name the arguments "parameters".
-        arguments = attempt.get("arguments", attempt.get("parameters", {}))
-        if isinstance(arguments, str):
-            arguments = _parse_args(arguments)
-        elif not isinstance(arguments, dict):   # e.g. a list or number: the tool reports it as an error
-            arguments = {"_raw": json.dumps(arguments, default=str)}
-        call_id = hashlib.sha256(f"{request_key}:{index}".encode()).hexdigest()[:12]
-        calls.append(ToolCall(f"recovered_{call_id}", attempt["name"], arguments))
-    return calls or None

@@ -1,6 +1,5 @@
 """Setup IDs resolve from configs/setups.yaml, and every value held constant comes from base.yaml."""
-import os
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
@@ -65,8 +64,8 @@ def test_the_default_setup_and_overrides_come_after_the_setup():
 
 def test_a_missing_key_is_an_error_not_a_different_setup():
     cfg = load_config()
-    del cfg["llm"]["reasoning_effort"]
-    with patch.dict(os.environ, {"GROQ_API_KEY": "key"}), pytest.raises(KeyError):
+    del cfg["llm"]["models"]
+    with pytest.raises(KeyError):
         OpenAICompatLLM(cfg)
     cfg = load_config()
     del cfg["policy"]["mode"]
@@ -78,8 +77,9 @@ def test_a_missing_key_is_an_error_not_a_different_setup():
 def test_the_held_constant_values_are_the_experiment_s():
     cfg = load_config()
     assert set(cfg["llm"]["models"]) == {"agent", "supervisor", "specialist", "approver", "reply_writer", "guard"}
-    assert {model for role, model in cfg["llm"]["models"].items() if role != "guard"} == {"openai/gpt-oss-120b"}
-    assert (cfg["llm"]["temperature"], cfg["llm"]["reasoning_effort"]) == (0.0, "medium")
+    assert set(cfg["llm"]["models"].values()) == {"lfm3:latest"}
+    assert cfg["llm"]["provider"] == "ollama"
+    assert cfg["llm"]["temperature"] == 0.0
     assert cfg["guard"]["threshold"] == 0.5
     assert (cfg["review"]["max_rejections"], cfg["review"]["max_reply_drafts"]) == (1, 2)
     assert (cfg["limits"]["max_tool_calls"], cfg["limits"]["max_agent_steps"], cfg["limits"]["max_cost_usd"]) == (40, 30, 0.05)
@@ -92,8 +92,7 @@ def test_the_trial_number_is_part_of_the_cache_key(tmp_path):
     keys = []
     for trial in (0, 1):
         cfg["run"]["trial"] = trial
-        with patch.dict(os.environ, {"GROQ_API_KEY": "key"}):
-            llm = OpenAICompatLLM(cfg)
+        llm = OpenAICompatLLM(cfg)
         response = Mock()
         response.choices = [Mock(message=Mock(content="hi", tool_calls=None, reasoning=None))]
         response.usage = Mock(prompt_tokens=1, completion_tokens=1)

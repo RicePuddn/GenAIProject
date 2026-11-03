@@ -14,9 +14,8 @@ uv pip install --python .venv/bin/python -e ".[dev,rag,demo]"
 cp .env.example .env
 ```
 
-In `.env`, set `GROQ_API_KEY` for the default provider, and `PINECONE_API_KEY` for the RAG setups
-(S1, S3, S5, S7). To use a local Ollama model instead, see [Use Ollama](#use-ollama). The default local
-database settings are:
+The LLM provider is local Ollama; no provider API key is needed. Set `PINECONE_API_KEY` for the RAG
+setups (S1, S3, S5, S7). The default local database settings are:
 
 ```dotenv
 POSTGRES_PASSWORD=support_ops_local
@@ -27,28 +26,24 @@ SUPPORT_OPS_DATABASE_URL=postgresql://support_ops:support_ops_local@127.0.0.1:54
 If you change the password or port, update the URL to match. Changing the password in `.env` does not
 reset the password of an existing database volume.
 
-## Use Ollama
+## Start Ollama
 
 The API uses the OpenAI-compatible client already installed by this project. Ollama exposes the local
-endpoint at `http://localhost:11434/v1`; its local server requires an API key value from clients, but
-ignores that value. The supplied profile uses `ornith-1.5:9b` for every role, including the guard.
+endpoint at `http://localhost:11434/v1`; the client supplies a placeholder API key which the local
+server ignores. The default profile uses `lfm3:latest` for every role, including the guard.
 
-Pull the model if it is not installed, then add this line to `.env`:
+Pull the model if it is not installed:
 
 ```bash
-ollama pull ornith-1.5:9b
+ollama pull lfm3:latest
 ```
 
-```dotenv
-SUPPORT_OPS_CONFIG=configs/ollama.yaml
-```
-
-Restart the API after changing the profile. Remove or comment out `SUPPORT_OPS_CONFIG` to return to
-Groq. If your installed model has a different tag, update the role names in
-[`configs/ollama.yaml`](configs/ollama.yaml). Ollama supports tool calls through its OpenAI-compatible
+Restart Ollama and the API after changing models. If your installed model has a different tag, update the role names in
+[`configs/base.yaml`](configs/base.yaml). If `SUPPORT_OPS_CONFIG` selects the optional
+[`configs/ollama.yaml`](configs/ollama.yaml) overlay, update the role names there too. Ollama supports tool calls through its OpenAI-compatible
 chat endpoint, but tool-use quality depends on the model. See the [Ollama API compatibility docs](https://docs.ollama.com/api/openai-compatibility),
 [tool-calling docs](https://docs.ollama.com/capabilities/tool-calling), and the
-[Ornith model page](https://ollama.com/library/ornith-1.5%3A9b).
+[LFM model page](https://ollama.com/library/lfm3).
 
 On Windows, use `.venv/Scripts/` in place of `.venv/bin/` below.
 
