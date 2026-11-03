@@ -1,0 +1,24 @@
+# The eight setups and their variants (EXPERIMENT.md). A setup ID names one of each: s3-c is S3, variant c.
+# Each pair (S1/S2, S3/S4, S5/S6, S7/S8) runs the same code; only the policy mode differs.
+
+setups:
+  S1: {agents: single, control: agentic, policy: rag,    owner: FP}
+  S2: {agents: single, control: agentic, policy: skills, owner: Ernest}
+  S3: {agents: multi,  control: agentic, policy: rag,    owner: FT}
+  S4: {agents: multi,  control: agentic, policy: skills, owner: Lynn}
+  S5: {agents: single, control: graph,   policy: rag,    owner: FP}
+  S6: {agents: single, control: graph,   policy: skills, owner: Ernest}
+  S7: {agents: multi,  control: graph,   policy: rag,    owner: FT}
+  S8: {agents: multi,  control: graph,   policy: skills, owner: Lynn}
+
+# Each role's strategy, react or plan_execute, by variant. The agentic setup and its graph
+# counterpart have the same variants.
+variants:
+  single:
+    a: {agent: react}
+    b: {agent: plan_execute}
+  multi:
+    a: {supervisor: react,        specialists: react}
+    b: {supervisor: plan_execute, specialists: plan_execute}
+    c: {supervisor: react,        specialists: plan_execute}
+    d: {supervisor: plan_execute, specialists: react}

@@ -2,7 +2,7 @@
 
 [gold.json](gold.json) contains 10 standalone cases shared by S1 (single + RAG), S2
 (single + skills), S3 (multi + RAG) and S4 (multi + skills). Seed records are in
-[`scripts/seed_backend.py`](../../../scripts/seed_backend.py).
+[`scripts/seed_db.py`](../../../scripts/seed_db.py).
 
 Use fresh workflow state and the fixed clock **31 October 2026, 09:00 UTC**.
 The reference path is shared reads → policy calls → action calls. `gold_tool_call_count` includes
