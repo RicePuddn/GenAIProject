@@ -1,7 +1,7 @@
 """Insert the literal ecommerce records below into the local PostgreSQL database.
 
 Each list is one table; its column order is shown immediately above it.
-The labelled cases reference orders ORD-2026-00101 through ORD-2026-00110.
+The seed includes general demo records and scenario records for manual workflow checks.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import psycopg
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
-from support_ops.shared.config import ROOT, load_env
+from SupportOpsBot.runtime.shared.config import ROOT, load_env
 
 
 # Products.

@@ -2,7 +2,6 @@
 
 - `schema.sql`: tables, columns, constraints and indexes.
 - [`scripts/seed_db.py`](../../scripts/seed_db.py): hardcoded rows grouped by table.
-- [`gold.json`](../cases/agents/gold.json): 10 labelled cases linked to the seeded records.
 
 ```bash
 docker compose up -d --wait postgres
@@ -31,10 +30,7 @@ Tools collect these records into temporary inputs for `Rules.check()`. Refund
 checks use both the captured payment balance and the remaining return approval.
 Missing evidence or approval facts cannot be supplied by the agent.
 
-The seed contains 60 background orders for the demos plus the 10 gold orders
-`ORD-2026-00101`–`ORD-2026-00110`, with tickets `TKT-EVAL-01`–`TKT-EVAL-10`.
-See the [case overview](../cases/agents/README.md) for scenarios and expected results.
-Gold cases use a fixed clock of 31 October 2026, 09:00 UTC.
+The seed contains 60 general demo orders and 10 additional scenario orders, with their related records. The scenario data remains available for manual workflow checks; the old labelled agent cases have been removed.
 
 Every setup writes to these tables through the one write gate, and each write is recorded in
 `backend_writes`. Every turn also saves the conversation's row in `support_tickets`, in code, under the

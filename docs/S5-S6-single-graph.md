@@ -16,7 +16,7 @@ graph decides what happens next.
 2. **Gather.** The agent reads by its strategy (`read_record`, `get_orders_for_customer`, the order lookups,
    `policy`). React ends when it stops calling tools; plan_execute ends when its completion check plans nothing more.
 3. **Propose.** One structured output: `outcome` (resolved, awaiting_customer or awaiting_human), `note`,
-   `writes` (backend_write's arguments, including `route` and `policy_exception`) and `review_reason`.
+   `writes` (write arguments, including `route` and `policy_exception`) and `review_reason`.
 4. For each write, in order:
    - **Rule check**, the write gate. A write this ticket already made is replayed, not repeated.
    - **Review**, on the approver route only.
@@ -30,4 +30,4 @@ graph decides what happens next.
 ## Worth knowing
 
 - A proposal of `awaiting_human` ends the turn with nothing written.
-- Each write attempt counts and is traced as one `backend_write` tool call, as in S1/S2.
+- Each graph write attempt counts and is recorded with the internal `backend_write` trace label.

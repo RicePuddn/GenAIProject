@@ -1,6 +1,12 @@
 """Refresh the skills' clause files from the same PDFs used by RAG."""
-from support_ops.shared.config import ROOT
-from support_ops.shared.policy.rag.loader import NUMBERED_HEADING, load_corpus, read_document
+import sys
+from pathlib import Path
+
+# Allow direct execution as ``python scripts/sync_skills.py``.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from SupportOpsBot.runtime.shared.config import ROOT
+from SupportOpsBot.runtime.shared.policy.rag.loader import NUMBERED_HEADING, load_corpus, read_document
 
 
 # Keep the existing skill filenames while copying every complete PDF clause.

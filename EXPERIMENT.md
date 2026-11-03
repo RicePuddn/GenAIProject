@@ -23,7 +23,7 @@ The pair's two owners share that code. They do not keep separate copies.
 
 ## Definitions
 
-**Agentic control (S1–S4).** The agent holds every tool, including `backend_write`, and decides for itself
+**Agentic control (S1–S4).** The agent holds every registered tool, including named write tools, and decides for itself
 what to read, when to write, when to ask for review and when it is finished.
 Code only enforces budgets and the shared gates below.
 
@@ -74,7 +74,7 @@ Each variant has a setup ID such as `s1-a` or `s3-c`, resolved from the one matr
 | Prompt attack guard | `lfm3:latest`, threshold 0.5, screens the new customer message once per turn |
 | Data tools | One tool registry (`shared/tools.py`). Multi-agent setups give each specialist a subset; they never get different implementations (a specialist's `policy` tool is a scoped view of the same provider) |
 | Business rules | One rules engine, reading `data/policy/rules.json` |
-| Write path | One write gate (`shared/gates/write_gate.py`): rule check → cited clauses must be ones retrieved in this ticket → the order's returns and refunds not yet looked up are shown once → the route is the stricter of the rules' and the agent's own (`route`, `policy_exception`), never looser → independent approver review when required. Agentic setups reach it through `backend_write` and ask for the review themselves with `request_review`; graph setups call it as nodes |
+| Write path | One shared write coordinator over the gate and executor: replay → rule check → cited clauses must be ones retrieved in this ticket → the order's returns and refunds not yet looked up are shown once → the route is the stricter of the rules' and the agent's own (`route`, `policy_exception`), never looser → independent approver review when required. Agentic setups use named write tools and ask for review with `request_review`; graph stages call the same operations in their fixed order. Graph writes remain labeled `backend_write` in traces |
 | Write review and reply check | Same approver prompts and limits (`review.max_rejections: 1`, `review.max_reply_drafts: 2`) |
 | Reply | Same reply prompt and the same wording checks, written from the ticket's status, the agent's note, the evidence and the problems code finds in what the agents looked up |
 | Ticket save | Saved in code at the end of every turn, the same way in every setup |
@@ -108,7 +108,7 @@ GenAIProject/
 │   │   ├── skills/            SKILL.md trees (SKILL)
 │   │   └── rules.json         business rules
 │   └── cases/                 test cases (later)
-├── src/support_ops/
+├── SupportOpsBot/runtime/
 │   ├── shared/                identical for every setup
 │   │   ├── llm.py  tracing.py  clock.py  config.py  budget.py  cancellation.py
 │   │   ├── db/                reader.py, writer.py, accounts.py
@@ -163,7 +163,7 @@ Suggested code moves:
 | `scripts/demo_app.py`, `scripts/demo_multi_agent.py` | `apps/demo.py` |
 | `policy/raw_policy/pdf`, `chunk_policy`, `embed_chunk`, `skills` | `data/policy/` |
 | `data/backend_seed/` | `data/db/` |
-| `src/support_ops/eval/rag_evaluation.ipynb` | `notebooks/` |
+| `SupportOpsBot/runtime/eval/rag_evaluation.ipynb` | `notebooks/` |
 | `configs/experiments/` | `configs/setups.yaml` |
 | `docs/multi-agent.md`, `docs/multi-agent-flow.drawio` | `ARCHITECTURE.md`, and `docs/` per setup pair |
 
@@ -173,7 +173,7 @@ All 19 issues listed before the refactor are resolved:
 
 | # | Issue | Resolution |
 |---|---|---|
-| 1 | Two write paths | S7/S8 write through the one write gate; the route tool, approval tokens and `gateway/writes.py` are removed |
+| 1 | Two write paths | Every setup uses the shared write coordinator; the old route tool, approval tokens and `gateway/writes.py` are removed |
 | 2 | Shared gates copied per workflow | `shared/pipeline.py::run_turn` runs guard → body → reply and reply check → ticket save for every setup |
 | 3 | `plan_execute` meant three things | One react and one plan_execute loop (`shared/strategies/`) for every agent |
 | 4 | Multi-agent got larger step budgets | One budget per ticket, shared by all its agents (`shared/budget.py`) |
@@ -195,7 +195,7 @@ All 19 issues listed before the refactor are resolved:
 
 ### Decisions made during the refactor (owners to confirm)
 
-- **Who asks for a review in agentic setups.** The agent calls `request_review`; `backend_write` refuses an
+- **Who asks for a review in agentic setups.** The agent calls `request_review`; the named write tools refuse an
   approver-route write until that exact write is approved. In graph setups the graph runs the review.
 - **How an agentic agent ends a turn.** It calls `finish` (resolved, awaiting_customer or awaiting_human, with a
   note). An agent that stops without it is nudged once, then handed off. The S3/S4 supervisor's `reply`,
@@ -208,7 +208,7 @@ All 19 issues listed before the refactor are resolved:
   strictest outcome of their parts, or with a person if the supervisor gives up (as S3/S4 do when the supervisor
   never calls `finish`). A support request neither S7/S8 specialist covers still goes to `orders_shipping`, which
   hands it to a person, so the supervisor keeps its one tool.
-- **What S7/S8's route tool did, kept for every setup.** A write may ask for a stricter route, a claimed policy
+- **What the old S7/S8 route tool did, kept for every setup.** A write may ask for a stricter route, a claimed policy
   exception gets a review, unseen returns and refunds are shown once, and code-found problems reach the reply.
   Default routes per action (exchange to the approver, account changes to a person) are not kept: those are
   unsupported writes and go to a person.

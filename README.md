@@ -14,8 +14,9 @@ uv pip install --python .venv/bin/python -e ".[rag,demo]"
 cp .env.example .env
 ```
 
-The LLM provider is local Ollama; no provider API key is needed. Set `PINECONE_API_KEY` for the RAG
-setups (S1, S3, S5, S7). The default local database settings are:
+The default LLM provider is local Ollama; no provider API key is needed. An optional Azure OpenAI
+profile uses the APIM endpoint and deployment aliases listed in the Meeting Assistant report. Set
+`PINECONE_API_KEY` for the RAG setups (S1, S3, S5, S7). The default local database settings are:
 
 ```dotenv
 POSTGRES_PASSWORD=support_ops_local
@@ -45,6 +46,26 @@ chat endpoint, but tool-use quality depends on the model. See the [Ollama API co
 [tool-calling docs](https://docs.ollama.com/capabilities/tool-calling), and the
 [LFM model page](https://ollama.com/library/lfm3).
 
+## Use the Azure OpenAI deployments
+
+The optional [`configs/azure_openai.yaml`](configs/azure_openai.yaml) profile defaults every role to
+`gpt5`. The report's saved
+summary/evaluation files use `gpt5`; its generator also lists `gpt5.2`, `gpt5-mini`, and `gpt4o-mini`.
+To select another alias for a role, change that role in the overlay. `gpt5.2` requires a configured
+`GPT52_DEPLOYMENT_NAME`.
+
+Copy the approved endpoint, key, API version, and deployment-name values into this project's `.env`
+using the variable names in [`.env.example`](.env.example), then set:
+
+```dotenv
+SUPPORT_OPS_CONFIG=configs/azure_openai.yaml
+```
+
+Restart the API after changing the profile. The Azure profile uses `AZURE_OPENAI_APIM_API_KEY` as
+the client key and `Ocp-Apim-Subscription-Key` header. Token pricing is not configured by default,
+so the per-ticket dollar budget is not meaningful until `llm.pricing` is filled with the rates for
+your APIM deployments.
+
 On Windows, use `.venv/Scripts/` in place of `.venv/bin/` below.
 
 ## Start the database
@@ -61,13 +82,14 @@ sample IDs. Use `docker compose stop postgres` to stop it.
 ## Run the API and the demo page
 
 ```bash
-.venv/bin/uvicorn support_ops.api:app --reload --host 127.0.0.1 --port 8000
-.venv/bin/streamlit run apps/demo.py
+.venv/bin/uvicorn SupportOpsBot.chatRoute:app --reload --host 127.0.0.1 --port 8000
+.venv/bin/streamlit run SupportOpsBot/demo.py
 ```
 
 In RAG mode the API loads its models at startup (about 20 s) before it accepts requests. The demo
 page picks the setup and variant, the signed-in account and, optionally, today's date; it shows each
-step as it streams in. Restart uvicorn after editing configuration or `.env`.
+step as it streams in. Each completed run saves its request, response, trajectory, and an operational
+summary under `results/runs/`. Restart uvicorn after editing configuration or `.env`.
 
 ## Send a message
 
@@ -77,8 +99,8 @@ step as it streams in. Restart uvicorn after editing configuration or `.env`.
 {
   "setup": "s3-c",
   "ticket_id": "TKT-LOCAL-001",
-  "customer_id": "CUS-EVAL-001",
-  "customer_message": "Where is my order ORD-2026-00101?"
+  "customer_id": "CUS-1001",
+  "customer_message": "Where is my order ORD-2026-00001?"
 }
 ```
 
@@ -93,6 +115,11 @@ step as it streams in. Restart uvicorn after editing configuration or `.env`.
 
 `POST /chat/stream` takes the same body and answers with Server-Sent Events: a `trace` event per step,
 then one `result` event holding the `/chat` response, or an `error` event.
+
+The model-facing tools are named by action, including `get_order_items`, `get_tracking_events`,
+`create_return_request`, `request_refund`, and `cancel_order`. All writes use the same policy and review
+gates. RAG and skills policy behavior stays in the established implementations; Langfuse and DeepEval
+scoring are deferred.
 
 ## Rebuild the RAG index
 

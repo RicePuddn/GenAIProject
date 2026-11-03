@@ -11,9 +11,9 @@ from __future__ import annotations
 import argparse
 import json
 
-from support_ops.shared.config import ROOT, load_config
-from support_ops.shared.policy.rag.embeddings import EMBEDDING_DIR, prepare_embeddings
-from support_ops.shared.policy.rag.pinecone_store import upload_embeddings
+from SupportOpsBot.runtime.shared.config import ROOT, load_config
+from SupportOpsBot.runtime.shared.policy.rag.embeddings import EMBEDDING_DIR, prepare_embeddings
+from SupportOpsBot.runtime.shared.policy.rag.pinecone_store import upload_embeddings
 
 
 def main() -> None:

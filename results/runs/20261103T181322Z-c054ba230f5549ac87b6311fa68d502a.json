@@ -1,0 +1,517 @@
+{
+  "schema_version": 1,
+  "run_id": "c054ba230f5549ac87b6311fa68d502a",
+  "recorded_at": "2026-11-03T18:13:22.255405+00:00",
+  "request": {
+    "ticket_id": null,
+    "setup": "s1-a",
+    "customer_id": "CUS-1001",
+    "customer_message": "What are my orders?",
+    "history": [],
+    "clock_start": null
+  },
+  "operational_summary": {
+    "setup": "s1-a",
+    "ticket_status": "resolved",
+    "llm_calls": 7,
+    "tool_call_count": 1,
+    "evidence_count": 1,
+    "write_count": 0,
+    "part_count": 0,
+    "handoff": false,
+    "cost_usd": 0.0,
+    "elapsed_s": 23.1185,
+    "event_counts": {
+      "agent_end": 1,
+      "agent_start": 1,
+      "approval": 1,
+      "control_call": 1,
+      "control_result": 1,
+      "customer_reply": 1,
+      "guard_classification": 1,
+      "llm_call": 7,
+      "llm_request": 7,
+      "llm_response": 7,
+      "node_start": 2,
+      "reply_wording_rejected": 1,
+      "ticket_saved": 1,
+      "tool_call_requested": 1,
+      "tool_end": 1,
+      "tool_start": 1,
+      "workflow_end": 1,
+      "workflow_start": 1
+    }
+  },
+  "response": {
+    "ticket_id": "TKT-620B683F0835",
+    "setup": "s1-a",
+    "strategy": {
+      "agent": "react"
+    },
+    "customer_id": "CUS-1001",
+    "reply": "Here are your recent orders:\n\n- Order ORD-2026-00026 (placed Sep 26, 2026): delivered. Total SGD 499.22. Item: Pulse Fitness Watch.\n- Order ORD-2026-00051 (placed Sep 3, 2026): delivered. Total SGD 206.01. Item: Auralis Noise-Cancelling Headphones.\n- Order ORD-2026-00001 (placed Sep 1, 2026): delivered. Total SGD 275.77. Items: Auralis Noise-Cancelling Headphones; Terra Insulated Bottle 750 ml.\n\nIf you’d like details for any specific order, just let me know the order number.",
+    "ticket_status": "resolved",
+    "note": "Provided the customer with a list of their recent orders (IDs, dates, statuses, totals, and main items) from account CUS-1001.",
+    "handoff_packet": null,
+    "evidence": [
+      {
+        "agent": "agent",
+        "tool": "get_customer_orders",
+        "arguments": {},
+        "result": {
+          "orders": [
+            {
+              "id": "ORD-2026-00026",
+              "placed_at": "2026-09-26T10:00:00Z",
+              "status": "delivered",
+              "total": "499.22",
+              "currency": "SGD",
+              "items": "Pulse Fitness Watch"
+            },
+            {
+              "id": "ORD-2026-00051",
+              "placed_at": "2026-09-03T11:00:00Z",
+              "status": "delivered",
+              "total": "206.01",
+              "currency": "SGD",
+              "items": "Auralis Noise-Cancelling Headphones"
+            },
+            {
+              "id": "ORD-2026-00001",
+              "placed_at": "2026-09-01T09:00:00Z",
+              "status": "delivered",
+              "total": "275.77",
+              "currency": "SGD",
+              "items": "Auralis Noise-Cancelling Headphones, Terra Insulated Bottle 750 ml"
+            }
+          ]
+        }
+      }
+    ],
+    "writes": [],
+    "parts": [],
+    "reply_review": {
+      "stage": "reply",
+      "decision": "approve",
+      "issues": [],
+      "reason": "The reply accurately lists the customer’s recent orders matching the evidence, avoids unsupported claims, and appropriately offers further help without asking for unnecessary information."
+    },
+    "audit_log": [],
+    "tool_call_count": 1,
+    "tool_calls": [
+      {
+        "t": 6.509,
+        "kind": "tool_call_requested",
+        "simulated_at": "2026-10-01T09:00:00+08:00",
+        "call_id": "call-1",
+        "tool": "get_customer_orders",
+        "input": {},
+        "agent": "agent",
+        "execution": {
+          "t": 6.5253,
+          "kind": "tool_end",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "call_id": "call-1",
+          "tool": "get_customer_orders",
+          "agent": "agent",
+          "elapsed_s": 0.016254,
+          "output": {
+            "orders": [
+              {
+                "id": "ORD-2026-00026",
+                "placed_at": "2026-09-26T10:00:00Z",
+                "status": "delivered",
+                "total": "499.22",
+                "currency": "SGD",
+                "items": "Pulse Fitness Watch"
+              },
+              {
+                "id": "ORD-2026-00051",
+                "placed_at": "2026-09-03T11:00:00Z",
+                "status": "delivered",
+                "total": "206.01",
+                "currency": "SGD",
+                "items": "Auralis Noise-Cancelling Headphones"
+              },
+              {
+                "id": "ORD-2026-00001",
+                "placed_at": "2026-09-01T09:00:00Z",
+                "status": "delivered",
+                "total": "275.77",
+                "currency": "SGD",
+                "items": "Auralis Noise-Cancelling Headphones, Terra Insulated Bottle 750 ml"
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "trace": {
+      "llm_calls": 7,
+      "input_tokens": 9027,
+      "output_tokens": 654,
+      "cost_usd": 0.0,
+      "elapsed_s": 23.1185,
+      "tool_call_count": 1,
+      "events": [
+        {
+          "t": 0.2316,
+          "kind": "workflow_start",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "setup": "s1-a",
+          "strategy": {
+            "agent": "react"
+          },
+          "history_turns": 0
+        },
+        {
+          "t": 0.2317,
+          "kind": "node_start",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "node": "guard"
+        },
+        {
+          "t": 0.2317,
+          "kind": "llm_request",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "role": "guard"
+        },
+        {
+          "t": 3.4462,
+          "kind": "llm_call",
+          "role": "guard",
+          "model": "gpt5",
+          "input_tokens": 120,
+          "output_tokens": 10,
+          "cost_usd": 0.0,
+          "latency_s": 3.214,
+          "cached": false
+        },
+        {
+          "t": 3.4463,
+          "kind": "llm_response",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "role": "guard",
+          "tool_calls": [],
+          "latency_s": 3.214
+        },
+        {
+          "t": 3.4463,
+          "kind": "guard_classification",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "label": "benign",
+          "malicious_score": 0.0,
+          "threshold": 0.5,
+          "role": "customer",
+          "offset": 0
+        },
+        {
+          "t": 3.4503,
+          "kind": "agent_start",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "agent": "agent",
+          "strategy": "react"
+        },
+        {
+          "t": 3.455,
+          "kind": "llm_request",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "role": "agent"
+        },
+        {
+          "t": 6.5089,
+          "kind": "llm_call",
+          "role": "agent",
+          "model": "gpt5",
+          "input_tokens": 2070,
+          "output_tokens": 20,
+          "cost_usd": 0.0,
+          "latency_s": 3.054,
+          "cached": false
+        },
+        {
+          "t": 6.5089,
+          "kind": "llm_response",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "role": "agent",
+          "tool_calls": [
+            "get_customer_orders"
+          ],
+          "latency_s": 3.054
+        },
+        {
+          "t": 6.509,
+          "kind": "tool_call_requested",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "call_id": "call-1",
+          "tool": "get_customer_orders",
+          "input": {},
+          "agent": "agent"
+        },
+        {
+          "t": 6.509,
+          "kind": "tool_start",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "call_id": "call-1",
+          "tool": "get_customer_orders",
+          "input": {},
+          "agent": "agent"
+        },
+        {
+          "t": 6.5253,
+          "kind": "tool_end",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "call_id": "call-1",
+          "tool": "get_customer_orders",
+          "agent": "agent",
+          "elapsed_s": 0.016254,
+          "output": {
+            "orders": [
+              {
+                "id": "ORD-2026-00026",
+                "placed_at": "2026-09-26T10:00:00Z",
+                "status": "delivered",
+                "total": "499.22",
+                "currency": "SGD",
+                "items": "Pulse Fitness Watch"
+              },
+              {
+                "id": "ORD-2026-00051",
+                "placed_at": "2026-09-03T11:00:00Z",
+                "status": "delivered",
+                "total": "206.01",
+                "currency": "SGD",
+                "items": "Auralis Noise-Cancelling Headphones"
+              },
+              {
+                "id": "ORD-2026-00001",
+                "placed_at": "2026-09-01T09:00:00Z",
+                "status": "delivered",
+                "total": "275.77",
+                "currency": "SGD",
+                "items": "Auralis Noise-Cancelling Headphones, Terra Insulated Bottle 750 ml"
+              }
+            ]
+          }
+        },
+        {
+          "t": 6.5301,
+          "kind": "llm_request",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "role": "agent"
+        },
+        {
+          "t": 10.6018,
+          "kind": "llm_call",
+          "role": "agent",
+          "model": "gpt5",
+          "input_tokens": 2303,
+          "output_tokens": 156,
+          "cost_usd": 0.0,
+          "latency_s": 4.071,
+          "cached": false
+        },
+        {
+          "t": 10.6019,
+          "kind": "llm_response",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "role": "agent",
+          "tool_calls": [],
+          "latency_s": 4.071
+        },
+        {
+          "t": 10.6077,
+          "kind": "llm_request",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "role": "agent"
+        },
+        {
+          "t": 14.2912,
+          "kind": "llm_call",
+          "role": "agent",
+          "model": "gpt5",
+          "input_tokens": 2467,
+          "output_tokens": 57,
+          "cost_usd": 0.0,
+          "latency_s": 3.683,
+          "cached": false
+        },
+        {
+          "t": 14.2913,
+          "kind": "llm_response",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "role": "agent",
+          "tool_calls": [
+            "finish"
+          ],
+          "latency_s": 3.683
+        },
+        {
+          "t": 14.2915,
+          "kind": "control_call",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "call_id": "call-2",
+          "tool": "finish",
+          "input": {
+            "outcome": "resolved",
+            "note": "Provided the customer with a list of their recent orders (IDs, dates, statuses, totals, and main items) from account CUS-1001."
+          },
+          "agent": "agent"
+        },
+        {
+          "t": 14.2916,
+          "kind": "control_result",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "call_id": "call-2",
+          "tool": "finish",
+          "agent": "agent",
+          "elapsed_s": 0.000111,
+          "output": {
+            "status": "finished"
+          }
+        },
+        {
+          "t": 14.2916,
+          "kind": "agent_end",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "agent": "agent",
+          "finished": {
+            "outcome": "resolved",
+            "note": "Provided the customer with a list of their recent orders (IDs, dates, statuses, totals, and main items) from account CUS-1001."
+          },
+          "error": null,
+          "stopped": null
+        },
+        {
+          "t": 14.2917,
+          "kind": "node_start",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "node": "reply"
+        },
+        {
+          "t": 14.2919,
+          "kind": "llm_request",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "role": "reply_writer"
+        },
+        {
+          "t": 17.9564,
+          "kind": "llm_call",
+          "role": "reply_writer",
+          "model": "gpt5",
+          "input_tokens": 684,
+          "output_tokens": 208,
+          "cost_usd": 0.0,
+          "latency_s": 3.664,
+          "cached": false
+        },
+        {
+          "t": 17.9565,
+          "kind": "llm_response",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "role": "reply_writer",
+          "tool_calls": [],
+          "latency_s": 3.664
+        },
+        {
+          "t": 17.9568,
+          "kind": "reply_wording_rejected",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "issues": [
+            "the reply shows internal IDs ['CUS-1001']: remove them and describe the policy or record in plain words (the order number may stay)"
+          ]
+        },
+        {
+          "t": 17.957,
+          "kind": "llm_request",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "role": "reply_writer"
+        },
+        {
+          "t": 21.0254,
+          "kind": "llm_call",
+          "role": "reply_writer",
+          "model": "gpt5",
+          "input_tokens": 723,
+          "output_tokens": 155,
+          "cost_usd": 0.0,
+          "latency_s": 3.068,
+          "cached": false
+        },
+        {
+          "t": 21.0256,
+          "kind": "llm_response",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "role": "reply_writer",
+          "tool_calls": [],
+          "latency_s": 3.068
+        },
+        {
+          "t": 21.0259,
+          "kind": "llm_request",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "role": "approver"
+        },
+        {
+          "t": 23.0958,
+          "kind": "llm_call",
+          "role": "approver",
+          "model": "gpt5",
+          "input_tokens": 660,
+          "output_tokens": 48,
+          "cost_usd": 0.0,
+          "latency_s": 2.07,
+          "cached": false
+        },
+        {
+          "t": 23.0959,
+          "kind": "llm_response",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "role": "approver",
+          "tool_calls": [],
+          "latency_s": 2.07
+        },
+        {
+          "t": 23.0962,
+          "kind": "approval",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "stage": "reply",
+          "decision": "approve",
+          "issues": [],
+          "reason": "The reply accurately lists the customer’s recent orders matching the evidence, avoids unsupported claims, and appropriately offers further help without asking for unnecessary information."
+        },
+        {
+          "t": 23.0962,
+          "kind": "customer_reply",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "reply": "Here are your recent orders:\n\n- Order ORD-2026-00026 (placed Sep 26, 2026): delivered. Total SGD 499.22. Item: Pulse Fitness Watch.\n- Order ORD-2026-00051 (placed Sep 3, 2026): delivered. Total SGD 206.01. Item: Auralis Noise-Cancelling Headphones.\n- Order ORD-2026-00001 (placed Sep 1, 2026): delivered. Total SGD 275.77. Items: Auralis Noise-Cancelling Headphones; Terra Insulated Bottle 750 ml.\n\nIf you’d like details for any specific order, just let me know the order number."
+        },
+        {
+          "t": 23.1184,
+          "kind": "ticket_saved",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "status": "resolved",
+          "order_id": null
+        },
+        {
+          "t": 23.1184,
+          "kind": "workflow_end",
+          "simulated_at": "2026-10-01T09:00:00+08:00",
+          "status": "resolved",
+          "llm_calls": 7,
+          "elapsed_s": 23.1184
+        }
+      ]
+    },
+    "history": [
+      {
+        "role": "customer",
+        "content": "What are my orders?"
+      },
+      {
+        "role": "agent",
+        "content": "Here are your recent orders:\n\n- Order ORD-2026-00026 (placed Sep 26, 2026): delivered. Total SGD 499.22. Item: Pulse Fitness Watch.\n- Order ORD-2026-00051 (placed Sep 3, 2026): delivered. Total SGD 206.01. Item: Auralis Noise-Cancelling Headphones.\n- Order ORD-2026-00001 (placed Sep 1, 2026): delivered. Total SGD 275.77. Items: Auralis Noise-Cancelling Headphones; Terra Insulated Bottle 750 ml.\n\nIf you’d like details for any specific order, just let me know the order number."
+      }
+    ]
+  }
+}
