@@ -14,9 +14,8 @@ uv pip install --python .venv/bin/python -e ".[rag,demo]"
 cp .env.example .env
 ```
 
-The default LLM provider is local Ollama; no provider API key is needed. An optional Azure OpenAI
-profile uses the APIM endpoint and deployment aliases listed in the Meeting Assistant report. Set
-`PINECONE_API_KEY` for the RAG setups (S1, S3, S5, S7). The default local database settings are:
+The LLM provider is local Ollama; no provider API key is needed. Set `PINECONE_API_KEY` for the RAG
+setups (S1, S3, S5, S7). The default local database settings are:
 
 ```dotenv
 POSTGRES_PASSWORD=support_ops_local
@@ -31,7 +30,8 @@ reset the password of an existing database volume.
 
 The API uses the OpenAI-compatible client already installed by this project. Ollama exposes the local
 endpoint at `http://localhost:11434/v1`; the client supplies a placeholder API key which the local
-server ignores. The default profile uses `lfm3:latest` for every role, including the guard.
+server ignores. The default profile uses `lfm3:latest` for every role. The optional
+[`configs/ollama.yaml`](configs/ollama.yaml) profile uses `ornith:9b` for every role.
 
 Pull the model if it is not installed:
 
@@ -40,31 +40,10 @@ ollama pull lfm3:latest
 ```
 
 Restart Ollama and the API after changing models. If your installed model has a different tag, update the role names in
-[`configs/base.yaml`](configs/base.yaml). If `SUPPORT_OPS_CONFIG` selects the optional
-[`configs/ollama.yaml`](configs/ollama.yaml) overlay, update the role names there too. Ollama supports tool calls through its OpenAI-compatible
+[`configs/base.yaml`](configs/base.yaml) or [`configs/ollama.yaml`](configs/ollama.yaml). Ollama supports tool calls through its OpenAI-compatible
 chat endpoint, but tool-use quality depends on the model. See the [Ollama API compatibility docs](https://docs.ollama.com/api/openai-compatibility),
 [tool-calling docs](https://docs.ollama.com/capabilities/tool-calling), and the
 [LFM model page](https://ollama.com/library/lfm3).
-
-## Use the Azure OpenAI deployments
-
-The optional [`configs/azure_openai.yaml`](configs/azure_openai.yaml) profile defaults every role to
-`gpt5`. The report's saved
-summary/evaluation files use `gpt5`; its generator also lists `gpt5.2`, `gpt5-mini`, and `gpt4o-mini`.
-To select another alias for a role, change that role in the overlay. `gpt5.2` requires a configured
-`GPT52_DEPLOYMENT_NAME`.
-
-Copy the approved endpoint, key, API version, and deployment-name values into this project's `.env`
-using the variable names in [`.env.example`](.env.example), then set:
-
-```dotenv
-SUPPORT_OPS_CONFIG=configs/azure_openai.yaml
-```
-
-Restart the API after changing the profile. The Azure profile uses `AZURE_OPENAI_APIM_API_KEY` as
-the client key and `Ocp-Apim-Subscription-Key` header. Token pricing is not configured by default,
-so the per-ticket dollar budget is not meaningful until `llm.pricing` is filled with the rates for
-your APIM deployments.
 
 On Windows, use `.venv/Scripts/` in place of `.venv/bin/` below.
 

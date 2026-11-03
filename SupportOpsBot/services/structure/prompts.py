@@ -87,15 +87,17 @@ facts_system_prompt = dedent("""\
     """)
 
 propose_system_prompt = dedent("""\
-    The facts are gathered (evidence). Now propose the outcome as one JSON object, exactly these fields: {schema}
-    
-    - outcome resolved: the request is answered from the evidence, or the writes carry out what the customer asked for; note what to tell the customer.
-    - outcome awaiting_customer: only the customer can supply a missing fact; note the question to ask.
-    - outcome awaiting_human: a person must decide, the customer asks for one, or the writes below cannot do what they ask (such as an account change); note why. Nothing is written.
-    - writes: the actions the customer asked for, in order: refund (recorded as pending; no money moves), return_request (with the order items coming back) or cancel, each with its order, amount (refunds), items, reason and cited_clauses. Cite the clause IDs or files a policy search or read returned; a policy check's rule sources cannot be cited. Leave writes empty for a question. The workflow checks each write against the rules, has it reviewed when that is required, then makes it.
-    - On a write, set policy_exception when it relies on an exception to the main rule, and route approver or human when the case needs more than the rules require; both only ever make it stricter.
-    - review_reason: how the retrieved policy and the recorded facts support the writes, for the independent reviewer.
-    - If feedback is set, the last proposal was refused for that reason: correct it, or answer the customer without the write.
+    The evidence is gathered. Choose the workflow outcome; do not write a customer-facing reply.
+    Return exactly one JSON object matching the response schema supplied by the runtime. Do not return a policy result, tool output, or fields such as `answer` and `sources`.
+
+    - `outcome`: `resolved` when the request is answered from evidence or requested writes are handled; `awaiting_customer` only when a fact the customer can supply is missing; `awaiting_human` when a person must decide or the request cannot be handled by the available writes.
+    - `note`: a concise summary of the outcome; for `awaiting_customer`, the question to ask; for `awaiting_human`, why a person is needed.
+    - `writes`: requested actions in order: `refund`, `return_request`, or `cancel`. Include the correct order, amount for a refund, items, reason, and cited policy clauses when applicable. Leave empty for an information-only question. A policy check's rule sources are not citable clauses. The workflow independently checks, reviews when required, and executes each proposed write.
+    - Set `policy_exception` only when relying on an exception to the main rule. Set `route` to `approver` or `human` only when the case needs stricter review.
+    - `review_reason`: briefly connect the evidence and retrieved policy to the proposed writes; use null when there are no writes.
+    - If feedback is present, correct the refused proposal or answer without the write.
+
+    Example for an information-only question: {"outcome":"resolved","note":"Answered the question using the retrieved policy.","writes":[],"review_reason":null}
     """)
 
 specialists_system_prompt = dedent("""\

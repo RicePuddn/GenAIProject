@@ -1,4 +1,7 @@
-"""LLM access behind one small interface for Ollama and Azure OpenAI."""
+"""LLM access behind one small interface.
+
+`OpenAICompatLLM` talks to the local Ollama OpenAI-compatible endpoint.
+"""
 
 from __future__ import annotations
 
@@ -20,7 +23,8 @@ _ENC = tiktoken.get_encoding("o200k_base")
 
 
 class ProviderError(Exception):
-    """The configured provider failed after the client's retries."""
+    """The local Ollama request failed after the client's own retries. No
+    agent can fix it, so it ends the turn, and the ticket waits to be sent again."""
 
 
 def count_tokens(text: str) -> int:
@@ -57,28 +61,23 @@ class ChatResult:
 
 class LLM(Protocol):
     def chat(self, role: str, messages: list[dict[str, Any]], tools: list[dict] | None = None,
-             tracer: Tracer | None = None, json_mode: bool = False) -> ChatResult: ...
+             tracer: Tracer | None = None, response_schema: dict[str, Any] | None = None) -> ChatResult: ...
 
 
 class OpenAICompatLLM:
     def __init__(self, cfg: dict):
+        from openai import OpenAI
+
         llm = cfg["llm"]
         self.provider = llm["provider"]
-        if self.provider not in {"ollama", "azure_openai"}:
-            raise ValueError(f"unsupported LLM provider {self.provider!r}")
+        if self.provider != "ollama":
+            raise ValueError("only the local Ollama provider is supported")
         self.models: dict[str, str] = llm["models"]
         self.pricing: dict[str, dict[str, float]] = llm["pricing"]
         self.temperature = llm["temperature"]
-        self.temperature_by_model: dict[str, float | None] = llm.get("temperature_by_model", {})
         self.max_tokens = llm["max_tokens"]
         self.max_tokens_by_role: dict[str, int] = llm["max_tokens_by_role"]
         self.cache_enabled_by_role: dict[str, bool] = llm["cache_enabled_by_role"]
-        self.azure_deployment_envs: dict[str, str] = llm.get("deployment_envs", {})
-        self.azure_deployment_defaults: dict[str, str] = llm.get("deployment_defaults", {})
-        self.completion_token_models = set(llm.get("completion_token_models", []))
-        self.reasoning_effort_by_role: dict[str, str] = llm.get("reasoning_effort_by_role", {})
-        self.reasoning_effort_by_model: dict[str, str] = llm.get("reasoning_effort_by_model", {})
-        self.no_parallel_tools_models = set(llm.get("no_parallel_tools_models", []))
         self.seed = cfg["run"]["seed"]
         # With temperature 0 and a fixed seed, the request alone would make every trial replay the first.
         self.trial = cfg["run"]["trial"]
@@ -89,59 +88,25 @@ class OpenAICompatLLM:
         if not api_key and self.provider == "ollama":
             # Ollama's local OpenAI-compatible endpoint requires a value the server ignores.
             api_key = "ollama"
-        if self.provider == "ollama":
-            from openai import OpenAI
-
-            self.client = OpenAI(base_url=llm["base_url"], api_key=api_key, max_retries=4)
-        else:
-            from openai import AzureOpenAI
-
-            if not api_key:
-                raise RuntimeError(f"set {api_key_env or 'the configured Azure API key'} (see .env.example)")
-            endpoint_env, version_env = llm["azure_endpoint_env"], llm["api_version_env"]
-            endpoint, api_version = os.environ.get(endpoint_env), os.environ.get(version_env)
-            missing = [name for name, value in ((endpoint_env, endpoint), (version_env, api_version)) if not value]
-            if missing:
-                raise RuntimeError("set the configured Azure variables: " + ", ".join(missing))
-            apim_header_env = llm.get("apim_header_env")
-            apim_key = os.environ.get(apim_header_env) if apim_header_env else None
-            headers = {"Ocp-Apim-Subscription-Key": apim_key} if apim_key else None
-            self.client = AzureOpenAI(api_key=api_key, azure_endpoint=endpoint, api_version=api_version,
-                                      default_headers=headers, max_retries=4)
+        self.client = OpenAI(base_url=llm["base_url"], api_key=api_key, max_retries=4)
 
     def _cost(self, model: str, tin: int, tout: int) -> float:
         p = self.pricing.get(model)
         return 0.0 if p is None else (tin * p["input"] + tout * p["output"]) / 1e6
 
-    def chat(self, role, messages, tools=None, tracer=None, json_mode=False) -> ChatResult:
+    def chat(self, role, messages, tools=None, tracer=None, response_schema=None) -> ChatResult:
         model = self.models[role]
-        provider_model = model
-        if self.provider == "azure_openai":
-            deployment_env = self.azure_deployment_envs.get(model)
-            provider_model = os.environ.get(deployment_env) if deployment_env else None
-            provider_model = provider_model or self.azure_deployment_defaults.get(model)
-            if not provider_model:
-                raise RuntimeError(f"Azure deployment for model {model!r} is not configured")
-        req: dict[str, Any] = {"model": provider_model, "messages": messages}
-        temperature = self.temperature_by_model.get(model, self.temperature)
-        if temperature is not None:
-            req["temperature"] = temperature
-        max_tokens = self.max_tokens_by_role.get(role, self.max_tokens)
-        if self.provider == "azure_openai" and model in self.completion_token_models:
-            req["max_completion_tokens"] = max_tokens
-            effort = self.reasoning_effort_by_role.get(role) or self.reasoning_effort_by_model.get(model)
-            if effort:
-                req["reasoning_effort"] = effort
-                if tools and model in self.no_parallel_tools_models:
-                    req["parallel_tool_calls"] = False
-        else:
-            req["max_tokens"] = max_tokens
-        if self.provider == "ollama":
-            req["seed"] = self.seed
+        req: dict[str, Any] = {
+            "model": model, "messages": messages, "temperature": self.temperature,
+            "max_tokens": self.max_tokens_by_role.get(role, self.max_tokens), "seed": self.seed,
+        }
         if tools:
             req["tools"] = tools
-        if json_mode:
-            req["response_format"] = {"type": "json_object"}
+        if response_schema is not None:
+            req["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"schema": response_schema},
+            }
         key = hashlib.sha256(json.dumps({**req, "trial": self.trial}, sort_keys=True, default=str).encode()).hexdigest()
         cache_enabled = self.cache_enabled_by_role.get(role, True)
         cached = self._cache_get(key) if cache_enabled else None

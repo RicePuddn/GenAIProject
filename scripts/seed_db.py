@@ -7,6 +7,12 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
+from pathlib import Path
+
+# Running ``python scripts/seed_db.py`` puts scripts/, not the repository root,
+# on sys.path. Add the project root so the package import below works directly.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import psycopg
 from psycopg import sql

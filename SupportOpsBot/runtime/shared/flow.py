@@ -78,7 +78,7 @@ class PartFlow:
         try:
             proposal = chat_json(self.ctx, self.agent.role, [
                 {"role": "system", "content": self.agent.prompt + "\n\n" + prompts.load(
-                    "propose", schema=json.dumps(Proposal.model_json_schema()))},
+                    "propose")},
                 {"role": "user", "content": json.dumps({**self.brief, "evidence": self._own_evidence(),
                                                         "feedback": state["feedback"]}, default=str)},
             ], Proposal, before_call=self.ctx.budget.agent_step)

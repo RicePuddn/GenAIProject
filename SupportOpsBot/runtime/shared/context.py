@@ -45,10 +45,11 @@ class TurnContext:
         self.tracer.log(kind, simulated_at=self.clock.now().isoformat(), **payload)
 
     def chat(self, role: str, messages: list[dict[str, Any]], *, tools: list[dict] | None = None,
-             json_mode: bool = False) -> ChatResult:
+             response_schema: dict[str, Any] | None = None) -> ChatResult:
         self.log("llm_request", role=role)
         previous_llm_calls = self.tracer.llm_calls
-        result = self.llm.chat(role, messages, tools=tools, tracer=self.tracer, json_mode=json_mode)
+        result = self.llm.chat(role, messages, tools=tools, tracer=self.tracer,
+                               response_schema=response_schema)
         latency = None
         if self.tracer.llm_calls > previous_llm_calls:
             latency = self.tracer.of_kind("llm_call")[-1]["latency_s"]
@@ -80,7 +81,7 @@ class TurnContext:
 
 
 def parse_json(content: str | None, model: type[BaseModel] | None = None) -> Any:
-    """Parse a json_mode reply, optionally into a model. Raises ValueError on bad output."""
+    """Parse a JSON reply, optionally into a model. Raises ValueError on bad output."""
     try:
         data = json.loads(content or "")
     except json.JSONDecodeError as exc:
@@ -95,13 +96,13 @@ def parse_json(content: str | None, model: type[BaseModel] | None = None) -> Any
 
 def chat_json(ctx: TurnContext, role: str, messages: list[dict[str, Any]], model: type[BaseModel], *,
               before_call: Callable[[], None], prepare: Callable[[Any], Any] = lambda data: data) -> BaseModel:
-    """A json_mode call parsed into `model`. A malformed reply is sent back with the validation error
+    """A schema-constrained JSON call parsed into `model`. A malformed reply is sent back with the validation error
     for another try, `retries.invalid_json` times; then the last ValueError is raised. `before_call`
     checks the budget before each try; `prepare` adjusts the parsed JSON before validation."""
     messages, attempts = list(messages), ctx.retries.invalid_json + 1
     for attempt in range(1, attempts + 1):
         before_call()
-        reply = ctx.chat(role, messages, json_mode=True)
+        reply = ctx.chat(role, messages, response_schema=model.model_json_schema())
         try:
             return parse_json(json.dumps(prepare(parse_json(reply.content))), model)
         except (ValueError, TypeError) as exc:
