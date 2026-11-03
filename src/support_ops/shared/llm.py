@@ -1,7 +1,6 @@
 """LLM access behind one small interface.
 
-`OpenAICompatLLM` talks to the local Ollama OpenAI-compatible endpoint. Tests use the scripted
-double in tests/fakes.py.
+`OpenAICompatLLM` talks to the local Ollama OpenAI-compatible endpoint.
 """
 
 from __future__ import annotations

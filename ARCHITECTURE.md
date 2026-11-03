@@ -107,9 +107,6 @@ retrieval profiles the RAG notebook compares.
 - `scripts/`: `seed_db.py`, `build_rag_index.py`, `sync_skills.py`.
 - `notebooks/rag_evaluation.ipynb`: retrieval evaluation; results in `results/rag/`.
 
-## Tests
+## Verification
 
-`tests/fakes.py` has a scripted LLM, an in-memory database and a fake retriever, so no test needs an
-API key, PostgreSQL or Pinecone. `tests/setups/` runs each behaviour scenario in all 24 variants from
-one description (`tests/setups/scripts.py`). `tests/shared/` unit-tests the gates, rules, tools,
-strategies and policy. Tests against a real database run when `SUPPORT_OPS_TEST_DATABASE_URL` is set.
+This POC has no automated test suite. Verify changes with the relevant local service or workflow.

@@ -10,7 +10,7 @@ Requires Python 3.11–3.13, uv, and Docker with Docker Compose. Run commands fr
 
 ```bash
 uv venv --python 3.12 .venv
-uv pip install --python .venv/bin/python -e ".[dev,rag,demo]"
+uv pip install --python .venv/bin/python -e ".[rag,demo]"
 cp .env.example .env
 ```
 
@@ -104,12 +104,3 @@ After a policy change, refresh the skills files and the index from the PDFs in `
 ```
 
 The retrieval evaluation is `notebooks/rag_evaluation.ipynb`, with the profiles in `configs/rag/`.
-
-## Run the tests
-
-```bash
-.venv/bin/python -m pytest -q
-```
-
-The suite needs no API key, database or Pinecone. To include the tests against a real database, seed a
-throwaway database and set `SUPPORT_OPS_TEST_DATABASE_URL`; those tests delete all its rows.

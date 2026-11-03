@@ -134,11 +134,6 @@ GenAIProject/
 ├── apps/demo.py               one Streamlit page
 ├── scripts/                   seed_db.py, build_rag_index.py, sync_skills.py
 ├── notebooks/                 rag_evaluation.ipynb
-├── tests/
-│   ├── fakes.py               scripted LLM, fake database, fake retriever
-│   ├── shared/                unit tests for gates, rules, tools, policy
-│   ├── setups/                behaviour tests: message in → expected outcome and writes, for every setup
-│   └── test_api.py, test_demo.py
 └── results/                   run outputs (gitignored except summaries)
 ```
 

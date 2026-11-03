@@ -44,6 +44,3 @@ everything else:
 ```bash
 .venv/bin/python scripts/seed_db.py --reset
 ```
-
-To test real database reads and writes, seed an isolated database and set
-`SUPPORT_OPS_TEST_DATABASE_URL` before running `pytest`. The write tests delete all rows in that database.
