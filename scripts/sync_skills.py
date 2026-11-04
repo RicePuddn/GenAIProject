@@ -9,7 +9,27 @@ from SupportOpsBot.runtime.shared.config import ROOT
 from SupportOpsBot.runtime.shared.policy.rag.loader import NUMBERED_HEADING, load_corpus, read_document
 
 
-# Keep the existing skill filenames while copying every complete PDF clause.
+# Keep each read small enough for an agent to use one policy topic at a time.
+RETURNS_FILES = {
+    "1": "eligibility.md",
+    "2": "eligibility.md",
+    "3": "evidence.md",
+    "4": "return-procedure.md",
+    "5": "shipping-fees.md",
+    "6": "refunds.md",
+    "7": "disputes.md",
+}
+SHIPPING_FILES = {
+    "1": "shipping-options.md",
+    "2": "shipping-options.md",
+    "3": "shipping-fees.md",
+    "4": "changes.md",
+    "5": "tracking.md",
+    "6": "partial-deliveries.md",
+    "7": "delivery-problems.md",
+}
+
+
 def sync_skills() -> None:
     files: dict[tuple[str, str], list[str]] = {}
     parent_titles = {}
@@ -22,9 +42,9 @@ def sync_skills() -> None:
     seen_parents: set[tuple[str, str]] = set()
     for clause in load_corpus(ROOT / "data/policy/pdf"):
         if clause.domain == "orders-and-shipping":
-            filename = "changes.md" if clause.section_id.split(".")[0] == "4" else "tracking.md"
+            filename = SHIPPING_FILES[clause.section_id.split(".")[0]]
         else:
-            filename = "refunds.md" if clause.section_id.split(".")[0] == "6" else "eligibility.md"
+            filename = RETURNS_FILES[clause.section_id.split(".")[0]]
         parent = clause.section_id.split(".")[0]
         parent_key = (clause.source, parent)
         body = ""

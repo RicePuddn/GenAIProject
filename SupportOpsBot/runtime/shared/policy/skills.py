@@ -69,12 +69,12 @@ class SkillsPolicy:
     arguments = PolicyArguments
     description = PolicyArguments.__doc__
     prompt_hint = ("Use the available policy filenames to choose a matching skill (call policy with "
-                   "action list if none are provided), then call policy with action open and that skill "
-                   "to read its SKILL.md. Choose a clause named there and call policy with action read, "
-                   "the same skill, and the exact clause filename. Only open reads SKILL.md; never call "
-                   "read with SKILL.md. read requires both skill and a clause filename. After an error, "
-                   "correct the arguments from its message instead "
-                   "of repeating the same call. Never invent policy filenames or missing facts.")
+                   "action list if none are provided). Read skills in two separate calls: first "
+                   "policy(action='open', skill='<skill>') with NO file field; this reads SKILL.md. "
+                   "Then policy(action='read', skill='<same skill>', file='<filename from SKILL.md>'). "
+                   "Never include file in an open call, even when you already know the filename. "
+                   "Never use read for SKILL.md. After an error, correct the arguments from its message "
+                   "instead of repeating the same call. Never invent policy filenames or missing facts.")
 
     def __init__(self, root: str | Path = ROOT / "data/policy/skills", rules: Rules | None = None):
         path = Path(root)

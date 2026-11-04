@@ -84,6 +84,11 @@ def setup_label(setup_id: str, setup: dict[str, Any]) -> str:
 def show_tool_result(tool: str, output: dict[str, Any]) -> None:
     if "error" in output:
         st.error(output["error"])
+    elif tool == "policy" and "content" in output:
+        st.markdown(f"**Policy file:** `{output.get('skill', '')}/{output.get('file', '')}`")
+        st.markdown(output["content"])
+    elif tool == "policy" and "catalog" in output:
+        st.dataframe(output["catalog"], hide_index=True, width="stretch")
     elif tool == "policy" and "clauses" in output:
         st.caption(f"Retrieved for query: “{output.get('query', '')}”")
         st.dataframe(

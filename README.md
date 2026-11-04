@@ -26,24 +26,14 @@ SUPPORT_OPS_DATABASE_URL=postgresql://support_ops:support_ops_local@127.0.0.1:54
 If you change the password or port, update the URL to match. Changing the password in `.env` does not
 reset the password of an existing database volume.
 
-## Start Ollama
+## Configure the LLM provider
 
-The API uses the OpenAI-compatible client already installed by this project. Ollama exposes the local
-endpoint at `http://localhost:11434/v1`; the client supplies a placeholder API key which the local
-server ignores. The default profile uses `lfm3:latest` for every role. The optional
-[`configs/ollama.yaml`](configs/ollama.yaml) profile uses `ornith:9b` for every role.
+The default profile uses OpenRouter's OpenAI-compatible API with `openai/gpt-oss-120b` for every role.
+Copy `.env.example` to `.env` and set `OPENROUTER_API_KEY` to a key from your OpenRouter account.
+The provider endpoint is `https://openrouter.ai/api/v1`.
 
-Pull the model if it is not installed:
-
-```bash
-ollama pull lfm3:latest
-```
-
-Restart Ollama and the API after changing models. If your installed model has a different tag, update the role names in
-[`configs/base.yaml`](configs/base.yaml) or [`configs/ollama.yaml`](configs/ollama.yaml). Ollama supports tool calls through its OpenAI-compatible
-chat endpoint, but tool-use quality depends on the model. See the [Ollama API compatibility docs](https://docs.ollama.com/api/openai-compatibility),
-[tool-calling docs](https://docs.ollama.com/capabilities/tool-calling), and the
-[LFM model page](https://ollama.com/library/lfm3).
+To use local Ollama instead, set `SUPPORT_OPS_CONFIG=configs/ollama.yaml` in `.env` and start Ollama
+with the model named in that profile. Restart the API after changing provider or model settings.
 
 On Windows, use `.venv/Scripts/` in place of `.venv/bin/` below.
 

@@ -32,14 +32,31 @@ def preflight(base):
     from SupportOpsBot.runtime.shared.config import load_env
     load_env()
     r=requests.get(base.rstrip('/')+'/customers',timeout=15); r.raise_for_status()
-    if not any(x.get('id')=='CUS-EVAL-001' for x in r.json()): raise RuntimeError('CUS-EVAL-001 missing from API database')
-    # Read-only direct checks ensure all ten seeded tickets/orders exist and belong to the evaluation customer.
+    if not r.ok: r.raise_for_status()
+    return {x.get('id') for x in r.json()}
+
+def reset_case_state(ticket_id):
+    """Remove only this test ticket's writes, then restore canonical seed rows without truncating DB."""
+    from SupportOpsBot.runtime.shared.config import load_env
     import psycopg
+    load_env()
     dsn=os.environ.get('SUPPORT_OPS_DATABASE_URL')
-    if not dsn: raise RuntimeError('SUPPORT_OPS_DATABASE_URL is required for seeded-record preflight')
-    with psycopg.connect(dsn,connect_timeout=5,options='-c default_transaction_read_only=on') as c, c.cursor() as cur:
-        cur.execute("SELECT count(*) FROM support_tickets WHERE id LIKE %s AND customer_id=%s",('TKT-EVAL-%','CUS-EVAL-001'))
-        if cur.fetchone()[0] != 10: raise RuntimeError('Expected all ten evaluation tickets for CUS-EVAL-001')
+    if not dsn: raise RuntimeError('SUPPORT_OPS_DATABASE_URL is required to reset case fixtures')
+    with psycopg.connect(dsn,connect_timeout=5) as conn, conn.cursor() as cur:
+        cur.execute("SELECT operation, result FROM backend_writes WHERE ticket_id=%s",(ticket_id,))
+        for operation, result in cur.fetchall():
+            write_id=(result or {}).get('write_id')
+            if not write_id: continue
+            if operation == 'refund':
+                cur.execute("DELETE FROM refunds WHERE id=%s",(write_id,))
+            elif operation == 'return':
+                cur.execute("DELETE FROM return_items WHERE return_id=%s",(write_id,))
+                cur.execute("DELETE FROM returns WHERE id=%s",(write_id,))
+        cur.execute("DELETE FROM backend_writes WHERE ticket_id=%s",(ticket_id,))
+        cur.execute("DELETE FROM support_tickets WHERE id=%s",(ticket_id,))
+    # Upsert the committed fixtures (including orders/items/shipments) without deleting unrelated data.
+    from scripts.seed_db import seed
+    seed(dsn)
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
@@ -49,22 +66,31 @@ def main():
     p.add_argument('--dry-run',action='store_true')
     p.add_argument('--judge-model',default=os.getenv('DEEPEVAL_JUDGE_MODEL','ollama/ornith:9b'))
     p.add_argument('--output',type=Path,default=Path('deepeval/results.jsonl'))
-    a=p.parse_args(); cases=read_cases(); setups=a.setup or SETUP_IDS
+    a=p.parse_args(); cases=read_cases(); setups=a.setup or ['s1-a']
     if a.case: cases=[c for c in cases if c['ticket_id'] in a.case or c['case_id'] in a.case]
     if not cases: p.error('no cases selected')
     if a.dry_run:
         print(json.dumps({'case_count':len(cases),'setup_count':len(setups),'runs':len(cases)*len(setups),'setups':setups,'cases':[c['ticket_id'] for c in cases]},indent=2)); return 0
-    preflight(a.api)
+    customer_ids = preflight(a.api)
+    missing = sorted({c['customer_id'] for c in cases} - customer_ids)
+    if missing: raise RuntimeError(f'customers missing from API database: {missing}')
     a.output.parent.mkdir(parents=True,exist_ok=True)
     with a.output.open('a') as out:
       for c in cases:
-       expected=json.loads(c['expected_tool_calls_by_setup'])[None] if False else json.loads(c['expected_tool_calls_by_setup'])
+       expected_by_setup=json.loads(c.get('expected_tool_calls_by_setup') or '{}')
        for setup in setups:
-        payload={'customer_message':c['Query'],'customer_id':c['customer_id'],'ticket_id':c['ticket_id'],'setup':setup,'clock_start':c['clock_start'],'history':[]}
-        response=requests.post(a.api.rstrip('/')+'/chat',json=payload,timeout=900); response.raise_for_status(); data=response.json()
-        steps=events_as_steps(data.get('trace',{}).get('events',[]))
+        reset_case_state(c['ticket_id'])
+        expected=expected_by_setup.get(setup, json.loads(c.get('expected_tools') or '[]'))
+        turns=json.loads(c.get('Turns') or c.get('turns') or '[]') or [c['Query']]
+        history=[]; all_tools=[]; all_events=[]; data={}; writes=[]
+        for message in turns:
+         payload={'customer_message':message,'customer_id':c['customer_id'],'ticket_id':c['ticket_id'],'setup':setup,'clock_start':c['clock_start'],'history':history}
+         response=requests.post(a.api.rstrip('/')+'/chat',json=payload,timeout=900); response.raise_for_status(); data=response.json()
+         all_tools.extend(data.get('tool_calls',[])); all_events.extend(data.get('trace',{}).get('events',[])); writes.extend(data.get('writes',[]))
+         history=data.get('history',history)
+        steps=events_as_steps(all_events)
         # Stable ticket IDs intentionally exercise idempotent replay across setup variants.
-        row={'case_id':c['case_id'],'setup':setup,'ticket_id':c['ticket_id'],'replayed':bool(data.get('writes') and any(w.get('replayed') for w in data['writes'])),'input':c['Query'],'ground_truth':c['Ground Truth'],'actual_output':data.get('reply',''),'ticket_status':data.get('ticket_status'),'expected_ticket_status':c['expected_ticket_status'],'expected_write':json.loads(c['expected_write']),'writes':data.get('writes',[]),'expected_tools':expected[setup],'tools_called':[{'name':x.get('tool'),'arguments':x.get('input',{})} for x in data.get('tool_calls',[])],'trajectory':steps,'judge_model':a.judge_model,'trace':data.get('trace',{})}
+        row={'case_id':c['case_id'],'setup':setup,'ticket_id':c['ticket_id'],'replayed':bool(any(w.get('replayed') for w in writes)),'input':'\n'.join(turns),'ground_truth':c['Ground Truth'],'actual_output':data.get('reply',''),'ticket_status':data.get('ticket_status'),'expected_ticket_status':c['expected_ticket_status'],'expected_write':json.loads(c['expected_write']),'writes':writes,'expected_tools':expected,'tools_called':[{'name':x.get('tool'),'arguments':x.get('input',{})} for x in all_tools],'trajectory':steps,'judge_model':a.judge_model,'trace':{'events':all_events}}
         out.write(json.dumps(row,default=str)+'\n'); out.flush(); print(f"{c['ticket_id']} {setup}: status={data.get('ticket_status')} tools={len(row['tools_called'])}")
         time.sleep(.05)
     print(f'Raw scenario results written to {a.output}. Run deepeval test/evaluation commands after configuring the judge.')

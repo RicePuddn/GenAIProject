@@ -46,3 +46,22 @@ The default is 10 cases × 24 setup variants, sequentially. `--case` and `--setu
 The JSONL record supplies the `LLMTestCase` inputs: final reply for G-Eval against `Ground Truth`, tool calls and setup-specific expected tools/arguments for Tool Correctness and Argument Correctness, and ordered events for trajectory scoring. Score Task Completion, Step Efficiency and the trajectory criteria from that ordered trace. Score Plan Adherence and Plan Quality only when the selected setup's resolved strategy includes `plan_execute`; omit them for all-react variants. Graph write attempts appear in the API trace as `backend_write` and are represented that way in the expected-tool mapping.
 
 The runner deliberately separates application execution from judge evaluation so raw outputs and traces remain inspectable and failures do not silently disappear. Configure DeepEval's judge with the same Ollama endpoint/model used for the study before scoring. See [DeepEval trajectory metrics](https://deepeval.com/docs/evaluation-trajectory-based-llm-evals) and [Tool Correctness](https://deepeval.com/docs/metrics-tool-correctness).
+
+## Score saved results
+
+Use `evaluate.py` to score an existing results JSONL without rerunning the API scenarios. The judge uses
+`OPENROUTER_API_KEY` from `.env` and defaults to `openai/gpt-oss-120b`:
+
+```powershell
+.venv\Scripts\python.exe deepeval\evaluate.py --input deepeval\results.jsonl --case EVAL-01 --setup s1-a
+.venv\Scripts\python.exe deepeval\evaluate.py --input deepeval\results.jsonl
+.venv\Scripts\python.exe deepeval\evaluate.py --input deepeval\results.jsonl --start-at EVAL-02,s3-b,TKT-EVAL-03 --output deepeval\scored-from-eval02.csv
+```
+
+Scores and judge reasons are written to `deepeval/scored.csv` (one row per result). Use `--output` to
+choose another CSV path, `--case` and `--setup` to filter, and `--limit` for a small sample. Metrics
+include answer correctness, tool correctness, argument correctness, and trace-based G-Eval for task
+completion, step efficiency and trajectory quality. Plan adherence and plan quality are scored only
+when the trace shows a `plan_execute` strategy. These trace-based G-Evals inspect the app's saved JSON
+trace; DeepEval's built-in trajectory metrics require DeepEval-native tracing, which these stored runs
+do not contain. Each score uses paid OpenRouter judge calls.

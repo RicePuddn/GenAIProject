@@ -238,7 +238,7 @@ ORDERS = [
      {'line1': '18 Queenstown Road', 'city': 'Singapore', 'postal_code': '149053', 'country': 'SG'}),
     ('ORD-2026-00108', 'CUS-EVAL-001', '2026-09-21T09:00:00+00:00', 'delivered', '27.52', '0.00', '2.48', '30.00', 'SGD', 'mobile_app',
      {'line1': '18 Queenstown Road', 'city': 'Singapore', 'postal_code': '149053', 'country': 'SG'}),
-    ('ORD-2026-00109', 'CUS-EVAL-001', '2026-10-31T08:50:00+00:00', 'processing', '29.36', '0.00', '2.64', '32.00', 'SGD', 'mobile_app',
+    ('ORD-2026-00109', 'CUS-EVAL-001', '2026-10-31T08:50:00+00:00', 'processing', '25.36', '0.00', '2.64', '28.00', 'SGD', 'mobile_app',
      {'line1': '18 Queenstown Road', 'city': 'Singapore', 'postal_code': '149053', 'country': 'SG'}),
     ('ORD-2026-00110', 'CUS-EVAL-001', '2026-10-16T09:00:00+00:00', 'partially_fulfilled', '58.72', '0.00', '5.28', '64.00', 'SGD', 'mobile_app',
      {'line1': '18 Queenstown Road', 'city': 'Singapore', 'postal_code': '149053', 'country': 'SG'}),
@@ -795,7 +795,7 @@ PAYMENTS = [
     ('PAY-EVAL-106', 'ORD-2026-00106', 'Stripe', 'Visa ending 4242', 'captured', '30.00', 'TXN-EVAL-106', '2026-10-16T09:00:00+00:00'),
     ('PAY-EVAL-107', 'ORD-2026-00107', 'Stripe', 'Visa ending 4242', 'captured', '30.00', 'TXN-EVAL-107', '2026-10-16T09:00:00+00:00'),
     ('PAY-EVAL-108', 'ORD-2026-00108', 'Stripe', 'Visa ending 4242', 'captured', '30.00', 'TXN-EVAL-108', '2026-09-21T09:00:00+00:00'),
-    ('PAY-EVAL-109', 'ORD-2026-00109', 'Stripe', 'Visa ending 4242', 'captured', '32.00', 'TXN-EVAL-109', '2026-10-31T08:50:00+00:00'),
+    ('PAY-EVAL-109', 'ORD-2026-00109', 'Stripe', 'Visa ending 4242', 'captured', '28.00', 'TXN-EVAL-109', '2026-10-31T08:50:00+00:00'),
     ('PAY-EVAL-110', 'ORD-2026-00110', 'Stripe', 'Visa ending 4242', 'captured', '64.00', 'TXN-EVAL-110', '2026-10-16T09:00:00+00:00'),
 ]
 
@@ -993,10 +993,19 @@ SEED_TABLES = {
 
 # Name every inserted column and preserve records that already exist.
 def insert_record(cur, table: str, **record) -> None:
-    query = sql.SQL("INSERT INTO {} ({}) VALUES ({}) ON CONFLICT DO NOTHING").format(
+    conflict_columns = {
+        "shipment_items": ("shipment_id", "order_item_id"),
+        "return_items": ("return_id", "order_item_id"),
+    }.get(table, ("id",))
+    updates = sql.SQL(", ").join(
+        sql.SQL("{} = EXCLUDED.{}").format(sql.Identifier(column), sql.Identifier(column))
+        for column in record if column not in conflict_columns
+    )
+    query = sql.SQL("INSERT INTO {} ({}) VALUES ({}) ON CONFLICT ({}) DO UPDATE SET {}").format(
         sql.Identifier(table),
         sql.SQL(", ").join(map(sql.Identifier, record)),
         sql.SQL(", ").join(sql.Placeholder() for _ in record),
+        sql.SQL(", ").join(map(sql.Identifier, conflict_columns)), updates,
     )
     cur.execute(query, tuple(record.values()))
 
@@ -1031,8 +1040,8 @@ def main() -> None:
     if not dsn:
         raise RuntimeError("set SUPPORT_OPS_DATABASE_URL in .env (see .env.example)")
     seed(dsn, reset=args.reset)
-    print("Seeded background data and 10 labelled evaluation scenarios. "
-          + ("All earlier rows were deleted." if args.reset else "Existing rows were preserved."))
+    print("Reseeded the records defined in seed_db.py. "
+          + ("All earlier rows were deleted before seeding." if args.reset else "Existing unrelated rows were preserved."))
 
 
 if __name__ == "__main__":

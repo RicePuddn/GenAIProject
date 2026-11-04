@@ -11,33 +11,27 @@ run:
   clock_start: "2026-10-01T09:00:00+08:00" # the workflow date for every run; the API can override it
 
 llm:
-  provider: ollama
-  base_url: http://localhost:11434/v1
-  api_key_env: null
+  provider: openrouter
+  base_url: https://openrouter.ai/api/v1
+  api_key_env: OPENROUTER_API_KEY
   temperature: 0.0
   max_tokens: 4096
   max_tokens_by_role:
     guard: 512
-  reasoning_effort_by_role:
-    guard: none
-    agent: none
-    supervisor: none
-    specialist: none
-    approver: none
-    reply_writer: none
   # Off for experiment runs: with the cache on, repeat trials replay the first one, and cached calls
   # take no time and cost nothing. Set a folder (e.g. results/cache) only while developing.
   cache_dir: null
   cache_enabled_by_role:
     guard: false # always classify live
-  models: # one local Ollama model for every role
-    agent: lfm3:latest
-    supervisor: lfm3:latest
-    specialist: lfm3:latest
-    approver: lfm3:latest
-    reply_writer: lfm3:latest
-    guard: lfm3:latest
-  pricing: {} # local inference has no provider token price
+  models: # OpenRouter hosted model for every role
+    agent: openai/gpt-oss-120b
+    supervisor: openai/gpt-oss-120b
+    specialist: openai/gpt-oss-120b
+    approver: openai/gpt-oss-120b
+    reply_writer: openai/gpt-oss-120b
+    guard: openai/gpt-oss-120b
+  pricing:
+    openai/gpt-oss-120b: {input: 0.03, output: 0.17} # USD per million tokens; verify current provider rate
 
 guard:
   enabled: true

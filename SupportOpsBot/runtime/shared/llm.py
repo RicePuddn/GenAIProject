@@ -70,8 +70,8 @@ class OpenAICompatLLM:
 
         llm = cfg["llm"]
         self.provider = llm["provider"]
-        if self.provider != "ollama":
-            raise ValueError("only the local Ollama provider is supported")
+        if self.provider not in {"ollama", "openrouter"}:
+            raise ValueError("llm.provider must be 'ollama' or 'openrouter'")
         self.models: dict[str, str] = llm["models"]
         self.pricing: dict[str, dict[str, float]] = llm["pricing"]
         self.temperature = llm["temperature"]
@@ -85,6 +85,8 @@ class OpenAICompatLLM:
         self.cache = (ROOT / cache_dir).resolve() if cache_dir else None
         api_key_env = llm.get("api_key_env")
         api_key = os.environ.get(api_key_env) if api_key_env else None
+        if self.provider == "openrouter" and not api_key:
+            raise ValueError(f"{api_key_env or 'OPENROUTER_API_KEY'} is required for OpenRouter")
         if not api_key and self.provider == "ollama":
             # Ollama's local OpenAI-compatible endpoint requires a value the server ignores.
             api_key = "ollama"
