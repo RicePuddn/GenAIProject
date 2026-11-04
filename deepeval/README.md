@@ -1,6 +1,19 @@
 # DeepEval scenario set
 
-`cases.csv` contains the ten seeded tickets and setup-specific expected tool traces. The runner executes one `/chat` request at a time, preserves the ordered API trace, and appends each result to JSONL. The same ticket ID is reused across variants to exercise write idempotency; each row records replay where reported. It never seeds, resets, or deletes database records.
+`cases.csv` contains the ten seeded tickets and setup-specific expected tool traces. The runner executes one `/chat` request at a time, preserves the ordered API trace, and appends each result to JSONL. The same ticket ID is reused across variants to exercise write idempotency; each row records replay where reported. It never seeds, resets, or deletes database records. Each row has a `focus` label; routine single-tool lookups come first, followed by the two longer scenarios.
+
+| Case | Focus | Expected route |
+|---|---|---|
+| EVAL-02 | Order contents | `get_order_items` |
+| EVAL-03 | Processing order status | `get_order` |
+| EVAL-04 | Captured payment | `get_payments` |
+| EVAL-05 | Pending return status | `get_returns_and_refunds` |
+| EVAL-06 | Delivered shipment tracking | `get_tracking_events` |
+| EVAL-08 | Standard return window | `policy` |
+| EVAL-09 | Find processing order | `get_customer_orders` |
+| EVAL-10 | Shipment carrier and tracking number | `get_shipments` |
+| EVAL-01 | Approved SGD 20 refund | Multi-step lookup and refund write |
+| EVAL-07 | Leaking battery safety escalation | Multi-step lookup and human review |
 
 ## Install and prepare
 
