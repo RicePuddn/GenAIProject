@@ -1,65 +1,75 @@
-# Base configuration shared by every arm (S1-S4). Experiment files override keys from here.
+# Every value held constant across the setups (EXPERIMENT.md). A setup ID such as s3-c adds the
+# setup's agents, control style, policy mode and strategies from setups.yaml. Code reads every key
+# without a default, so a missing key is an error instead of silently giving a different setup.
 # Every run writes its fully resolved config next to its results.
 
 run:
-  seed: 469                 # data generation, ticket sampling and trial order
-  k_trials: 4               # repeated trials per case, used for pass^k
-  clock_start: "2026-10-01T09:00:00+08:00"   # injectable clock origin
+  setup: s1-a # the setup and variant when a caller names none (API, demo, scripts)
+  seed: 469 # data generation, ticket sampling and trial order
+  k_trials: 4 # repeated trials per case, used for pass^k
+  trial: 0 # set per trial: part of the LLM cache key, so trials never replay each other
+  clock_start: "2026-10-01T09:00:00+08:00" # the workflow date for every run; the API can override it
 
 llm:
-  provider: groq
-  base_url: https://api.groq.com/openai/v1
-  api_key_env: GROQ_API_KEY
+  provider: openrouter
+  base_url: https://openrouter.ai/api/v1
+  api_key_env: OPENROUTER_API_KEY
   temperature: 0.0
-  reasoning_effort: medium  # gpt-oss only; recorded so both supervisor variants match
+  max_tokens: 4096
   max_tokens_by_role:
-    guard: 512              # Prompt Guard's Groq limit
+    guard: 512
+  # Off for experiment runs: with the cache on, repeat trials replay the first one, and cached calls
+  # take no time and cost nothing. Set a folder (e.g. results/cache) only while developing.
+  cache_dir: null
   cache_enabled_by_role:
-    guard: false             # Always classify live; do not replay stale/empty results
-  cache_dir: results/cache  # response cache for final runs (set to null to disable)
-  models:                   # one model family for the main comparison
+    guard: false # always classify live
+  models: # OpenRouter hosted model for every role
+    agent: openai/gpt-oss-120b
     supervisor: openai/gpt-oss-120b
-    guard: meta-llama/llama-prompt-guard-2-86m
     specialist: openai/gpt-oss-120b
     approver: openai/gpt-oss-120b
-    user_simulator: openai/gpt-oss-20b
-  # USD per 1M tokens; check provider pricing page and record the date you checked
+    reply_writer: openai/gpt-oss-120b
+    guard: openai/gpt-oss-120b
   pricing:
-    openai/gpt-oss-120b: {input: 0.15, output: 0.60}
-    openai/gpt-oss-20b: {input: 0.075, output: 0.30}
+    openai/gpt-oss-120b: {input: 0.03, output: 0.17} # USD per million tokens; verify current provider rate
 
 guard:
   enabled: true
-  threshold: 0.5             # numeric malicious-class score threshold
+  threshold: 0.5 # malicious-class score at or above which a turn is flagged
 
-agent:
-  strategy: react           # react | plan_and_execute
-
-policy:
-  mode: rag              # skills | rag
-  rules_file: src/support_ops/policy/rules/rules.json   # shared hard limits
-  skills_dir: policy/skills
-  corpus_dir: policy/raw_policy/pdf  # fixed policy corpus; PDF only
-  rag:                      # organisation selection; notebook compares the three approaches
-    dense: true             # Nomic embeddings, cosine
-    bm25: true              # keyword search; with dense, fused by reciprocal rank fusion
+policy: # policy.mode (rag or skills) comes from the setup
+  rules_file: data/policy/rules.json # the one rules engine's hard limits
+  skills_dir: data/policy/skills
+  corpus_dir: data/policy/pdf # fixed policy corpus; PDF only
+  rag: # organisation selection; the notebook compares the three approaches
+    dense: true # Nomic embeddings, cosine
+    bm25: true # keyword search; with dense, fused by reciprocal rank fusion
     rrf_k: 60
-    n_prime: 20             # candidates passed to the reranker
-    rerank: true            # cross-encoder rerank
-    contextual: true        # prepend the section name before indexing
-    k: 4                    # ranked clauses; direct references are added afterwards
+    n_prime: 20 # candidates passed to the reranker
+    rerank: true # cross-encoder rerank
+    contextual: true # prepend the section name before indexing
+    k: 4 # ranked clauses; direct references are added afterwards
     expand_references: true # also include directly referenced sections
     embedding_model: nomic-ai/nomic-embed-text-v1.5
     rerank_model: BAAI/bge-reranker-v2-m3
 
-review:                     # before a write requiring review, and on each reply
-  max_rejections: 1         # rejected write proposals the agent may fix; the next rejection goes to a human
-  max_reply_drafts: 2       # reply drafts checked before the fixed hold reply and a human handoff
+review: # the write review and the reply check
+  max_rejections: 1 # rejected writes the agent may fix; the next rejection goes to a human
+  max_reply_drafts: 2 # reply drafts the reply check sees before the hold reply and a human handoff
+  max_wording_rewrites:
+    2 # drafts code rejects for wording (a paid claim, an internal ID), redrafted
+    # without counting as reply drafts
 
-limits:                     # enforced by the workflow between calls
-  max_steps_per_ticket: 40  # maximum tool executions
-  max_agent_steps: 12
-  max_cost_usd_per_ticket: 0.05  # stop before the next call once reached
-  max_replans: 2            # plan-and-execute only
+limits: # per ticket, shared by every agent in it
+  max_tool_calls: 40 # data tool executions, writes included
+  max_agent_steps: 30 # LLM calls by the agent, supervisor or specialists.
+  max_cost_usd: 0.05 # checked before each LLM call; one call can still go over
+  max_replans: 2 # plan_execute: corrections after an invalid plan or a failed call
+  max_plan_checks: 3 # plan_execute: checks for a missing step after a plan has run in full
 
-human_cost_per_ticket_usd: 4.00   # baseline for the "acceptable cost" goal; cite your source in the report
+retries: # one retry policy for every setup
+  tool_errors: 1 # re-runs of a tool that failed for a reason the model can't fix (e.g. a DB timeout)
+  invalid_json: 1 # extra tries after a malformed JSON reply
+  backoff_s: 0.5 # wait before a tool re-run, times the attempt number
+
+human_cost_per_ticket_usd: 4.00 # baseline for the "acceptable cost" goal; cite your source in the report

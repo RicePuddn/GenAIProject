@@ -1,0 +1,13 @@
+# Local OpenAI-compatible Ollama server. Select from .env with SUPPORT_OPS_CONFIG=configs/ollama.yaml.
+# Override model names here if `ollama list` shows a different installed tag.
+llm:
+  provider: ollama
+  base_url: http://localhost:11434/v1
+  api_key_env: null # the local endpoint ignores the placeholder key supplied by the client
+  models:
+    agent: ornith:9b
+    supervisor: ornith:9b
+    specialist: ornith:9b
+    approver: ornith:9b
+    reply_writer: ornith:9b
+    guard: ornith:9b

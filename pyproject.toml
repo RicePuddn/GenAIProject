@@ -5,7 +5,7 @@ description = "Policy-bound multi-agent customer support operations (IS469 group
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "openai>=1.40",    # OpenAI-compatible client: works with Groq, OpenRouter, vLLM, Ollama
+    "openai>=1.40",    # Ollama's OpenAI-compatible local endpoint
     "langgraph>=0.2,<2",
     "psycopg[binary]>=3.2,<4",
     "fastapi>=0.115,<1",
@@ -17,7 +17,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
 rag = [               
     "sentence-transformers>=5.3",   # native Nomic model support
     "transformers>=5.5,<6",
@@ -29,15 +28,12 @@ rag = [
     "pandas>=2.2",                 # evaluation tables
     "ranx>=0.3,<0.4",               # retrieval evaluation metrics
 ]
-demo = ["streamlit>=1.50"]   # scripts/demo_app.py, a chat page that shows each agent step
+demo = ["streamlit>=1.50"]   # SupportOpsBot/demo.py, a chat page that shows each agent step
+evaluation = ["deepeval>=3.0", "requests>=2.31"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/support_ops"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src", "."]   # ".": test modules share helpers via `from tests.… import …`
+packages = ["SupportOpsBot"]
