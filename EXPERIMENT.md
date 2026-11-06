@@ -92,7 +92,7 @@ so only the four combinations of agent count and control style get their own cod
 GenAIProject/
 ├── EXPERIMENT.md              study design (this file, the source of truth)
 ├── ARCHITECTURE.md            how the code fits together, one page
-├── docs/                      one walkthrough and draw.io diagram per setup pair
+├── docs/                      one walkthrough and draw.io diagram per system (S1–S8)
 ├── README.md                  install and run only
 ├── .gitattributes             *.pdf binary
 ├── configs/
