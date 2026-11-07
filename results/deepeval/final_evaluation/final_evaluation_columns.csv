@@ -7,16 +7,13 @@ strategy,-,React / plan_execute per role,configs/setups.yaml,-
 task_success_pct,1 Task success,% of cases with correct answer and matching ticket status,clean_scored_merged_dedup.csv,executed evaluation run
 tool_call_accuracy_pct,2 Tool-call accuracy,% of cases with correct tools and arguments,clean_scored_merged_dedup.csv,executed evaluation run
 step_efficiency_pct,3 Step efficiency,% of cases with no unnecessary steps,clean_scored_merged_dedup.csv,executed evaluation run
-median_input_tokens,4 Cost,Median input tokens per case,clean_scored_merged_dedup.csv,executed evaluation run
-median_output_tokens,4 Cost,Median output tokens per case,clean_scored_merged_dedup.csv,executed evaluation run
+median_cost_usd,4 Cost,Median USD per case (tokens × configs/base.yaml pricing),clean_scored_merged_dedup.csv + configs/base.yaml,executed evaluation run
 median_latency_s,5 Latency,Median seconds per case,clean_scored_merged_dedup.csv,executed evaluation run
-p95_latency_s,5 Latency,95th-percentile seconds per case,clean_scored_merged_dedup.csv,executed evaluation run
 task_success_robust_pct,6 Robustness,% of cases passing task success under all three wordings,robustness_evaluation/final_robustness_summary.csv,baseline-derived rounds
 tool_call_accuracy_robust_pct,6 Robustness,% of cases passing tool-call accuracy under all three wordings,robustness_evaluation/final_robustness_summary.csv,baseline-derived rounds
 step_efficiency_robust_pct,6 Robustness,% of cases passing step efficiency under all three wordings,robustness_evaluation/final_robustness_summary.csv,baseline-derived rounds
 task_success_consistency_pct,7 Consistency,% of cases with the same task outcome in all three runs,consistency_evaluation/final_consistency_summary.csv,baseline-derived rounds
 tool_call_accuracy_consistency_pct,7 Consistency,% of cases with the same tool-call outcome in all three runs,consistency_evaluation/final_consistency_summary.csv,baseline-derived rounds
 step_efficiency_consistency_pct,7 Consistency,% of cases with the same step-efficiency outcome in all three runs,consistency_evaluation/final_consistency_summary.csv,baseline-derived rounds
-input_tokens_stable_cases_pct,7 Consistency,% of cases with input tokens within ±10% of the three-run mean,consistency_evaluation/final_consistency_summary.csv,baseline-derived rounds
-output_tokens_stable_cases_pct,7 Consistency,% of cases with output tokens within ±10% of the three-run mean,consistency_evaluation/final_consistency_summary.csv,baseline-derived rounds
+cost_usd_stable_cases_pct,7 Consistency,% of cases with cost within ±10% of the three-run mean,consistency_evaluation/final_consistency_summary.csv,baseline-derived rounds
 elapsed_s_stable_cases_pct,7 Consistency,% of cases with latency within ±20% of the three-run mean,consistency_evaluation/final_consistency_summary.csv,baseline-derived rounds
