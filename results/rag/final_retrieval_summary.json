@@ -1,0 +1,26 @@
+[
+  {
+    "Method":"Vector",
+    "k":8,
+    "N\u2032":20,
+    "Recall@k":0.9722222222,
+    "nDCG@k":0.8472694633,
+    "Complete evidence coverage":0.9583333333
+  },
+  {
+    "Method":"Hybrid (Vector + BM25)",
+    "k":8,
+    "N\u2032":20,
+    "Recall@k":0.9097222222,
+    "nDCG@k":0.8023924129,
+    "Complete evidence coverage":0.9166666667
+  },
+  {
+    "Method":"Hybrid + Reranking",
+    "k":8,
+    "N\u2032":20,
+    "Recall@k":0.9756944444,
+    "nDCG@k":0.9199495039,
+    "Complete evidence coverage":0.9791666667
+  }
+]

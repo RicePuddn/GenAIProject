@@ -338,5 +338,92 @@
       "REF-Refunds-6.2",
       "REF-Refunds-6.3"
     ]
+  },
+  {
+    "id": "q43",
+    "question": "The order still says processing, but a shipping label exists. Can I cancel it now? When does the standard delivery estimate start? If it arrives and I change my mind, what conditions apply to returning it?",
+    "evaluation_group": "cross_policy_stress",
+    "expected_chunk_ids": [
+      "ODR-OrderChangeCancel-4.1",
+      "SHP-ShippingOptions-2.2",
+      "RET-ReturnEligibility-2.4"
+    ],
+    "expected_reference_chunk_ids": [
+      "ODR-OrderChangeCancel-4.2",
+      "SHP-ShippingOptions-2.1",
+      "RET-ReturnEligibility-2.1",
+      "RET-ReturnEligibility-2.5"
+    ]
+  },
+  {
+    "id": "q44",
+    "question": "I paid for one order but it has two tracking numbers. Does that mean duplicate orders? Will I be charged delivery twice? The parcels arrived on different days; which date starts each item's return period?",
+    "evaluation_group": "cross_policy_stress",
+    "expected_chunk_ids": [
+      "ODR-OrderStatusTracking-5.1",
+      "SHP-ShippingFees-3.2",
+      "RET-ReturnEligibility-2.1"
+    ],
+    "expected_reference_chunk_ids": [
+      "RET-ReturnEligibility-2.6"
+    ]
+  },
+  {
+    "id": "q45",
+    "question": "Can I add another item to my paid order? If I request express delivery instead, what needs to be confirmed? If the original item arrives in the wrong colour, what evidence should I provide?",
+    "evaluation_group": "cross_policy_stress",
+    "expected_chunk_ids": [
+      "ODR-OrderChangeCancel-4.5",
+      "SHP-ShippingOptions-2.3",
+      "RET-SupportingEvidence-3.1"
+    ],
+    "expected_reference_chunk_ids": [
+      "ODR-OrderChangeCancel-4.1",
+      "RET-SupportingEvidence-3.2"
+    ]
+  },
+  {
+    "id": "q46",
+    "question": "My order was split into parcels and one item has not arrived. How do you tell whether it is missing from a delivered parcel or still coming? Another parcel says delivered but I have not received it; must I wait? A received item is faulty and marked final sale; can I request a return?",
+    "evaluation_group": "cross_policy_stress",
+    "expected_chunk_ids": [
+      "SHP-SeparateShipPartialDel-6.2",
+      "SHP-DeliveryProblems-7.4",
+      "RET-ReturnEligibility-2.5"
+    ],
+    "expected_reference_chunk_ids": [
+      "SHP-DeliveryProblems-7.1",
+      "SHP-DeliveryProblems-7.2",
+      "SHP-DeliveryProblems-7.3",
+      "SHP-DeliveryProblems-7.5",
+      "RET-ReturnEligibility-2.1"
+    ]
+  },
+  {
+    "id": "q47",
+    "question": "I want to correct my delivery address after packing has begun. Is redirection guaranteed? If the carrier then returns the parcel to sender, is a refund automatic? Separately, for an approved faulty-item return, can I choose my own courier and have its cost reimbursed?",
+    "evaluation_group": "cross_policy_stress",
+    "expected_chunk_ids": [
+      "ODR-OrderChangeCancel-4.4",
+      "SHP-DeliveryProblems-7.3",
+      "RET-ShippingFees-5.1"
+    ],
+    "expected_reference_chunk_ids": [
+      "SHP-DeliveryProblems-7.4"
+    ]
+  },
+  {
+    "id": "q48",
+    "question": "For an existing order, do you use today's shipping price or the fee I originally paid? The courier has confirmed one parcel lost; do I need to wait three more days? For a different item whose return is approved, does creating a return label meet the seven-day dispatch deadline?",
+    "evaluation_group": "cross_policy_stress",
+    "expected_chunk_ids": [
+      "SHP-ShippingFees-3.1",
+      "SHP-DeliveryProblems-7.2",
+      "RET-ReturnProcedure-4.2"
+    ],
+    "expected_reference_chunk_ids": [
+      "SHP-DeliveryProblems-7.1",
+      "RET-ReturnProcedure-4.5"
+    ]
   }
 ]
