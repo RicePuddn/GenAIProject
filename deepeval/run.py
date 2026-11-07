@@ -13,7 +13,16 @@ CASES=Path(__file__).with_name('cases.csv')
 SETUP_IDS=[f's{s}-{v}' for s in (1,2,5,6) for v in 'ab']+[f's{s}-{v}' for s in (3,4,7,8) for v in 'abcd']
 
 def read_cases(path=CASES):
-    with Path(path).open(newline='') as f: return list(csv.DictReader(f))
+    with Path(path).open(newline='') as f:
+        cases = list(csv.DictReader(f))
+    for row_number, case in enumerate(cases, 2):
+        customer_id = case.get('customer_id') or ''
+        if not customer_id.startswith('CUS-') or any(c.isspace() for c in customer_id):
+            raise ValueError(
+                f"{path}: row {row_number} ({case.get('case_id', 'unknown')}): "
+                f"invalid customer_id {customer_id!r}; expected a seeded customer ID starting with 'CUS-'"
+            )
+    return cases
 
 def events_as_steps(events):
     """Preserve API event order and turn trace tool events into a stable trajectory view."""
