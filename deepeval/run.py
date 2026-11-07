@@ -12,8 +12,8 @@ if str(ROOT) not in sys.path: sys.path.insert(0, str(ROOT))
 CASES=Path(__file__).with_name('cases.csv')
 SETUP_IDS=[f's{s}-{v}' for s in (1,2,5,6) for v in 'ab']+[f's{s}-{v}' for s in (3,4,7,8) for v in 'abcd']
 
-def read_cases():
-    with CASES.open(newline='') as f: return list(csv.DictReader(f))
+def read_cases(path=CASES):
+    with Path(path).open(newline='') as f: return list(csv.DictReader(f))
 
 def events_as_steps(events):
     """Preserve API event order and turn trace tool events into a stable trajectory view."""
@@ -66,7 +66,8 @@ def main():
     p.add_argument('--dry-run',action='store_true')
     p.add_argument('--judge-model',default=os.getenv('DEEPEVAL_JUDGE_MODEL','ollama/ornith:9b'))
     p.add_argument('--output',type=Path,default=Path('deepeval/results.jsonl'))
-    a=p.parse_args(); cases=read_cases(); setups=a.setup or ['s1-a']
+    p.add_argument('--cases',type=Path,default=CASES,help='Case CSV (default deepeval/cases.csv); e.g. a robustness variant file')
+    a=p.parse_args(); cases=read_cases(a.cases); setups=a.setup or ['s1-a']
     if a.case: cases=[c for c in cases if c['ticket_id'] in a.case or c['case_id'] in a.case]
     if not cases: p.error('no cases selected')
     if a.dry_run:
