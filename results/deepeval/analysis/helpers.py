@@ -22,7 +22,7 @@ from IPython.display import HTML, display
 from scipy import stats
 
 # ── Paths ────────────────────────────────────────────────────────────────────────────────────────
-ROOT = next(p for p in [Path.cwd(), *Path.cwd().parents] if (p / "EXPERIMENT.md").exists())
+ROOT = next(p for p in [Path.cwd(), *Path.cwd().parents] if (p / "pyproject.toml").exists())
 DEEPEVAL = ROOT / "results/deepeval"
 RUN1_SCORED = DEEPEVAL / "data/raw/baseline/run1/scored_dedup.csv"
 RUN1_LOG = DEEPEVAL / "data/raw/baseline/run1/results.jsonl"
@@ -379,6 +379,17 @@ def test_table(rows: list[dict], a: str, b: str, show: bool = True) -> pd.DataFr
                 .set_caption(f"<b>Matched-pair tests</b>: A = {NICE.get(a, a)}, B = {NICE.get(b, b)}"))
     return t
 
+
+
+def holm(p) -> np.ndarray:
+    """Holm step-down adjusted p-values, in the same order as the input (controls the family-wise error rate)."""
+    p = np.asarray(p, dtype=float)
+    order = np.argsort(p)
+    m = len(p)
+    adjusted = np.minimum(np.maximum.accumulate((m - np.arange(m)) * p[order]), 1.0)
+    out = np.empty(m)
+    out[order] = adjusted
+    return out
 
 # ── Presentation helpers ─────────────────────────────────────────────────────────────────────────
 SCORECARD_ROWS = ["1 Task success (%)", "2 Tool-call accuracy (%)", "3 Step efficiency (%)", "4 Cost (median US$)",
