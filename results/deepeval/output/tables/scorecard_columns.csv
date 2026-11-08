@@ -15,9 +15,9 @@ median_latency_s,5 Latency,Median seconds per case,data/prepared/baseline_run1.c
 task_success_3run_pct,1 Task success,Task success over all three runs (39 records),data/prepared/baseline_run1-3.csv,run 1 + rerun 2 + rerun 3
 tool_call_accuracy_3run_pct,2 Tool-call accuracy,Tool-call accuracy over all three runs (39 records),data/prepared/baseline_run1-3.csv,run 1 + rerun 2 + rerun 3
 step_efficiency_3run_pct,3 Step efficiency,Step efficiency over all three runs (39 records),data/prepared/baseline_run1-3.csv,run 1 + rerun 2 + rerun 3
-task_success_robust_pct,6 Robustness,% of cases passing task success under all three wordings,output/tables/robustness_by_setup.csv,executed robustness rounds
-tool_call_accuracy_robust_pct,6 Robustness,% of cases passing tool-call accuracy under all three wordings,output/tables/robustness_by_setup.csv,executed robustness rounds
-step_efficiency_robust_pct,6 Robustness,% of cases passing step efficiency under all three wordings,output/tables/robustness_by_setup.csv,executed robustness rounds
+task_success_robust_pct,6 Robustness,% of cases passing task success under both wordings,output/tables/robustness_by_setup.csv,executed robustness round
+tool_call_accuracy_robust_pct,6 Robustness,% of cases passing tool-call accuracy under both wordings,output/tables/robustness_by_setup.csv,executed robustness round
+step_efficiency_robust_pct,6 Robustness,% of cases passing step efficiency under both wordings,output/tables/robustness_by_setup.csv,executed robustness round
 task_success_consistency_pct,7 Consistency,% of cases with the same task outcome in all three runs,output/tables/consistency_by_setup.csv,three executed runs compared
 tool_call_accuracy_consistency_pct,7 Consistency,% of cases with the same tool-call outcome in all three runs,output/tables/consistency_by_setup.csv,three executed runs compared
 step_efficiency_consistency_pct,7 Consistency,% of cases with the same step-efficiency outcome in all three runs,output/tables/consistency_by_setup.csv,three executed runs compared

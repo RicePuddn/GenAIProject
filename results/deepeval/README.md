@@ -23,14 +23,14 @@ The test cases themselves live in [`deepeval/cases/`](../../deepeval/cases/).
 | Baseline run 1 | `cases/baseline.csv` | `data/raw/baseline/run1/` | `data/prepared/baseline_run1.csv` |
 | Baseline run 2 | `cases/baseline.csv` | `data/raw/baseline/run2/` | `data/prepared/baseline_run2.csv` |
 | Baseline run 3 | `cases/baseline.csv` | `data/raw/baseline/run3/` | `data/prepared/baseline_run3.csv` |
-| Paraphrased run 1 | `cases/paraphrased.csv` | `data/raw/paraphrased/run1/` (pending) | `data/prepared/paraphrased_run1.csv` |
-| Messy run 1 | `cases/messy.csv` | `data/raw/messy/run1/` (pending) | `data/prepared/messy_run1.csv` |
+| Paraphrased run 1 | `cases/paraphrased.csv` | `data/raw/paraphrased/` | `data/prepared/paraphrased_run1.csv` |
+
+Prepared files are generated from the raw runs with `analysis/prepare_run.py` (same columns and rules as the baseline: `*_success_manual` = score ≥ 0.5; tokens summed over `llm_call` events; `elapsed_s` summed over `workflow_end` events). Running it on `data/raw/baseline/run2` reproduces `baseline_run2.csv` exactly.
 
 - **Baseline** is the original wording of the 13 questions.
-- **Paraphrased** has the same questions, reworded.
-- **Messy** has the same questions with typos, slang and missing punctuation.
+- **Paraphrased** has the same questions, reworded, with the same expected answers, statuses and tool calls.
 
-New runs are collected with `bash deepeval/collect_full.sh --variant <baseline|paraphrased|messy>`. The script writes to the next free `data/raw/<variant>/runN/` folder. See [`deepeval/README.md`](../../deepeval/README.md).
+New runs are collected with `bash deepeval/collect_full.sh --variant <baseline|paraphrased>`. The script writes to the next free `data/raw/<variant>/runN/` folder. See [`deepeval/README.md`](../../deepeval/README.md).
 
 `data/raw/baseline/run1/scored_dedup.csv` exists only for run 1. Run 1 was scored in batches and some cases were retried, so `scored.csv` holds 337 rows. The dedup file keeps one row per case and setup (312 rows) and adds tokens, latency and ticket status from the logs. Runs 2 and 3 had no retries, so they don't need this file.
 
@@ -40,7 +40,7 @@ New runs are collected with `bash deepeval/collect_full.sh --variant <baseline|p
 |---|---|---|
 | **Scorecard** | How good is each setup? | Baseline run 1, plus a 3-run average |
 | **Consistency** | Run the same setup 3 times: do you get the same pass/fail each time? | Baseline runs 1, 2 and 3 |
-| **Robustness** | Does the setup still pass when the question is reworded or messy? | Baseline run 1, paraphrased run 1, messy run 1 |
+| **Robustness** | Does the setup still pass when the question is reworded? | Baseline run 1 and paraphrased run 1 |
 
 Consistency and robustness are both about reliability, but they vary different things. Consistency keeps the question fixed and repeats the run. Robustness keeps the run fixed and changes the question.
 
@@ -57,7 +57,7 @@ Run them in order: `3_scorecard` reads the outputs of the first two, and `5_find
 | Notebook | Reads | Writes |
 |---|---|---|
 | `1_consistency.ipynb` | `data/prepared/baseline_run{1,2,3}.csv` | `output/tables/consistency_*.csv` |
-| `2_robustness.ipynb` | `data/prepared/baseline_run1.csv`, `data/prepared/paraphrased_run1.csv`, `data/prepared/messy_run1.csv` | `output/tables/robustness_by_setup.csv`, `robustness_by_setup_and_case.csv` |
+| `2_robustness.ipynb` | `data/prepared/baseline_run1.csv`, `data/prepared/paraphrased_run1.csv` | `output/tables/robustness_by_setup.csv`, `robustness_by_setup_and_case.csv` |
 | `3_scorecard.ipynb` | `data/prepared/`, `output/tables/consistency_*`, `output/tables/robustness_*` | `output/tables/scorecard_*.csv` |
 | `4_hypothesis_tests.ipynb` | `data/raw/baseline/run1/scored_dedup.csv` | `output/figures/` (matched-pair significance tests for H1–H4; statistical backup) |
 | **`5_findings.ipynb`** | everything above | `output/figures/findings_*.png`. **Results and Discussion: the presentation notebook** |
@@ -91,12 +91,12 @@ File names follow the pattern **`<analysis>_by_<one row per>`**.
 
 | File | One row per | Contents |
 |---|---|---|
-| `robustness_by_setup.csv` | setup (24) | Pass rates on the baseline, paraphrased and messy questions, plus the **robust** rate and **retention** (see below) |
-| `robustness_by_setup_and_case.csv` | setup × case (312) | Drill-down: did this exact case pass on each of the three wordings? |
-| `robustness_question_variants.csv` | case (13) | The baseline, paraphrased and messy wording side by side, for showing in the report what was changed. Static: no notebook writes it, so update it by hand if the case files change. |
+| `robustness_by_setup.csv` | setup (24) | Pass rates on the baseline and paraphrased questions, plus the **robust** rate and **retention** (see below) |
+| `robustness_by_setup_and_case.csv` | setup × case (312) | Drill-down: did this exact case pass on both wordings? |
+| `robustness_question_variants.csv` | case (13) | The baseline and paraphrased wording side by side, for showing in the report what was changed. Static: no notebook writes it, so update it by hand if the case files change. |
 
-- **Robust rate**: % of the 13 cases that passed on *all three* wordings.
-- **Retention**: of the cases a setup passed on the baseline, the % that still passed on both rewordings. This separates how sensitive a setup is to wording from how good it is overall. For example, a setup that passes 11/13 on the baseline and keeps 10 of those has a robust rate of 76.9% and retention of 90.9%.
+- **Robust rate**: % of the 13 cases that passed on *both* wordings.
+- **Retention**: of the cases a setup passed on the baseline, the % that still passed when reworded. This separates how sensitive a setup is to wording from how good it is overall. For example, a setup that passes 11/13 on the baseline and keeps 10 of those has a robust rate of 76.9% and retention of 90.9%.
 
 ## Renamed files
 
@@ -117,7 +117,7 @@ File names follow the pattern **`<analysis>_by_<one row per>`**.
 | `results-and-discussions.ipynb` | `analysis/5_findings.ipynb` |
 | `clean_scored_merged_dedup.csv` | `data/prepared/baseline_run1.csv` (original Excel kept in `archive/`) |
 | `consistency_evaluation/run{2,3}_clean_scored_merged_dedup_.csv` | `data/prepared/baseline_run{2,3}.csv` |
-| `robustness_evaluation/{messy,paraphrase}_clean_scored_merged_dedup_.csv` | `data/prepared/{messy,paraphrased}_run1.csv` |
+| `robustness_evaluation/paraphrase_clean_scored_merged_dedup_.csv` | `data/prepared/paraphrased_run1.csv` |
 | `scored_merged_dedup.csv` | `data/raw/baseline/run1/scored_dedup.csv` |
 | `run1/`, `rerun2/`, `rerun3/` | `data/raw/baseline/run{1,2,3}/` |
 | `case_categories.csv` | `deepeval/cases/categories.csv` |

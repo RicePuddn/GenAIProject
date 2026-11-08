@@ -5,7 +5,7 @@ Everything that is set-up rather than analysis lives here, so the notebooks can 
 - paths and chart style
 - load_run1():        the 312 scored runs of baseline run 1, labelled and joined with latency, cost,
                       robustness and consistency (one row per case x setup)
-- load_three_runs():  run 1 plus both re-runs stacked (936 rows), for the consistency section
+- load_three_runs():  runs 1, 2 and 3 stacked (936 rows), for the consistency section
 - paired_test() / test_table():  significance tests on matched pairs
 - scorecard(), verdict_box(), show_case(), bar_labels():  presentation helpers
 """
@@ -90,7 +90,7 @@ pct = lambda s: 100 * s.mean()
 
 # Matched pairs: the columns that must be equal for two runs to count as a pair
 MATCH_CONTROL = ["pair_id", "case_id"]                    # agentic <-> graph twin (s1-a <-> s5-a), same case
-MATCH_AGENTS = ["control", "policy", "variant", "case_id"]  # single <-> team twin (S1 <-> S3), variants a/b only
+MATCH_AGENTS = ["control", "policy", "variant", "case_id"]  # single <-> multi-agent twin (S1 <-> S3), variants a/b only
 MATCH_STRATEGY = ["family", "supervisor", "case_id"]      # react <-> plan worker, supervisor held fixed
 
 
@@ -106,9 +106,9 @@ def _add_setup_labels(df: pd.DataFrame) -> pd.DataFrame:
     single = {"a": "react", "b": "plan_execute"}
     multi = {"a": "react / react", "b": "plan / plan", "c": "react / plan", "d": "plan / react"}
     df["strategy"] = np.where(df["agents"] == "single", df["variant"].map(single), df["variant"].map(multi))
-    # Thinking mode of whoever calls the tools (the agent, or the specialists in a team)
+    # Thinking mode of whoever calls the tools (the agent, or the specialists in a multi-agent setup)
     df["worker_strategy"] = df["variant"].map({"a": "react", "b": "plan_execute", "c": "plan_execute", "d": "react"})
-    # Supervisor's thinking mode in a team; "none" for single agents
+    # Supervisor's thinking mode in a multi-agent setup; "none" for single agents
     df["supervisor"] = np.where(df["agents"] == "single", "none",
                                 df["variant"].map({"a": "react", "b": "plan_execute", "c": "react", "d": "plan_execute"}))
     df["ab_strategy"] = df["variant"].map({"a": "react", "b": "plan_execute"})  # variants a vs b only
@@ -195,7 +195,7 @@ def load_run1(with_reliability: bool = True) -> pd.DataFrame:
 
 
 def load_three_runs(run1: pd.DataFrame) -> pd.DataFrame:
-    """Run 1 plus re-runs 1 and 2 stacked (936 rows), with the same labels and pass rules."""
+    """Runs 1, 2 and 3 stacked (936 rows), with the same labels and pass rules."""
     def flags(frame, run):
         out = frame[["case_id", "setup"]].copy()
         out["run"] = run
@@ -209,12 +209,12 @@ def load_three_runs(run1: pd.DataFrame) -> pd.DataFrame:
         out["cost_usd"] = ((frame.input_tokens * PRICE_IN + frame.output_tokens * PRICE_OUT) / 1e6).values
         return out
 
-    reruns = [flags(pd.read_csv(PREPARED / f"baseline_run{i}.csv"), f"re-run {i - 1}") for i in (2, 3)]
+    reruns = [flags(pd.read_csv(PREPARED / f"baseline_run{i}.csv"), f"run {i}") for i in (2, 3)]
     three = pd.concat([flags(run1, "run 1"), *reruns], ignore_index=True)
     labels = ["setup", "family", "variant", "control", "agents", "policy", "strategy", "worker_strategy", "supervisor", "pair_id"]
     three = (three.merge(run1[labels].drop_duplicates("setup"), on="setup")
                   .merge(run1[["case_id", "kind", "category"]].drop_duplicates("case_id"), on="case_id"))
-    assert len(three) == 3 * len(run1), "each re-run needs the same 312 runs"
+    assert len(three) == 3 * len(run1), "runs 2 and 3 need the same 312 runs"
     return three
 
 
@@ -286,6 +286,27 @@ def write_gate_refusals(case_id: str, setup: str, control: str) -> dict:
                        and ("error" in e["output"] or e["output"].get("status") in ("blocked", "review_required"))
                        for e in ev)
     return {"refusals": refusals, "proposal_cycles": sum(e["kind"] == "proposal" for e in ev)}
+
+
+def time_after_first_refusal(case_id: str, setup: str) -> dict:
+    """Seconds of a run spent before vs after the write gate's first refusal of a graph proposal.
+
+    Everything after the first refusal is the graph restarting gather -> propose. Multi-turn cases are summed
+    over turns. Agentic runs never log 'proposal_refused', so all their time counts as 'before'.
+    """
+    before = after = 0.0
+    start = refused = None
+    for e in run_of(case_id, setup)["trace"]["events"]:
+        t = float(e["t"])
+        if e["kind"] == "workflow_start":
+            start, refused = t, None
+        elif e["kind"] == "proposal_refused" and refused is None:
+            refused = t
+        elif e["kind"] == "workflow_end":
+            cut = refused if refused is not None else t
+            before += cut - start
+            after += t - cut
+    return {"s_before_refusal": before, "s_after_refusal": after}
 
 
 def first_refusal_reason(case_id: str, setup: str) -> str | None:
