@@ -11,7 +11,7 @@ The test cases themselves live in [`deepeval/cases/`](../../deepeval/cases/).
 |---|---|---|
 | `data/raw/` | Raw output of each evaluation run: `results.jsonl` (agent logs) and `scored.csv` (DeepEval judge scores) | Never |
 | `data/prepared/` | Analysis input, not results: each raw run standardised to one row per case × setup, with the same columns for every run | No, regenerate instead |
-| `analysis/` | Notebooks that turn `data/prepared/` into `output/tables/`, numbered in run order | — |
+| `analysis/` | Notebooks numbered in run order, plus `helpers.py` (shared loading, tests and chart style) | — |
 | `output/tables/` | Result tables used in the report | No, regenerate instead |
 | `output/figures/` | Charts used in the report | No, regenerate instead |
 | `archive/` | Files kept for reference that nothing reads | — |
@@ -52,16 +52,18 @@ The three quality metrics, used throughout:
 
 ## Notebooks (`analysis/`)
 
-Run them in order, because `3_scorecard` reads the outputs of the first two.
+Run them in order: `3_scorecard` reads the outputs of the first two, and `5_findings` reads all of them.
 
 | Notebook | Reads | Writes |
 |---|---|---|
 | `1_consistency.ipynb` | `data/prepared/baseline_run{1,2,3}.csv` | `output/tables/consistency_*.csv` |
 | `2_robustness.ipynb` | `data/prepared/baseline_run1.csv`, `data/prepared/paraphrased_run1.csv`, `data/prepared/messy_run1.csv` | `output/tables/robustness_by_setup.csv`, `robustness_by_setup_and_case.csv` |
 | `3_scorecard.ipynb` | `data/prepared/`, `output/tables/consistency_*`, `output/tables/robustness_*` | `output/tables/scorecard_*.csv` |
-| `architecture_analysis.ipynb` | `data/raw/baseline/run1/scored_dedup.csv` | `output/figures/` (a teammate's hypothesis tests) |
+| `4_hypothesis_tests.ipynb` | `data/raw/baseline/run1/scored_dedup.csv` | `output/figures/` (matched-pair significance tests for H1–H4; statistical backup) |
+| **`5_findings.ipynb`** | everything above | `output/figures/findings_*.png`. **Results and Discussion: the presentation notebook** |
 
-`results-and-discussions.ipynb` at the top level is the presentation notebook. It reads from `output/tables/` and `output/figures/`.
+`5_findings_script.md` holds the talking points for presenting `5_findings`, with headings that match its sections.
+`helpers.py` holds the set-up code shared by notebooks 4 and 5, so the notebooks show only analysis.
 
 ## Tables (`output/tables/`)
 
@@ -111,6 +113,8 @@ File names follow the pattern **`<analysis>_by_<one row per>`**.
 | `robustness_evaluation/final_robustness_summary.csv` | `output/tables/robustness_by_setup.csv` |
 | `robustness_evaluation/case_robustness_per_case.csv` | `output/tables/robustness_by_setup_and_case.csv` |
 | `robustness_evaluation/robustness_cases_overview.csv` | `output/tables/robustness_question_variants.csv` |
+| `analysis/architecture_analysis.ipynb` | `analysis/4_hypothesis_tests.ipynb` |
+| `results-and-discussions.ipynb` | `analysis/5_findings.ipynb` |
 | `clean_scored_merged_dedup.csv` | `data/prepared/baseline_run1.csv` (original Excel kept in `archive/`) |
 | `consistency_evaluation/run{2,3}_clean_scored_merged_dedup_.csv` | `data/prepared/baseline_run{2,3}.csv` |
 | `robustness_evaluation/{messy,paraphrase}_clean_scored_merged_dedup_.csv` | `data/prepared/{messy,paraphrased}_run1.csv` |
