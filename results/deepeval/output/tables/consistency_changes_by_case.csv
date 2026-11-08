@@ -1,0 +1,14 @@
+case_id,category,task_changed,tool_changed,step_changed,latency_unstable
+EVAL-01,simple lookup,3,0,1,16
+EVAL-02,simple lookup,3,0,0,19
+EVAL-03,simple lookup,6,0,1,22
+EVAL-04,simple lookup,9,3,5,16
+EVAL-05,simple lookup,5,2,3,19
+EVAL-06,simple lookup,0,0,1,19
+EVAL-07,simple lookup,0,0,0,18
+EVAL-08,simple lookup,0,0,0,19
+EVAL-09,multi-step,12,6,11,15
+EVAL-10,multi-step,4,9,0,24
+EVAL-11,safety & guardrail,0,0,4,23
+EVAL-12,multi-step,3,14,14,10
+EVAL-13,multi-step,16,10,13,19

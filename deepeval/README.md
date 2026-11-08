@@ -6,12 +6,14 @@ Run the commands below from the repository root. Examples use Bash and `.venv/bi
 
 ## Case files
 
-| File                                                          | Purpose                                                                                                   |
-| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `deepeval/cases_full.csv`                                     | All 13 original evaluation questions, expected answers/statuses, tool expectations, and multi-turn inputs |
-| `results/deepeval/robustness_evaluation/cases_paraphrase.csv` | Paraphrased versions of the 13 cases                                                                      |
-| `results/deepeval/robustness_evaluation/cases_messy.csv`      | Messy-input versions of the 13 cases                                                                      |
-| `results/deepeval/case_categories.csv`                        | Case descriptions and category labels for analysis                                                        |
+| File                             | Purpose                                                                                                   |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `deepeval/cases/baseline.csv`    | All 13 original evaluation questions, expected answers/statuses, tool expectations, and multi-turn inputs |
+| `deepeval/cases/paraphrased.csv` | Paraphrased versions of the 13 cases                                                                      |
+| `deepeval/cases/messy.csv`       | Messy-input versions of the 13 cases                                                                      |
+| `deepeval/cases/categories.csv`  | Case descriptions and category labels for analysis                                                        |
+
+Results are written under `results/deepeval/`; see [its README](../results/deepeval/README.md) for the folder layout and how runs flow into the analysis notebooks.
 
 The 13 questions cover these categories:
 
@@ -75,10 +77,10 @@ Collect fresh outputs:
 caffeinate -i bash deepeval/collect_full.sh
 ```
 
-The wrapper selects all 24 variants, giving **312 case/setup records**. Multi-turn cases make more than one request, so this is not a count of individual API calls. Collection is sequential. The wrapper creates a fresh directory such as:
+The wrapper selects all 24 variants, giving **312 case/setup records**. Multi-turn cases make more than one request, so this is not a count of individual API calls. Collection is sequential. The wrapper writes to the next free run folder for the chosen question variant (default `baseline`), for example:
 
 ```text
-results/deepeval/rerun_YYYYMMDD_HHMMSS_PID/results.jsonl
+results/deepeval/data/raw/baseline/run4/results.jsonl
 ```
 
 It prints the exact output path and the corresponding scoring command. `caffeinate -i` is optional on macOS; it prevents idle sleep while the command runs. Locking the screen is fine. Keep the lid open and the network connected.
@@ -98,7 +100,7 @@ To collect a single case and variant, call the Python runner directly:
 
 ```bash
 .venv/bin/python deepeval/run.py \
-  --cases deepeval/cases_full.csv \
+  --cases deepeval/cases/baseline.csv \
   --case EVAL-13 \
   --setup s1-a \
   --judge-model openai/gpt-oss-120b \
@@ -110,26 +112,23 @@ When invoking `run.py` directly, always specify `--cases`. Its legacy default po
 ## Collect robustness variants
 
 ```bash
-bash deepeval/collect_full.sh \
-  --cases results/deepeval/robustness_evaluation/cases_paraphrase.csv \
-  --dry-run
+bash deepeval/collect_full.sh --variant paraphrased --dry-run
 
-caffeinate -i bash deepeval/collect_full.sh \
-  --cases results/deepeval/robustness_evaluation/cases_paraphrase.csv
+caffeinate -i bash deepeval/collect_full.sh --variant paraphrased
 ```
 
-This uses the same collection and reset process with a fresh output directory. Substitute `cases_messy.csv` to collect the messy-input variants.
+`--variant` reads `deepeval/cases/<variant>.csv` and writes to `results/deepeval/data/raw/<variant>/runN/`, using the same collection and reset process. Use `--variant messy` to collect the messy-input variants.
 
-For a one-word robustness test, create a separate copy of `cases_full.csv`, such as `deepeval/cases_robustness_one_word.csv`, and make one meaning-preserving word edit per initial question. Pass that file with `--cases` after creating it; it is not present in the current checkout. For multi-turn cases, also change the initial message in `Turns`, preserving the follow-up messages. Keep the baseline CSV unchanged.
+For a one-word robustness test, create a separate copy of `deepeval/cases/baseline.csv`, such as `deepeval/cases/one_word.csv`, and make one meaning-preserving word edit per initial question. Collect it with `--variant one_word` after creating it; it is not present in the current checkout. For multi-turn cases, also change the initial message in `Turns`, preserving the follow-up messages. Keep the baseline CSV unchanged.
 
 Before collection, check that the baseline and robustness files use the same current reference answers, expected statuses, and tool expectations. Keep those aligned when correcting a case's ground truth. Compare matching case/setup records under the original and modified wording. Robustness concerns maintaining a correct outcome and appropriate tool use; identical response wording or an identical trajectory is not required.
 
 ## Score saved outputs
 
-Set `run_dir` to the directory printed by collection, or to an existing round such as `results/deepeval/rerun2`:
+Set `run_dir` to the directory printed by collection, or to an existing round such as `results/deepeval/data/raw/baseline/run2`:
 
 ```bash
-run_dir="results/deepeval/rerun2"
+run_dir="results/deepeval/data/raw/baseline/run2"
 
 caffeinate -i .venv/bin/python deepeval/evaluate.py \
   --input "$run_dir/results.jsonl" \
@@ -137,7 +136,7 @@ caffeinate -i .venv/bin/python deepeval/evaluate.py \
   --judge-model openai/gpt-oss-120b
 ```
 
-Paths must match the actual directory: `results/deepeval/rerun2/results.jsonl` differs from `results/rerun2/results.jsonl`. The judge reads `OPENROUTER_API_KEY` from the environment or `.env`. Scoring writes one CSV row per selected saved record, including metric scores, automatic success flags, and judge explanations. It **overwrites** the specified output CSV; choose a separate filename for retries or revised references.
+Paths must match the actual directory: `results/deepeval/data/raw/baseline/run2/results.jsonl` differs from `results/deepeval/run2/results.jsonl`. The judge reads `OPENROUTER_API_KEY` from the environment or `.env`. Scoring writes one CSV row per selected saved record, including metric scores, automatic success flags, and judge explanations. It **overwrites** the specified output CSV; choose a separate filename for retries or revised references.
 
 Available scoring filters include repeatable `--case` and `--setup` options, plus `--limit`. For example:
 
@@ -169,13 +168,13 @@ See [DeepEval's AI Agent evaluation metrics](https://deepeval.com/guides/guides-
 
 The scorer uses the `ground_truth` stored in its **input JSONL**. Updating the case CSV alone does not update existing collected records. For an answer-reference correction, preserve the recorded responses and traces and update the corresponding saved reference in a separate JSONL copy. Recollect only if you need fresh agent behavior, such as after changing the question, fixture state, or application.
 
-If the saved JSONL already contains the corrected reference, re-score the selected case directly. For EVAL-13 across rerun2 and rerun3:
+If the saved JSONL already contains the corrected reference, re-score the selected case directly. For EVAL-13 across baseline runs 2 and 3:
 
 ```bash
-for round in rerun2 rerun3; do
+for round in run2 run3; do
   caffeinate -i .venv/bin/python deepeval/evaluate.py \
-    --input "results/deepeval/$round/results.jsonl" \
-    --output "results/deepeval/$round/scored_eval13_retry.csv" \
+    --input "results/deepeval/data/raw/baseline/$round/results.jsonl" \
+    --output "results/deepeval/data/raw/baseline/$round/scored_eval13_retry.csv" \
     --case EVAL-13 \
     --judge-model openai/gpt-oss-120b
 done
@@ -189,12 +188,12 @@ After scoring, merge replacements into a **new** combined score file using the e
 
 An `ERROR:` in a metric's reason column indicates a scoring failure, such as an invalid JSON response from the judge. It is different from a valid low score or failed task. The scorer attempts the remaining metrics and records errors in the CSV; its final exit status is nonzero if any metric raised an error.
 
-Match affected CSV records to the source JSONL using `(case_id, setup, ticket_id)` and save only those traces in a separate retry JSONL. If rerun3's previously extracted retry file exists, score it with:
+Match affected CSV records to the source JSONL using `(case_id, setup, ticket_id)` and save only those traces in a separate retry JSONL. If baseline run 3's previously extracted retry file exists, score it with:
 
 ```bash
 caffeinate -i .venv/bin/python deepeval/evaluate.py \
-  --input results/deepeval/rerun3/results_errors_retry.jsonl \
-  --output results/deepeval/rerun3/scored_retry.csv \
+  --input results/deepeval/data/raw/baseline/run3/results_errors_retry.jsonl \
+  --output results/deepeval/data/raw/baseline/run3/scored_retry.csv \
   --judge-model openai/gpt-oss-120b
 ```
 
