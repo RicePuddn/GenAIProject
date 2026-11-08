@@ -10,7 +10,6 @@ Run the commands below from the repository root. Examples use Bash and `.venv/bi
 | -------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `deepeval/cases/baseline.csv`    | All 13 original evaluation questions, expected answers/statuses, tool expectations, and multi-turn inputs |
 | `deepeval/cases/paraphrased.csv` | Paraphrased versions of the 13 cases                                                                      |
-| `deepeval/cases/messy.csv`       | Messy-input versions of the 13 cases                                                                      |
 | `deepeval/cases/categories.csv`  | Case descriptions and category labels for analysis                                                        |
 
 Results are written under `results/deepeval/`; see [its README](../results/deepeval/README.md) for the folder layout and how runs flow into the analysis notebooks.
@@ -117,7 +116,7 @@ bash deepeval/collect_full.sh --variant paraphrased --dry-run
 caffeinate -i bash deepeval/collect_full.sh --variant paraphrased
 ```
 
-`--variant` reads `deepeval/cases/<variant>.csv` and writes to `results/deepeval/data/raw/<variant>/runN/`, using the same collection and reset process. Use `--variant messy` to collect the messy-input variants.
+`--variant` reads `deepeval/cases/<variant>.csv` and writes to `results/deepeval/data/raw/<variant>/runN/`, using the same collection and reset process.
 
 For a one-word robustness test, create a separate copy of `deepeval/cases/baseline.csv`, such as `deepeval/cases/one_word.csv`, and make one meaning-preserving word edit per initial question. Collect it with `--variant one_word` after creating it; it is not present in the current checkout. For multi-turn cases, also change the initial message in `Turns`, preserving the follow-up messages. Keep the baseline CSV unchanged.
 

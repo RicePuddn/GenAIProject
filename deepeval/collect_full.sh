@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Collect all 13 evaluation cases across all 24 variants; scoring is separate.
-# Usage: bash deepeval/collect_full.sh [--variant baseline|paraphrased|messy] [--dry-run] [--api URL] [--case EVAL-01]
+# Usage: bash deepeval/collect_full.sh [--variant baseline|paraphrased] [--dry-run] [--api URL] [--case EVAL-01]
 #   --variant picks the question wording (deepeval/cases/<variant>.csv, default baseline)
 #   and writes to the next free results/deepeval/data/raw/<variant>/runN/ folder.
 set -euo pipefail
@@ -26,7 +26,7 @@ done
 
 cases_file="deepeval/cases/$variant.csv"
 if [[ ! -f "$cases_file" ]]; then
-  printf 'Unknown variant %s: %s not found (use baseline, paraphrased or messy).\n' "$variant" "$cases_file" >&2
+  printf 'Unknown variant %s: %s not found (use baseline or paraphrased).\n' "$variant" "$cases_file" >&2
   exit 1
 fi
 
