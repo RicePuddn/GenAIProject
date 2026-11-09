@@ -1,8 +1,8 @@
 # Policy-Bound Customer Support Operations
 
 IS469 Generative and Agentic AI group project: eight support setups (single or multi-agent, agentic or
-graph control, RAG or skills policy) compared on the same tickets. The study design is in
-[EXPERIMENT.md](EXPERIMENT.md); how the code fits together is in [ARCHITECTURE.md](ARCHITECTURE.md).
+graph control, RAG or skills policy), 24 variants in all, compared on the same tickets. How the code
+fits together is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Install
 
@@ -10,12 +10,14 @@ Requires Python 3.11–3.13, uv, and Docker with Docker Compose. Run commands fr
 
 ```bash
 uv venv --python 3.12 .venv
-uv pip install --python .venv/bin/python -e ".[rag,demo]"
+uv pip install --python .venv/bin/python -e ".[rag,demo,evaluation]"
 cp .env.example .env
 ```
 
-The LLM provider is local Ollama; no provider API key is needed. Set `PINECONE_API_KEY` for the RAG
-setups (S1, S3, S5, S7). The default local database settings are:
+The `evaluation` extra is needed only to run and analyse the evaluation (see below).
+
+Set `OPENROUTER_API_KEY` for the default LLM provider (see the next section) and `PINECONE_API_KEY`
+for the RAG setups (S1, S3, S5, S7). The default local database settings are:
 
 ```dotenv
 POSTGRES_PASSWORD=support_ops_local
@@ -79,16 +81,16 @@ summary under `results/runs/`. Restart uvicorn after editing configuration or `.
   and the ticket is saved as theirs. Without it nothing is scoped. The local API does not authenticate it.
 - `history`: the API is stateless. To continue a ticket, send the `history` array from the previous
   response. History is untrusted context for the agent; the guard screens only the new customer message.
-- `clock_start`: the workflow date is `run.clock_start` (1 October 2026), as in experiment runs.
-  Send a timezone-aware date to override it, e.g. to check return windows against today.
+- `clock_start`: the workflow date defaults to `run.clock_start` (1 October 2026). Send a
+  timezone-aware date to override it, e.g. to check return windows against today. The evaluation
+  cases set their own date in `deepeval/cases/`.
 
 `POST /chat/stream` takes the same body and answers with Server-Sent Events: a `trace` event per step,
 then one `result` event holding the `/chat` response, or an `error` event.
 
 The model-facing tools are named by action, including `get_order_items`, `get_tracking_events`,
 `create_return_request`, `request_refund`, and `cancel_order`. All writes use the same policy and review
-gates. RAG and skills policy behavior stays in the established implementations; Langfuse and DeepEval
-scoring are deferred.
+gates.
 
 ## Rebuild the RAG index
 
@@ -99,4 +101,33 @@ After a policy change, refresh the skills files and the index from the PDFs in `
 .venv/bin/python scripts/build_rag_index.py
 ```
 
-The retrieval evaluation is `notebooks/rag_evaluation.ipynb`, with the profiles in `configs/rag/`.
+The retrieval evaluation, which compares vector, hybrid and hybrid + rerank search, is
+[results/rag/rag_evaluation.ipynb](results/rag/rag_evaluation.ipynb), with the profiles in `configs/rag/`.
+
+## Run the evaluation
+
+The evaluation sends 13 test cases to all 24 variants (312 runs), then scores the saved runs with
+DeepEval, using `openai/gpt-oss-120b` as the judge. Running and scoring are separate steps. Start the
+database and the API first, and use a dedicated evaluation database: collection resets the test tickets'
+records before each run.
+
+```bash
+bash deepeval/collect_full.sh --dry-run   # preview the selection
+bash deepeval/collect_full.sh             # collect; prints the output folder and the scoring command
+```
+
+```bash
+run_dir="results/deepeval/data/raw/baseline/run1"   # the folder collection printed
+.venv/bin/python deepeval/evaluate.py \
+  --input "$run_dir/results.jsonl" \
+  --output "$run_dir/scored.csv" \
+  --judge-model openai/gpt-oss-120b
+```
+
+Add `--variant paraphrased` to collect the reworded questions for the robustness check. The test cases
+and their expected answers, ticket statuses and tool calls are in `deepeval/cases/`. See
+[deepeval/README.md](deepeval/README.md) for single-case runs, re-scoring and retries.
+
+The analysis notebooks in `results/deepeval/analysis/` (consistency, robustness, scorecard, hypothesis
+tests and findings) read the scored runs and write the report's tables and figures. Run them in order;
+see [results/deepeval/README.md](results/deepeval/README.md).

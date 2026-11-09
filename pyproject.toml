@@ -29,7 +29,15 @@ rag = [
     "ranx>=0.3,<0.4",               # retrieval evaluation metrics
 ]
 demo = ["streamlit>=1.50"]   # SupportOpsBot/demo.py, a chat page that shows each agent step
-evaluation = ["deepeval>=3.0", "requests>=2.31"]
+evaluation = [
+    "deepeval>=3.0",
+    "requests>=2.31",
+    "pandas>=2.2",                 # analysis notebooks in results/deepeval/analysis/
+    "scipy>=1.11",                 # significance tests
+    "matplotlib>=3.8",             # figures
+    "seaborn>=0.13",
+    "ipykernel>=6.29",
+]
 
 [build-system]
 requires = ["hatchling"]
